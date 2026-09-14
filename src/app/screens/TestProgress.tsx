@@ -5,6 +5,7 @@ import type { TestProgress as TP } from '../../engine/types';
 import { fmtPct, num } from '../format';
 import { normKey } from '../../engine/keys';
 import { parseDelimitedText } from '../../engine/parse';
+import { readWorkbook, pickSheet, workbookGrid } from '../../engine/workbook';
 import { parseP6Date, isValidISO } from '../../engine/dates';
 import type { Route } from '../router';
 
@@ -40,9 +41,8 @@ export function TestProgress({ route }: { route: Route }) {
     setNewId('');
   };
 
-  /** Paste a block: Activity ID, Tests Total, Tests Complete, [Pct Override], [Test Start], [Test End]. Header optional. */
-  const applyPaste = () => {
-    const grid = parseDelimitedText(paste);
+  /** Apply a block: Activity ID, Tests Total, Tests Complete, [Pct Override], [Test Start], [Test End]. Header optional. */
+  const applyGrid = (grid: unknown[][], sourceLabel: string) => {
     let added = 0;
     let updated = 0;
     const next = [...state.data.testProgress];
@@ -67,7 +67,23 @@ export function TestProgress({ route }: { route: Route }) {
     }
     actions.update('testProgress', () => next);
     setPaste('');
-    actions.notify('ok', `Pasted block applied: ${added} added, ${updated} updated. Save to write.`);
+    if (added === 0 && updated === 0) actions.notify('error', `No usable rows found in ${sourceLabel}. Expected Activity ID, tests total, tests complete.`);
+    else actions.notify('ok', `${sourceLabel}: ${added} added, ${updated} updated. Save to write.`);
+  };
+
+  const applyPaste = () => applyGrid(parseDelimitedText(paste), 'Pasted block');
+
+  const applyFile = async (file: File) => {
+    try {
+      if (/\.xlsx?$|\.xlsm$/i.test(file.name)) {
+        const wb = readWorkbook(new Uint8Array(await file.arrayBuffer()));
+        applyGrid(workbookGrid(wb, pickSheet(wb)), file.name);
+      } else {
+        applyGrid(parseDelimitedText(await file.text()), file.name);
+      }
+    } catch (err) {
+      actions.notify('error', (err as Error).message);
+    }
   };
 
   const columns: Column<Row>[] = [
@@ -110,9 +126,14 @@ export function TestProgress({ route }: { route: Route }) {
           </div>
           <datalist id="budgeted-ids">{model.rows.filter((r) => r.status === 'IN BUDGET').map((r) => <option key={r.activityId} value={r.activityId}>{r.activity.activityName}</option>)}</datalist>
         </div>
-        <div className="card">
-          <h2 className="font-semibold">Paste a block from a tracking spreadsheet</h2>
-          <p className="text-[12px] text-slate-500">Columns: Activity ID, Tests total, Tests complete, then optional % override, test start, test end. Existing rows are updated, new IDs added.</p>
+        <div
+          className="card"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) void applyFile(f); }}
+        >
+          <h2 className="font-semibold">Load counts from a file or a paste</h2>
+          <p className="text-[12px] text-slate-500">Columns: Activity ID, Tests total, Tests complete, then optional % override, test start, test end. Existing rows are updated, new IDs added. Drop an .xlsx or .csv here, or paste below.</p>
+          <input className="mt-1 block text-[12px]" type="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt" onChange={(e) => e.target.files?.[0] && void applyFile(e.target.files[0])} />
           <textarea className="input mt-1 h-16 w-full font-mono text-[11px]" value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={'0-P2-TC-W40-FA-0100\t120\t46'} />
           <button className="btn mt-1" disabled={!paste.trim()} onClick={applyPaste}>Apply pasted block</button>
         </div>

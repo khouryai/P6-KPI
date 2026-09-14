@@ -1,5 +1,4 @@
 node_modules/
-dist/
 *.log
 .DS_Store
 Thumbs.db
@@ -9,8 +8,14 @@ Thumbs.db
 *.xlsm
 *.xls
 *.csv
-!fixtures/tc-fixture.xlsx
+!fixtures/*.xlsx
 !fixtures/*.csv
+!fixtures/*.tsv
+
+# The built application IS committed: the laptop it runs on has no Node and no npm,
+# so dist/ and standalone/ are the delivered product. Rebuild with `npm run build:all`.
+!dist/
+!standalone/
 
 # Live OneDrive storage folder, in case it is ever placed inside the repo
 TC-Budget/

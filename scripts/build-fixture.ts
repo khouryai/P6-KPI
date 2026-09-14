@@ -76,6 +76,64 @@ const tsvCell = (v: unknown): string => {
 const tsv = [header, ...current].map((r) => r.map(tsvCell).join('\t')).join('\r\n') + '\r\n';
 writeFileSync(resolve(outDir, 'tc-fixture-current.tsv'), tsv);
 
+// A P6 .xer export of the same activities, so the native-format path has a fixture too.
+// Durations are held in hours; two calendars exercise the per-calendar conversion.
+const xerDate = (v: unknown): string => {
+  if (v instanceof Date) return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')} 08:00`;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{2})( A)?\*?$/.exec(v.trim());
+    if (m) {
+      const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+      let y = Number(m[3]) + 1900;
+      if (y < 1950) y += 100;
+      return `${y}-${String(months.indexOf(m[2].toLowerCase()) + 1).padStart(2, '0')}-${m[1].padStart(2, '0')} 08:00`;
+    }
+  }
+  return '';
+};
+const isActual = (v: unknown): boolean => typeof v === 'string' && v.trim().endsWith(' A');
+const TEN_HOUR = new Set(['0-P2-TC-C30-FA-0030']);
+const xerLines: string[] = [
+  'ERMHDR	19.12	2026-09-14	Project	admin	Sample	dbxDatabaseNoName	Project Management	USD',
+  '%T	CALENDAR',
+  '%F	clndr_id	clndr_name	day_hr_cnt',
+  '%R	1	Standard 5 Day	8',
+  '%R	2	Night Shift 10 Hour	10',
+  '%T	PROJECT',
+  '%F	proj_id	proj_short_name',
+  '%R	100	SAMPLE-PH2',
+  '%T	TASK',
+  '%F	task_id	proj_id	clndr_id	task_code	task_name	target_drtn_hr_cnt	remain_drtn_hr_cnt	act_start_date	act_end_date	early_start_date	early_end_date',
+];
+let taskId = 1000;
+for (const r of current) {
+  if (r[1] === '') continue; // XER TASK holds activities only, never WBS summary rows
+  const code = r[0].trim();
+  const cal = TEN_HOUR.has(code) ? '2' : '1';
+  const hpd = cal === '2' ? 10 : 8;
+  const od = r[2] === null ? '' : String((r[2] as number) * hpd);
+  const rd = r[3] === null ? '' : String((r[3] as number) * hpd);
+  const s0 = xerDate(r[4]);
+  const f0 = xerDate(r[5]);
+  xerLines.push(
+    ['%R', String(taskId++), '100', cal, code, r[1], od, rd, isActual(r[4]) ? s0 : '', isActual(r[5]) ? f0 : '', s0, f0].join('\t'),
+  );
+}
+xerLines.push('%E');
+writeFileSync(resolve(outDir, 'tc-fixture.xer'), xerLines.join('\r\n') + '\r\n');
+
+// A sheet whose columns are in a different order, with two title rows above the header,
+// to exercise header detection and the manual column mapping.
+const shuffled: unknown[][] = [
+  ['Sample Program - Progress Schedule (Master Live)', null, null, null, null, null],
+  ['Data date 31-Aug-26', null, null, null, null, null],
+  ['Activity Name', 'Start', 'Finish', 'Activity ID', 'Remaining Duration', 'Original Duration'],
+  ...current.map((r) => [r[1], r[4], r[5], r[0], r[3], r[2]]),
+];
+const wb2 = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wb2, XLSX.utils.aoa_to_sheet(shuffled, { cellDates: true }), 'Export');
+writeFileSync(resolve(outDir, 'tc-fixture-shuffled.xlsx'), XLSX.write(wb2, { type: 'buffer', bookType: 'xlsx', cellDates: true }) as Buffer);
+
 const inputs = {
   settings: {
     storageFolderName: 'TC-Budget',
@@ -137,4 +195,4 @@ const inputs = {
   ],
 };
 writeFileSync(resolve(outDir, 'fixture-inputs.json'), JSON.stringify(inputs, null, 2) + '\n');
-console.log(`fixture written: ${current.length} current rows, ${baseline.length} baseline rows`);
+console.log(`fixture written: ${current.length} current rows, ${baseline.length} baseline rows, ${xerLines.length - 12} xer tasks`);

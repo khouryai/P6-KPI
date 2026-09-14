@@ -42,7 +42,8 @@ export class IndexedDbAdapter implements StorageAdapter {
   }
 
   describe(): string {
-    return 'browser cache (IndexedDB)';
+    // Shown to the user when this is the primary store, so it must not say "cache".
+    return 'this browser (IndexedDB)';
   }
 
   async list(prefix = ''): Promise<string[]> {

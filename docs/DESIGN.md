@@ -55,6 +55,39 @@ would be re-added by the next import and tier 1 would catch it again. A library 
 with `retired: true` is therefore excluded from matching and from the type count, and is
 never re-added by discovery. Retire and restore are on the Activity Library screen.
 
+## Import paths
+
+Three formats reach the same `P6Activity[]`, so everything downstream is identical.
+
+- **`.xlsx` / `.csv` / pasted rows.** The header row is located by name across the first
+  twelve rows, which skips the title rows a P6 "export to Excel" puts on top, and the six
+  columns are matched by synonym rather than by position. The detected mapping is shown on
+  the import screen and every column can be corrected by hand before confirming. With no
+  recognisable header, columns fall back to their usual order.
+- **`.xer`, P6's native export.** Two differences are surfaced rather than hidden. XER
+  holds durations in *hours*, so they are divided by the hours per day of each activity's
+  own calendar from the CALENDAR table, or by a value the user sets (default 8) when the
+  file carries no calendar. And the TASK table holds activities only, so an XER import has
+  no WBS summary rows to exclude; since WBS rows never contributed hours, no figure
+  changes. A file holding several projects offers a project picker.
+
+The XER path also reads dates the Excel path cannot: a P6 constraint star (`01-Oct-26*`)
+defeats Excel's `DATEVALUE`, but the native format carries a real timestamp.
+
+## Consolidating the library
+
+Tier 2 matching only fires when a shorter key exists to match against, and import never
+invents one. Two actions on the Activity Library screen close that loop:
+
+- **Add a key by hand** creates a library entry that no activity name produced.
+- **Consolidate variant families** finds keys that differ only by their last parenthetical
+  (the `(DF: W40 -> Y10)` families), creates the shortened key carrying the rates of an
+  already-priced variant, and retires the variants. Their activities then resolve through
+  tier 2 to the single consolidated entry, which Budget Master marks with a T2 badge.
+
+A retired entry is excluded from matching and from the type count, and is never re-added by
+a later import.
+
 ## Storage rules
 
 - Plain JSON only, never a single binary file written on every change.
@@ -67,6 +100,42 @@ never re-added by discovery. Retire and restore are on the Activity Library scre
 - Read once into memory; write only on explicit Save. Imports and snapshots are the
   exception: confirming an import or writing a snapshot is the explicit action.
 - Imports and snapshots are append only.
+
+## Where the data can live
+
+Three adapters back the same `StorageAdapter` interface, so the rest of the application
+cannot tell them apart.
+
+- **A OneDrive folder** through the File System Access API. The primary mode, and the one
+  the rules above are written for. Needs a secure context, which `http://localhost`
+  provides; it also works from `file://` in current Chromium, though permission tends not
+  to persist there.
+- **The browser profile** through IndexedDB. Real persistence across restarts, but on one
+  machine only, with no sync, no backup and no version history, so the UI says so in a
+  standing banner and pushes the user toward backups. This is the fallback when the folder
+  API is unavailable or declined.
+- **Memory**, for tests and for looking around without saving.
+
+A whole-store backup (settings, library, locations, overrides, test progress, both
+schedules and every snapshot) downloads as one JSON file and restores into any of them,
+which is also how you move between machines. A restore replaces the edited files but
+*appends* the schedules and snapshots, so the append-only history is never rewritten.
+
+## Delivery without Node
+
+The laptop this runs on has no Node.js and cannot install one, so `dist/` and
+`standalone/` are built here and committed; they are the product, not build artefacts.
+
+`start.cmd` serves `dist/` with `server/serve.ps1`, a static file server written against
+raw .NET APIs so it runs on the Windows PowerShell 5.1 that ships with Windows. It binds a
+`TcpListener` to `127.0.0.1` rather than using `HttpListener`, because `HttpListener` goes
+through HTTP.sys and can demand a `netsh` URL reservation, which needs admin. A loopback
+TCP socket on a high port never does.
+
+`standalone/index.html` is the same application inlined into one file for when no server
+can start. It is built as an IIFE rather than ES modules, because `file://` blocks module
+scripts under CORS, and its script tag is moved to the end of `<body>` because an inline
+script cannot be deferred the way Vite's module tag is.
 
 ## Figures
 

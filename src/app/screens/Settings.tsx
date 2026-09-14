@@ -3,6 +3,7 @@ import { useApp } from '../state';
 import { Page, Notice } from '../components/ui';
 import type { Settings as S } from '../../engine/types';
 import { buildWorkbook, workbookBytes, downloadBytes, stamp } from '../export';
+import type { Bundle } from '../state';
 import { num } from '../format';
 
 export function Settings() {
@@ -23,6 +24,27 @@ export function Settings() {
       actions.notify('error', (err as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const backup = async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify(actions.exportBundle(), null, 2));
+    const name = `TC-Budget-backup-${stamp()}.json`;
+    try {
+      if (state.adapterKind === 'filesystem') actions.notify('ok', `Backup written to ${await actions.writeExport(name, bytes)}`);
+      else downloadBytes(name, bytes, 'application/json');
+    } catch (err) {
+      actions.notify('error', (err as Error).message);
+    }
+  };
+
+  const restore = async (file: File) => {
+    if (!confirm(`Restore from ${file.name}? Settings, library, locations, overrides and test progress are replaced. Schedules and snapshots in the backup are added alongside what you already have.`)) return;
+    try {
+      const bundle = JSON.parse(await file.text()) as Bundle;
+      await actions.restoreBundle(bundle);
+    } catch (err) {
+      actions.notify('error', (err as Error).message);
     }
   };
 
@@ -64,20 +86,38 @@ export function Settings() {
         <div className="card space-y-3">
           <h2 className="font-semibold">Storage</h2>
           <div className="text-[12px]">
-            {state.adapterKind === 'filesystem' ? (
+            {state.adapterKind === 'filesystem' && (
               <>Data lives in the OneDrive folder <b>{state.folderName}</b> as plain JSON. Version history in OneDrive gives point in time recovery of every file.</>
-            ) : (
-              <Notice tone="warn">Running in memory only. Nothing is saved. Choose a folder to persist your work.</Notice>
             )}
+            {state.adapterKind === 'indexeddb' && (
+              <Notice tone="warn">Saving in this browser profile, not in OneDrive. It survives restarts, but clearing browsing data erases it and nothing is backed up. Take backups below, or switch to a folder.</Notice>
+            )}
+            {state.adapterKind === 'memory' && <Notice tone="error">Nothing is being saved. Choose a folder or browser storage below.</Notice>}
           </div>
           <div className="flex flex-wrap gap-2">
-            <button className="btn" onClick={() => void actions.chooseFolder()}>Choose a different folder…</button>
-            <button className="btn" onClick={() => void actions.reload()} disabled={state.dirty.size > 0} title={state.dirty.size ? 'Save or discard changes first' : 'Re-read every file from the folder'}>Reload from folder</button>
-            <button className="btn" onClick={() => { if (confirm('Forget the folder? Files stay on disk; the app will ask for a folder again.')) void actions.forgetFolder(); }}>Forget folder</button>
+            <button className="btn" onClick={() => void actions.chooseFolder()}>{state.adapterKind === 'filesystem' ? 'Choose a different folder…' : 'Use a OneDrive folder…'}</button>
+            {state.adapterKind !== 'indexeddb' && <button className="btn" onClick={() => void actions.useBrowserStorage()}>Save in this browser instead</button>}
+            <button className="btn" onClick={() => void actions.reload()} disabled={state.dirty.size > 0} title={state.dirty.size ? 'Save or discard changes first' : 'Re-read everything from storage'}>Reload</button>
+            {state.adapterKind === 'filesystem' && (
+              <button className="btn" onClick={() => { if (confirm('Forget the folder? Files stay on disk; the app will ask for a folder again.')) void actions.forgetFolder(); }}>Forget folder</button>
+            )}
           </div>
           <Notice tone="info">
             OneDrive is sync, not concurrency control. Two machines editing at once produce a conflict copy, which this app detects on load but cannot merge. Mark the folder "Always keep on this device" so no file is a cloud-only placeholder.
           </Notice>
+        </div>
+        <div className="card space-y-3">
+          <h2 className="font-semibold">Backup and restore</h2>
+          <p className="text-[12px] text-slate-600">
+            One JSON file holding everything: settings, locations, the rate library, overrides, test progress, both schedules and every snapshot. Use it to move to another machine, or as a safety net when saving in the browser.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="btn" onClick={() => void backup()}>Download a backup</button>
+            <label className="btn cursor-pointer">
+              Restore from a backup…
+              <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && void restore(e.target.files[0])} />
+            </label>
+          </div>
         </div>
         <div className="card space-y-3">
           <h2 className="font-semibold">Export</h2>

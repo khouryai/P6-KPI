@@ -36,7 +36,7 @@ export function Layout({ screen, children }: { screen: string; children: React.R
         </nav>
         <div className="border-t border-white/10 px-4 py-3 text-[11px] text-slate-300">
           <div className="truncate" title={state.storageLabel}>
-            {state.adapterKind === 'filesystem' ? `Folder: ${state.folderName}` : state.adapterKind === 'memory' ? 'Memory only, nothing is saved' : 'No storage'}
+            {state.adapterKind === 'filesystem' ? `Folder: ${state.folderName}` : state.adapterKind === 'indexeddb' ? 'Saved in this browser' : state.adapterKind === 'memory' ? 'Memory only, nothing is saved' : 'No storage'}
           </div>
           {state.lastSavedAt && <div>Saved {fmtDateTime(state.lastSavedAt)}</div>}
         </div>
@@ -70,6 +70,17 @@ export function Layout({ screen, children }: { screen: string; children: React.R
         {state.lock?.foreign && (
           <div className="border-b border-amber-300 bg-amber-50 px-5 py-2 text-[12px] text-amber-900">
             <span className="font-semibold">Another machine may have this folder open</span> ({state.lock.foreign.label}, last seen {fmtDateTime(state.lock.foreign.refreshedAt)}). Saving from both will create OneDrive conflict copies.
+          </div>
+        )}
+        {state.adapterKind === 'indexeddb' && (
+          <div className="border-b border-amber-300 bg-amber-50 px-5 py-2 text-[12px] text-amber-900">
+            <span className="font-semibold">Saving in this browser, not in OneDrive.</span> The data lives in this browser profile on this machine only. Clearing browsing data will erase it.
+            Take a backup from <a className="underline" href={href('settings')}>Settings</a>, or switch to a OneDrive folder there.
+          </div>
+        )}
+        {state.adapterKind === 'memory' && (
+          <div className="border-b border-red-300 bg-red-50 px-5 py-2 text-[12px] text-red-900">
+            <span className="font-semibold">Nothing is being saved.</span> You are just looking around. Choose a storage folder or browser storage in <a className="underline" href={href('settings')}>Settings</a> before doing real work.
           </div>
         )}
         {state.problems.length > 0 && (

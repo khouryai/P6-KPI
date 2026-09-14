@@ -1,5 +1,6 @@
 import type { P6Activity, ExcludeReason, RowType } from './types';
 import { parseP6Date } from './dates';
+import { detectLayout, type ColumnMap, type Layout } from './columns';
 
 /** One raw row from a P6 export, in the expected column order. Cells are untyped. */
 export type RawRow = {
@@ -89,15 +90,18 @@ export type ParseWarning = { row: number; message: string };
 export type ParsedTable = {
   activities: P6Activity[];
   headerSkipped: boolean;
+  layout: Layout;
   warnings: ParseWarning[];
   unparseableDates: number;
   duplicateIds: string[];
   skippedBlank: number;
+  /** Rows above the header row that were ignored (P6 title rows). */
+  skippedBeforeHeader: number;
 };
 
 const HEADER_WORDS = ['activity id', 'activity_id', 'activityid', 'id'];
 
-/** Detect a header row: first cell reads like "Activity ID" and durations are not numeric. */
+/** Kept for readability in tests: does this row read like a header? */
 export function looksLikeHeader(cells: unknown[]): boolean {
   const first = cellText(cells[0]).trim().toLowerCase();
   const second = cellText(cells[1]).trim().toLowerCase();
@@ -105,50 +109,58 @@ export function looksLikeHeader(cells: unknown[]): boolean {
   return second === 'activity name' || second === 'activity_name';
 }
 
+function pick(cells: unknown[], col: number | null): unknown {
+  return col === null ? null : cells[col];
+}
+
 /**
  * Parse a grid of cells (from a paste, CSV, or worksheet) into activities.
- * Expected columns: Activity ID, Activity Name, Original Duration, Remaining Duration, Start, Finish.
- * Extra trailing columns are ignored. A header row is detected and skipped. Blank rows are skipped.
+ *
+ * The column mapping is detected from the header row by name, so an export whose columns
+ * are in a different order still imports correctly; pass `layout` to override it. Rows
+ * above the header (P6 title rows) and blank rows are skipped.
  */
-export function parseTable(grid: unknown[][]): ParsedTable {
+export function parseTable(grid: unknown[][], layout?: Layout): ParsedTable {
+  const lay = layout ?? detectLayout(grid);
+  const map: ColumnMap = lay.map;
   const warnings: ParseWarning[] = [];
   const activities: P6Activity[] = [];
-  let headerSkipped = false;
   let unparseableDates = 0;
   let skippedBlank = 0;
+  let skippedBeforeHeader = 0;
   const seen = new Map<string, number>();
   const duplicateIds: string[] = [];
   let order = 0;
   grid.forEach((cells, idx) => {
     const rowNo = idx + 1;
+    if (idx < lay.firstDataRow) {
+      // Count only the rows above the header (P6 title rows), not the header itself.
+      if (idx !== lay.headerRow && cells.some((c) => cellText(c).trim() !== '')) skippedBeforeHeader += 1;
+      return;
+    }
     const nonEmpty = cells.some((c) => cellText(c).trim() !== '');
     if (!nonEmpty) {
       skippedBlank += 1;
       return;
     }
-    if (!headerSkipped && activities.length === 0 && looksLikeHeader(cells)) {
-      headerSkipped = true;
-      return;
-    }
-    if (cellText(cells[0]).trim() === '') {
-      // Excel leaves the ID blank on nothing real; treat as blank but tell the user.
+    if (cellText(pick(cells, map.activityId)).trim() === '') {
       warnings.push({ row: rowNo, message: 'Row has no Activity ID and was skipped' });
       skippedBlank += 1;
       return;
     }
     const a = parseP6Row(
       {
-        activityId: cells[0],
-        activityName: cells[1],
-        originalDuration: cells[2],
-        remainingDuration: cells[3],
-        start: cells[4],
-        finish: cells[5],
+        activityId: pick(cells, map.activityId),
+        activityName: pick(cells, map.activityName),
+        originalDuration: pick(cells, map.originalDuration),
+        remainingDuration: pick(cells, map.remainingDuration),
+        start: pick(cells, map.start),
+        finish: pick(cells, map.finish),
       },
       order++,
     );
-    const s = parseP6Date(cells[4]);
-    const f = parseP6Date(cells[5]);
+    const s = parseP6Date(pick(cells, map.start));
+    const f = parseP6Date(pick(cells, map.finish));
     if (s.unparseable) {
       unparseableDates += 1;
       warnings.push({ row: rowNo, message: `Start "${s.raw}" could not be parsed and is treated as no date` });
@@ -165,7 +177,7 @@ export function parseTable(grid: unknown[][]): ParsedTable {
     }
     activities.push(a);
   });
-  return { activities, headerSkipped, warnings, unparseableDates, duplicateIds, skippedBlank };
+  return { activities, headerSkipped: lay.headerRow !== null, layout: lay, warnings, unparseableDates, duplicateIds, skippedBlank, skippedBeforeHeader };
 }
 
 /** Split tab separated text (a clipboard paste from Excel) into a grid. Cells stay as strings. */

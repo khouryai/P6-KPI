@@ -1,19 +1,28 @@
 import { useMemo, useState, useCallback } from 'react';
+import type { WorkBook } from 'xlsx';
 import { useApp } from '../state';
 import { Page, Notice, Badge } from '../components/ui';
 import { parseTable, parseDelimitedText, type ParsedTable } from '../../engine/parse';
-import { readWorkbook, pickSheet, parseWorkbookSheet } from '../../engine/workbook';
+import { detectLayout, columnCount, columnLabel, FIELD_ORDER, FIELD_LABELS, type ColumnMap, type Layout } from '../../engine/columns';
+import { readWorkbook, pickSheet, workbookGrid } from '../../engine/workbook';
+import { parseXer, isXer, xerToActivities, type XerTable } from '../../engine/xer';
 import { distinctActivityTypes, distinctLocations } from '../../engine/discover';
 import { normKey } from '../../engine/keys';
-import type { ImportKind, ImportIndexEntry, ScheduleImport } from '../../engine/types';
+import type { ImportKind, ImportIndexEntry, ScheduleImport, P6Activity } from '../../engine/types';
 import { fmtDateTime, fmtDate } from '../format';
 
-type Source = { name: string; parsed: ParsedTable };
+type Pending =
+  | { type: 'grid'; name: string; grid: unknown[][] }
+  | { type: 'workbook'; name: string; wb: WorkBook; sheet: string }
+  | { type: 'xer'; name: string; tables: Map<string, XerTable> };
 
 export function Import() {
   const { state, actions } = useApp();
   const [kind, setKind] = useState<ImportKind>('current');
-  const [source, setSource] = useState<Source | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [mapOverride, setMapOverride] = useState<Partial<ColumnMap> | null>(null);
+  const [hoursPerDay, setHoursPerDay] = useState(8);
+  const [project, setProject] = useState('');
   const [paste, setPaste] = useState('');
   const [folderFiles, setFolderFiles] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -21,26 +30,45 @@ export function Import() {
   const [viewing, setViewing] = useState<{ entry: ImportIndexEntry; imp: ScheduleImport } | null>(null);
 
   const fail = (e: unknown) => setError((e as Error).message);
+  const reset = () => {
+    setPending(null);
+    setMapOverride(null);
+    setProject('');
+  };
+
+  const loadBytes = useCallback((name: string, bytes: Uint8Array, text: string | null) => {
+    setMapOverride(null);
+    setProject('');
+    if (text !== null && isXer(text)) {
+      setPending({ type: 'xer', name, tables: parseXer(text) });
+      return;
+    }
+    if (/\.xlsx?$|\.xlsm$|\.xlsb$/i.test(name)) {
+      const wb = readWorkbook(bytes);
+      setPending({ type: 'workbook', name, wb, sheet: pickSheet(wb, kind === 'baseline' ? 'Baseline_Extract' : 'P6_Extract') });
+      return;
+    }
+    setPending({ type: 'grid', name, grid: parseDelimitedText(text ?? new TextDecoder().decode(bytes)) });
+  }, [kind]);
 
   const loadFile = useCallback(async (file: File) => {
     setError(null);
     try {
-      if (/\.xlsx?$|\.xlsm$/i.test(file.name)) {
-        const wb = readWorkbook(new Uint8Array(await file.arrayBuffer()));
-        const sheet = pickSheet(wb, kind === 'baseline' ? 'Baseline_Extract' : 'P6_Extract');
-        setSource({ name: `${file.name} [${sheet}]`, parsed: parseWorkbookSheet(wb, sheet) });
-      } else {
-        setSource({ name: file.name, parsed: parseTable(parseDelimitedText(await file.text())) });
-      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      // An .xer is text; a workbook is not. Sniff before deciding.
+      const isBinary = /\.xlsx?$|\.xlsm$|\.xlsb$/i.test(file.name);
+      loadBytes(file.name, bytes, isBinary ? null : await file.text());
     } catch (e) {
       fail(e);
     }
-  }, [kind]);
+  }, [loadBytes]);
 
   const loadPaste = () => {
     setError(null);
+    setMapOverride(null);
     try {
-      setSource({ name: 'clipboard paste', parsed: parseTable(parseDelimitedText(paste)) });
+      if (isXer(paste)) setPending({ type: 'xer', name: 'clipboard paste', tables: parseXer(paste) });
+      else setPending({ type: 'grid', name: 'clipboard paste', grid: parseDelimitedText(paste) });
     } catch (e) {
       fail(e);
     }
@@ -49,25 +77,51 @@ export function Import() {
   const loadFolderFile = async (path: string) => {
     setError(null);
     try {
-      if (/\.xlsx?$|\.xlsm$/i.test(path)) {
+      const binary = /\.xlsx?$|\.xlsm$|\.xlsb$/i.test(path);
+      if (binary) {
         const bytes = await actions.readFolderBinary(path);
         if (!bytes) throw new Error(`${path} could not be read`);
-        const wb = readWorkbook(bytes);
-        const sheet = pickSheet(wb, kind === 'baseline' ? 'Baseline_Extract' : 'P6_Extract');
-        setSource({ name: `${path} [${sheet}]`, parsed: parseWorkbookSheet(wb, sheet) });
-        return;
+        loadBytes(path, bytes, null);
+      } else {
+        const text = await actions.readFolderFile(path);
+        if (text === null) throw new Error(`${path} could not be read`);
+        loadBytes(path, new Uint8Array(), text);
       }
-      const text = await actions.readFolderFile(path);
-      if (text === null) throw new Error(`${path} could not be read`);
-      setSource({ name: path, parsed: parseTable(parseDelimitedText(text)) });
     } catch (e) {
       fail(e);
     }
   };
 
+  // ---- derive the parse from the pending source and the user's corrections ----
+  const grid = useMemo<unknown[][] | null>(() => {
+    if (!pending) return null;
+    if (pending.type === 'grid') return pending.grid;
+    if (pending.type === 'workbook') return workbookGrid(pending.wb, pending.sheet);
+    return null;
+  }, [pending]);
+
+  const detected = useMemo(() => (grid ? detectLayout(grid) : null), [grid]);
+  const layout = useMemo<Layout | null>(() => {
+    if (!detected) return null;
+    return mapOverride ? { ...detected, map: { ...detected.map, ...mapOverride } } : detected;
+  }, [detected, mapOverride]);
+
+  const xer = useMemo(() => {
+    if (pending?.type !== 'xer') return null;
+    return xerToActivities(pending.tables, { hoursPerDay, projectShortName: project || undefined });
+  }, [pending, hoursPerDay, project]);
+
+  const parsed = useMemo<ParsedTable | null>(() => {
+    if (xer) {
+      return { activities: xer.activities, headerSkipped: false, layout: detectLayout([]), warnings: [], unparseableDates: 0, duplicateIds: [], skippedBlank: 0, skippedBeforeHeader: 0 };
+    }
+    if (!grid || !layout) return null;
+    return parseTable(grid, layout);
+  }, [grid, layout, xer]);
+
   const preview = useMemo(() => {
-    if (!source) return null;
-    const acts = source.parsed.activities;
+    if (!parsed) return null;
+    const acts = parsed.activities;
     const real = acts.filter((a) => a.rowType === 'ACTIVITY');
     const locs = distinctLocations(acts);
     const types = distinctActivityTypes(acts);
@@ -78,15 +132,16 @@ export function Import() {
     const other = kind === 'current' ? state.data.baseline : state.data.current;
     const otherIds = new Set((other?.activities ?? []).filter((a) => a.rowType === 'ACTIVITY').map((a) => normKey(a.activityId)));
     const missingInOther = other ? real.filter((a) => !otherIds.has(normKey(a.activityId))).length : null;
-    return { acts, real, locs, types, newTypes, newLocs, missingInOther };
-  }, [source, state.data, kind]);
+    const noId = real.filter((a) => a.location === '').length;
+    return { acts, real, locs, types, newTypes, newLocs, missingInOther, noId };
+  }, [parsed, state.data, kind]);
 
   const commit = async () => {
-    if (!source) return;
+    if (!pending || !parsed) return;
     setBusy(true);
     try {
-      await actions.commitImport(kind, source.parsed.activities, source.name);
-      setSource(null);
+      await actions.commitImport(kind, parsed.activities, pending.name);
+      reset();
       setPaste('');
     } catch (e) {
       fail(e);
@@ -96,13 +151,15 @@ export function Import() {
   };
 
   const history = [...state.data.importsIndex].sort((a, b) => b.importedAt.localeCompare(a.importedAt));
+  const headerCells = grid && layout?.headerRow !== null && layout ? (grid[layout.headerRow as number] ?? null) : null;
+  const cols = grid ? columnCount(grid) : 0;
 
   return (
-    <Page title="Import" subtitle="Two independent targets: the current (live) schedule and the baseline. Columns in order: Activity ID, Activity Name, Original Duration, Remaining Duration, Start, Finish. Extra columns are ignored.">
+    <Page title="Import" subtitle="Drop the P6 export straight in. Excel is never needed: .xlsx, .csv and P6's own .xer are all read directly. Two independent targets, the current (live) schedule and the baseline.">
       <div className="mb-3 flex items-center gap-2">
         <span className="text-slate-600">Import target:</span>
         {(['current', 'baseline'] as ImportKind[]).map((k) => (
-          <button key={k} className={`btn ${kind === k ? 'btn-primary' : ''}`} onClick={() => { setKind(k); setSource(null); }}>
+          <button key={k} className={`btn ${kind === k ? 'btn-primary' : ''}`} onClick={() => { setKind(k); reset(); }}>
             {k === 'current' ? 'Current schedule' : 'Baseline schedule'}
           </button>
         ))}
@@ -115,7 +172,7 @@ export function Import() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div
-          className="card border-dashed"
+          className="card border-2 border-dashed border-slate-300"
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
@@ -123,32 +180,32 @@ export function Import() {
             if (f) void loadFile(f);
           }}
         >
-          <h2 className="font-semibold">1. File</h2>
-          <p className="mt-1 text-[12px] text-slate-500">Drop an .xlsx or .csv here, or pick one. Nothing is imported until you confirm the preview.</p>
-          <input className="mt-3 block text-[12px]" type="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt" onChange={(e) => e.target.files?.[0] && void loadFile(e.target.files[0])} />
+          <h2 className="font-semibold">1. Drop the P6 export</h2>
+          <p className="mt-1 text-[12px] text-slate-500">
+            Drag the file here, or pick it. Accepts <b>.xer</b> (P6's own export, no Excel involved), <b>.xlsx</b> and <b>.csv</b>. Nothing is imported until you confirm the preview.
+          </p>
+          <input className="mt-3 block text-[12px]" type="file" accept=".xer,.xlsx,.xlsm,.xls,.csv,.tsv,.txt" onChange={(e) => e.target.files?.[0] && void loadFile(e.target.files[0])} />
         </div>
         <div className="card">
-          <h2 className="font-semibold">2. Paste from Excel</h2>
-          <p className="mt-1 text-[12px] text-slate-500">Open the P6 export in Excel, select the six columns (header row optional), copy, and paste here.</p>
+          <h2 className="font-semibold">2. Paste rows</h2>
+          <p className="mt-1 text-[12px] text-slate-500">If you already have the export open somewhere, select the columns, copy, and paste here.</p>
           <textarea className="input mt-2 h-28 w-full font-mono text-[11px]" placeholder={'Activity ID\tActivity Name\tOriginal Duration\tRemaining Duration\tStart\tFinish'} value={paste} onChange={(e) => setPaste(e.target.value)} />
           <button className="btn mt-2" disabled={!paste.trim()} onClick={loadPaste}>
             Parse pasted rows
           </button>
         </div>
         <div className="card">
-          <h2 className="font-semibold">3. File already in the folder</h2>
-          <p className="mt-1 text-[12px] text-slate-500">Workbooks, CSV or TSV files sitting in the storage folder or its exports sub-folder.</p>
+          <h2 className="font-semibold">3. A file already in the folder</h2>
+          <p className="mt-1 text-[12px] text-slate-500">Exports saved into the storage folder or its exports sub-folder.</p>
           <button className="btn mt-2" disabled={state.adapterKind !== 'filesystem'} onClick={() => void actions.listFolderFiles().then(setFolderFiles).catch(fail)}>
             List files
           </button>
           {folderFiles && (
             <ul className="mt-2 max-h-28 overflow-auto text-[12px]">
-              {folderFiles.length === 0 && <li className="text-slate-400">No workbook, .csv or .tsv files found.</li>}
+              {folderFiles.length === 0 && <li className="text-slate-400">No schedule files found in the folder.</li>}
               {folderFiles.map((f) => (
                 <li key={f}>
-                  <button className="text-blue-700 underline" onClick={() => void loadFolderFile(f)}>
-                    {f}
-                  </button>
+                  <button className="text-blue-700 underline" onClick={() => void loadFolderFile(f)}>{f}</button>
                 </li>
               ))}
             </ul>
@@ -156,41 +213,98 @@ export function Import() {
         </div>
       </div>
 
-      {error && (
-        <div className="mt-3">
-          <Notice tone="error">{error}</Notice>
-        </div>
-      )}
+      {error && <div className="mt-3"><Notice tone="error">{error}</Notice></div>}
 
-      {source && preview && (
+      {pending && preview && parsed && (
         <div className="card mt-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="font-semibold">Preview: {source.name}</h2>
-              <div className="text-[12px] text-slate-500">Importing as the {kind} schedule. Review the counts, then confirm.</div>
+              <h2 className="font-semibold">
+                Preview: {pending.name} {pending.type === 'xer' && <Badge tone="purple">P6 native .xer</Badge>}
+              </h2>
+              <div className="text-[12px] text-slate-500">Importing as the {kind} schedule. Check the mapping and the counts, then confirm.</div>
             </div>
             <div className="flex gap-2">
-              <button className="btn" onClick={() => setSource(null)}>
-                Discard
-              </button>
+              <button className="btn" onClick={reset}>Discard</button>
               <button className="btn btn-primary" disabled={busy || preview.real.length === 0} onClick={() => void commit()}>
                 {busy ? 'Importing…' : `Confirm import (${preview.acts.length} rows)`}
               </button>
             </div>
           </div>
+
+          {pending.type === 'workbook' && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded bg-slate-50 px-3 py-2 text-[12px]">
+              <span className="font-semibold">Sheet</span>
+              <select className="input" value={pending.sheet} onChange={(e) => { setPending({ ...pending, sheet: e.target.value }); setMapOverride(null); }}>
+                {pending.wb.SheetNames.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <span className="text-slate-500">{pending.wb.SheetNames.length} sheets in this workbook.</span>
+            </div>
+          )}
+
+          {pending.type === 'xer' && xer && (
+            <div className="mt-3 flex flex-wrap items-end gap-3 rounded bg-slate-50 px-3 py-2 text-[12px]">
+              {xer.projects.length > 1 && (
+                <label>
+                  <div className="font-semibold">Project</div>
+                  <select className="input mt-1" value={project} onChange={(e) => setProject(e.target.value)}>
+                    <option value="">All projects ({xer.projects.reduce((s, p) => s + p.taskCount, 0)} activities)</option>
+                    {xer.projects.map((p) => <option key={p.id} value={p.shortName}>{p.shortName} ({p.taskCount})</option>)}
+                  </select>
+                </label>
+              )}
+              <label>
+                <div className="font-semibold">Hours per day</div>
+                <input className="input mt-1 w-24" type="number" step="0.5" value={hoursPerDay} onChange={(e) => setHoursPerDay(Number(e.target.value) || 8)} />
+              </label>
+              <div className="text-slate-600">
+                XER holds durations in hours. {xer.calendarHours.length > 0
+                  ? <>Converted using each activity's own calendar: {xer.calendarHours.map((c) => `${c.name} at ${c.hoursPerDay} h`).join(', ')}.</>
+                  : <>No calendar was found in the file, so the value above is used for every activity.</>}
+              </div>
+            </div>
+          )}
+
+          {pending.type !== 'xer' && layout && grid && (
+            <div className="mt-3 rounded bg-slate-50 px-3 py-2">
+              <div className="flex items-baseline gap-2 text-[12px]">
+                <span className="font-semibold">Column mapping</span>
+                {layout.fromHeader
+                  ? <span className="text-slate-500">Matched from the header in row {(layout.headerRow ?? 0) + 1}. Change any that are wrong.</span>
+                  : <span className="text-amber-700">No header row recognised, so columns are read by position. Check these carefully.</span>}
+                {mapOverride && <button className="text-blue-700 underline" onClick={() => setMapOverride(null)}>reset to detected</button>}
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
+                {FIELD_ORDER.map((f) => (
+                  <label key={f} className="text-[11px]">
+                    <div className="font-semibold text-slate-600">{FIELD_LABELS[f]}</div>
+                    <select
+                      className="input mt-0.5 w-full"
+                      value={layout.map[f] === null ? '' : String(layout.map[f])}
+                      onChange={(e) => setMapOverride({ ...(mapOverride ?? {}), [f]: e.target.value === '' ? null : Number(e.target.value) })}
+                    >
+                      <option value="">(not in this export)</option>
+                      {Array.from({ length: cols }, (_, i) => <option key={i} value={i}>{columnLabel(i, headerCells)}</option>)}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="mt-3 grid grid-cols-2 gap-2 text-[12px] md:grid-cols-4">
             {[
               ['Rows', preview.acts.length],
               ['WBS rows (never budgeted)', preview.acts.length - preview.real.length],
               ['Activities', preview.real.length],
-              ['Header row skipped', source.parsed.headerSkipped ? 'yes' : 'no'],
+              ['Title rows skipped', parsed.skippedBeforeHeader],
               ['Locations found', preview.locs.length],
               ['New locations', preview.newLocs.length],
               ['Activity types found', preview.types.length],
               ['New to the library', preview.newTypes.length],
-              ['Unparseable dates', source.parsed.unparseableDates],
-              ['Duplicate Activity IDs', source.parsed.duplicateIds.length],
-              ['Blank rows skipped', source.parsed.skippedBlank],
+              ['Unparseable dates', parsed.unparseableDates],
+              ['Duplicate Activity IDs', parsed.duplicateIds.length],
+              ['IDs with no location segment', preview.noId],
               [kind === 'current' ? 'Not in the baseline' : 'Not in the current schedule', preview.missingInOther ?? 'n/a'],
             ].map(([k, v]) => (
               <div key={String(k)} className="rounded bg-slate-50 px-2 py-1">
@@ -199,26 +313,25 @@ export function Import() {
               </div>
             ))}
           </div>
+
+          {preview.real.length === 0 && (
+            <div className="mt-2"><Notice tone="error">No activity rows were found. Check the column mapping above: the Activity Name column decides what is an activity and what is a WBS summary row.</Notice></div>
+          )}
           {kind === 'current' && (preview.newTypes.length > 0 || preview.newLocs.length > 0) && (
             <div className="mt-2 text-[12px] text-slate-600">
               Confirming will also write {preview.newLocs.length ? `${preview.newLocs.length} new location${preview.newLocs.length === 1 ? '' : 's'} (${preview.newLocs.join(', ')})` : 'no new locations'} and{' '}
               {preview.newTypes.length ? `${preview.newTypes.length} new library type${preview.newTypes.length === 1 ? '' : 's'} on default rates` : 'no new library types'}. Existing entries keep their rates.
             </div>
           )}
-          {source.parsed.duplicateIds.length > 0 && (
-            <div className="mt-2">
-              <Notice tone="warn">Duplicate Activity IDs (the first occurrence wins for baseline and test progress matching): {source.parsed.duplicateIds.join(', ')}</Notice>
-            </div>
+          {xer?.warnings.map((w) => <div key={w} className="mt-2"><Notice tone="warn">{w}</Notice></div>)}
+          {parsed.duplicateIds.length > 0 && (
+            <div className="mt-2"><Notice tone="warn">Duplicate Activity IDs (the first occurrence wins for baseline and test progress matching): {parsed.duplicateIds.join(', ')}</Notice></div>
           )}
-          {source.parsed.warnings.length > 0 && (
+          {parsed.warnings.length > 0 && (
             <details className="mt-2 text-[12px]">
-              <summary className="cursor-pointer text-amber-800">{source.parsed.warnings.length} row warnings</summary>
+              <summary className="cursor-pointer text-amber-800">{parsed.warnings.length} row warnings</summary>
               <ul className="mt-1 max-h-40 overflow-auto">
-                {source.parsed.warnings.map((w, i) => (
-                  <li key={i}>
-                    Row {w.row}: {w.message}
-                  </li>
-                ))}
+                {parsed.warnings.map((w, i) => <li key={i}>Row {w.row}: {w.message}</li>)}
               </ul>
             </details>
           )}
@@ -228,13 +341,13 @@ export function Import() {
               <ul className="mt-1 max-h-40 overflow-auto">{preview.newTypes.map((t) => <li key={t}>{t}</li>)}</ul>
             </details>
           )}
-          <details className="mt-2 text-[12px]">
+          <details className="mt-2 text-[12px]" open>
             <summary className="cursor-pointer">First 15 parsed rows</summary>
             <div className="mt-1 overflow-auto">
               <table className="tbl">
-                <thead><tr><th>Raw ID</th><th>Type</th><th>Name</th><th>OD</th><th>RD</th><th>Start</th><th>Finish</th><th>Location</th><th>Activity type</th></tr></thead>
+                <thead><tr><th>Activity ID</th><th>Type</th><th>Name</th><th>OD</th><th>RD</th><th>Start</th><th>Finish</th><th>Location</th><th>Activity type</th></tr></thead>
                 <tbody>
-                  {preview.acts.slice(0, 15).map((a) => (
+                  {preview.acts.slice(0, 15).map((a: P6Activity) => (
                     <tr key={a.sortOrder}>
                       <td><pre className="m-0 font-mono text-[11px]">{a.rawActivityId}</pre></td>
                       <td><Badge tone={a.rowType === 'WBS' ? 'slate' : 'green'}>{a.rowType}</Badge></td>

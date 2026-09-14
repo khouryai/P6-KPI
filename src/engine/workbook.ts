@@ -1,12 +1,13 @@
 import * as XLSX from 'xlsx';
 import { parseTable, type ParsedTable } from './parse';
+import type { Layout } from './columns';
 
 /**
  * Read the first six columns of a worksheet into an untyped grid. Dates come back as
  * JS Date objects (cellDates), numbers as numbers, everything else as text, so the
  * mixed text / serial date columns of a pasted P6 export survive intact.
  */
-export function sheetToGrid(ws: XLSX.WorkSheet, maxCols = 6): unknown[][] {
+export function sheetToGrid(ws: XLSX.WorkSheet, maxCols = 40): unknown[][] {
   const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: null, blankrows: false });
   return rows.map((r) => r.slice(0, maxCols));
 }
@@ -25,8 +26,13 @@ export function pickSheet(wb: XLSX.WorkBook, preferred?: string): string {
 }
 
 /** Parse a worksheet of a P6 export into activities. */
-export function parseWorkbookSheet(wb: XLSX.WorkBook, sheetName: string): ParsedTable {
+export function parseWorkbookSheet(wb: XLSX.WorkBook, sheetName: string, layout?: Layout): ParsedTable {
+  return parseTable(workbookGrid(wb, sheetName), layout);
+}
+
+/** The raw grid of a sheet, so the import screen can re-parse with a corrected mapping. */
+export function workbookGrid(wb: XLSX.WorkBook, sheetName: string, maxCols = 40): unknown[][] {
   const ws = wb.Sheets[sheetName];
   if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
-  return parseTable(sheetToGrid(ws));
+  return sheetToGrid(ws, maxCols);
 }

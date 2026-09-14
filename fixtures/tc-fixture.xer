@@ -1,0 +1,36 @@
+ERMHDR	19.12	2026-09-14	Project	admin	Sample	dbxDatabaseNoName	Project Management	USD
+%T	CALENDAR
+%F	clndr_id	clndr_name	day_hr_cnt
+%R	1	Standard 5 Day	8
+%R	2	Night Shift 10 Hour	10
+%T	PROJECT
+%F	proj_id	proj_short_name
+%R	100	SAMPLE-PH2
+%T	TASK
+%F	task_id	proj_id	clndr_id	task_code	task_name	target_drtn_hr_cnt	remain_drtn_hr_cnt	act_start_date	act_end_date	early_start_date	early_end_date
+%R	1000	100	1	0-P2-TC-A10-FA-0010	[T&C] A10 (Ph2) - Core Network Test	96	0	2025-03-03 08:00	2025-03-18 08:00	2025-03-03 08:00	2025-03-18 08:00
+%R	1001	100	1	0-P2-TC-A10-FA-0020	[T&C] A10 (Ph2) - Wayside SAT/SIT	120	0	2025-04-01 08:00	2025-04-21 08:00	2025-04-01 08:00	2025-04-21 08:00
+%R	1002	100	1	0-P2-TC-A10-FA-0030	[T&C] A10 (Ph2) - Pre-Simulation Test	80	32	2026-08-18 08:00		2026-08-18 08:00	2026-09-04 08:00
+%R	1003	100	1	0-P2-TC-A10-FA-0040	[T&C] A10 (Ph2) - Sim Mode Test (Adjacent Location) (DF: A10 → B20)	40	40			2026-10-05 08:00	2026-10-09 08:00
+%R	1004	100	1	0-P2-TC-A10-FA-0050	[T&C] A10 (Ph2) - Cutover (by BART)	160	160			2027-01-04 08:00	2027-01-29 08:00
+%R	1005	100	1	0-P2-TC-A10-FA-0060	[T&C] A10 (Ph2) - Old Switch Test (Deleted)	80	0	2025-01-31 08:00	2025-01-31 08:00	2025-01-31 08:00	2025-01-31 08:00
+%R	1006	100	1	0-P2-TC-B20-FA-0010	[T&C] B20 (Ph2) - Core Network Test	96	96			2026-11-02 08:00	2026-11-17 08:00
+%R	1007	100	1	0-P2-TC-B20-FA-0020	[T&C] B20 (Ph2) - Wayside SAT/SIT	120	120			2027-02-01 08:00	2027-02-19 08:00
+%R	1008	100	1	0-P2-TC-B20-FA-0030	[T&C] B20 (Ph2) - Sim Mode Test (Adjacent Location) (DF: B20 → A10)	40	40			2026-10-12 08:00	2026-10-16 08:00
+%R	1009	100	1	0-P2-TC-B20-FA-0040	[T&C] B20 (Ph2) - Cutover (By BART)	160	160			2027-03-01 08:00	2027-03-26 08:00
+%R	1010	100	1	0-P2-TC-B20-FA-0050	[T&C] B20 (Ph2) - Wiring Prep (By Others)	80	80			2026-10-01 08:00	2026-10-14 08:00
+%R	1011	100	1	0-P2-TC-B20-FA-0060	[T&C] B20 (Ph2) - Long Hammock Support	720	720			2026-10-01 08:00	2027-02-05 08:00
+%R	1012	100	1	0-P2-TC-B20-FA-0070	[T&C] B20 (Ph2) - Regression Test	80	80			2027-03-01 08:00	2027-03-12 08:00
+%R	1013	100	1	0-P2-TC-C30-FA-0010	[T&C] C30 (Ph2) - Sim Mode Test (Adjacent Location) (DF: C30 → B20)	40	40			2027-04-05 08:00	2027-04-09 08:00
+%R	1014	100	1	0-P2-TC-C30-FA-0020	[T&C] C30 (Ph2) - Sim Mode Test (Adjacent Location) (DF: B20 → C30)	40	40			2027-04-12 08:00	2027-04-16 08:00
+%R	1015	100	2	0-P2-TC-C30-FA-0030	[T&C] C30 (Ph2) - Onboard Integration	200	200			2028-06-05 08:00	2030-08-26 08:00
+%R	1016	100	1	0-P2-TC-C30-FA-0040	[T&C] C30 (Ph2) - Database Survey	120	120				2028-01-21 08:00
+%R	1017	100	1	0-P2-TC-C30-FA-0050	[T&C] C30 (Ph2) - Milestone Release	0	0	2025-12-31 08:00	2025-12-31 08:00	2025-12-31 08:00	2025-12-31 08:00
+%R	1018	100	1	0-P2-TC-C30-FA-0060	[T&C] C30 (Ph2) - Core Network Test	96	96			2026-10-01 08:00	2026-10-16 08:00
+%R	1019	100	1	0-P2-TC-C30-FA-0070	[T&C] C30 (Ph2) - Axle Test (Cancelled)	80	80			2027-05-03 08:00	2027-05-14 08:00
+%R	1020	100	1	0-P2-TC-D40-FA-0010	[T&C] D40 (Ph2) - Core Network Test	96	96				
+%R	1021	100	1	0-P2-TC-D40-FA-0020	[T&C] D40 (Ph2) - Wayside SAT/SIT	120	120			2029-05-01 08:00	2029-05-21 08:00
+%R	1022	100	1	0-P2-TC-D40-FA-0030	[T&C] D40 (Ph2) - Special Test (Ad hoc)	40	40			2029-06-04 08:00	2029-06-08 08:00
+%R	1023	100	1	0-P2-TC-E50-FA-0010	[T&C] E50 (Ph2) - Pre-Simulation Test	80	80			2028-03-06 08:00	2028-03-17 08:00
+%R	1024	100	1	0-P2-MS-0010	[MS] - Program Milestone	0	0			2030-08-26 08:00	2030-08-26 08:00
+%E

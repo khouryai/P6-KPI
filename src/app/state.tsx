@@ -10,6 +10,22 @@ import { MemoryAdapter } from '../storage/memoryAdapter';
 import { Store, emptyStoreData, importStamp, FILES, type StoreData, type StoreFileKey, type ConflictCopy, type LockStatus } from '../storage/store';
 import { fsaSupported, loadFolderHandle, saveFolderHandle, forgetFolderHandle, pickFolder, queryPermission, requestPermission, ownerIdentity } from './folder';
 
+const MODE_KEY = 'tc-storage-mode';
+function readMode(): string | null {
+  try { return localStorage.getItem(MODE_KEY); } catch { return null; }
+}
+function writeMode(v: string | null): void {
+  try { if (v === null) localStorage.removeItem(MODE_KEY); else localStorage.setItem(MODE_KEY, v); } catch { /* private window */ }
+}
+
+/** Everything in the store as one file, for backup, restore and moving between machines. */
+export type Bundle = {
+  kind: 'tc-budget-backup';
+  version: 1;
+  createdAt: string;
+  data: StoreData;
+};
+
 export type AppStatus = 'booting' | 'no-folder' | 'needs-permission' | 'loading' | 'ready' | 'error';
 
 export type AppState = {
@@ -32,6 +48,9 @@ export type DataUpdater = <K extends StoreFileKey>(key: K, fn: (prev: StoreData[
 
 export type AppActions = {
   chooseFolder(): Promise<void>;
+  useBrowserStorage(): Promise<void>;
+  exportBundle(): Bundle;
+  restoreBundle(bundle: Bundle): Promise<void>;
   grantPermission(): Promise<void>;
   useMemoryOnly(): void;
   forgetFolder(): Promise<void>;
@@ -148,8 +167,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (readMode() === 'browser') {
+        await openStore(idb(), null);
+        return;
+      }
       if (!fsaSupported()) {
-        patch({ status: 'no-folder', error: 'This browser does not support opening folders. Use Edge or Chrome at http://localhost.' });
+        patch({ status: 'no-folder', error: 'This browser cannot open folders, so the OneDrive folder is not available here. Use Edge or Chrome, and open the app through the local server rather than by double-clicking the HTML file.' });
         return;
       }
       try {
@@ -199,6 +222,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const handle = await pickFolder();
       await saveFolderHandle(idb(), handle);
+      writeMode(null);
       await openHandle(handle);
     } catch (err) {
       if ((err as DOMException).name === 'AbortError') return;
@@ -218,8 +242,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     void openStore(new MemoryAdapter(), null);
   }, [openStore]);
 
+  /**
+   * Keep the data in this browser profile instead of a folder. Real persistence, but it
+   * lives only on this machine and in this browser, so backups matter. Used when the
+   * folder API is unavailable or the user declines it.
+   */
+  const useBrowserStorage = useCallback(async () => {
+    writeMode('browser');
+    await openStore(idb(), null);
+  }, [idb, openStore]);
+
   const forgetFolder = useCallback(async () => {
     await storeRef.current?.releaseLock().catch(() => undefined);
+    writeMode(null);
     await forgetFolderHandle(idb());
     handleRef.current = null;
     storeRef.current = null;
@@ -310,6 +345,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const readImport = useCallback(async (entry: ImportIndexEntry) => storeRef.current?.readImport(entry.file) ?? null, []);
 
+  const exportBundle = useCallback((): Bundle => ({ kind: 'tc-budget-backup', version: 1, createdAt: new Date().toISOString(), data: stateRef.current.data }), []);
+
+  /**
+   * Restore a backup over the current store. Settings, library, locations, overrides and
+   * test progress are replaced; the schedules in the backup are appended as new imports
+   * and snapshots as new files, so the append-only history is never rewritten.
+   */
+  const restoreBundle = useCallback(async (bundle: Bundle) => {
+    const store = storeRef.current;
+    if (!store) throw new Error('No storage open');
+    if (bundle?.kind !== 'tc-budget-backup') throw new Error('That file is not a T&C Budget backup.');
+    const b = bundle.data;
+    for (const key of ['settings', 'locations', 'library', 'overrides', 'testProgress'] as const) {
+      await store.saveFile(key, b[key]);
+    }
+    let index = stateRef.current.data.importsIndex;
+    for (const kind of ['current', 'baseline'] as const) {
+      const imp = b[kind];
+      if (!imp) continue;
+      const res = await store.appendImport({ ...imp, id: importStamp(), importedAt: new Date().toISOString(), sourceFilename: `restored from backup (${imp.sourceFilename})` }, index);
+      index = res.index;
+    }
+    const have = new Set(stateRef.current.data.snapshots.map((s) => `${s.statusDate}|${s.takenAt}`));
+    for (const snap of b.snapshots ?? []) {
+      if (!have.has(`${snap.statusDate}|${snap.takenAt}`)) await store.appendSnapshot(snap);
+    }
+    await reload();
+    notify('ok', 'Backup restored.');
+  }, [notify, reload]);
+
   const restoreImport = useCallback(
     async (entry: ImportIndexEntry) => {
       const imp = await readImport(entry);
@@ -357,15 +422,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!a) return [];
     const root = await a.list('');
     const exports = await a.list('exports').catch(() => [] as string[]);
-    return [...root, ...exports].filter((p) => /\.(xlsx|csv|tsv|txt)$/i.test(p));
+    return [...root, ...exports].filter((p) => /\.(xer|xlsx|xlsm|xls|csv|tsv|txt)$/i.test(p));
   }, []);
 
   const readFolderFile = useCallback(async (path: string) => storeRef.current?.adapter.read(path) ?? null, []);
   const readFolderBinary = useCallback(async (path: string) => storeRef.current?.adapter.readBinary(path) ?? null, []);
 
   const actions = useMemo<AppActions>(
-    () => ({ chooseFolder, grantPermission, useMemoryOnly, forgetFolder, reload, save, update, commitImport, restoreImport, readImport, takeSnapshot, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify }),
-    [chooseFolder, grantPermission, useMemoryOnly, forgetFolder, reload, save, update, commitImport, restoreImport, readImport, takeSnapshot, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify],
+    () => ({ chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, update, commitImport, restoreImport, readImport, takeSnapshot, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify }),
+    [chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, update, commitImport, restoreImport, readImport, takeSnapshot, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify],
   );
 
   return <AppContext.Provider value={{ state, model, actions }}>{children}</AppContext.Provider>;

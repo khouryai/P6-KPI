@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, Select, Badge, statusTone, Notice, type Column } from '../components/ui';
 import type { LibraryStat, LibraryEntry, Basis } from '../../engine/types';
+import { dropLastParenthetical } from '../../engine/match';
 import { fmtHours, num } from '../format';
 import { normKey } from '../../engine/keys';
 import type { Route } from '../router';
@@ -11,6 +12,7 @@ export function Library({ route }: { route: Route }) {
   const flag = route.params.get('flag');
   const [filter, setFilter] = useState('');
   const [showRetired, setShowRetired] = useState(false);
+  const [newKey, setNewKey] = useState('');
   const settings = state.data.settings;
 
   const edit = (key: string, patch: Partial<LibraryEntry>) => {
@@ -29,6 +31,54 @@ export function Library({ route }: { route: Route }) {
     return r;
   }, [model.library, flag, filter]);
   const retired = state.data.library.filter((e) => e.retired);
+
+  const addKey = (raw: string) => {
+    const key = raw.trim();
+    if (!key) return;
+    if (state.data.library.some((e) => normKey(e.matchKey) === normKey(key))) {
+      const wasRetired = state.data.library.find((e) => normKey(e.matchKey) === normKey(key))?.retired;
+      if (wasRetired) {
+        retire(key, false);
+        actions.notify('ok', `"${key}" was retired and has been restored.`);
+      } else actions.notify('info', `"${key}" is already in the library.`);
+      setNewKey('');
+      return;
+    }
+    actions.update('library', (lib) => [...lib, { matchKey: key }]);
+    setNewKey('');
+    actions.notify('ok', `Added "${key}". Price it below, then Save.`);
+  };
+
+  /**
+   * Families of keys that differ only by their last parenthetical, for example the
+   * "(DF: W40 -> Y10)" variants. Consolidating creates the shortened key and retires the
+   * variants, so tier 2 matching resolves every one of them to a single priced entry.
+   */
+  const families = useMemo(() => {
+    const groups = new Map<string, LibraryStat[]>();
+    for (const l of model.library) {
+      const stem = dropLastParenthetical(l.matchKey);
+      if (stem === l.matchKey || stem === '') continue;
+      const list = groups.get(stem) ?? [];
+      list.push(l);
+      groups.set(stem, list);
+    }
+    return [...groups.entries()]
+      .filter(([stem, list]) => list.length >= 2 && !state.data.library.some((e) => normKey(e.matchKey) === normKey(stem) && !e.retired))
+      .map(([stem, list]) => ({ stem, variants: list, count: list.reduce((n, l) => n + l.count, 0), days: list.reduce((n, l) => n + l.totalP6Days, 0) }))
+      .sort((a, b) => b.days - a.days);
+  }, [model.library, state.data.library]);
+
+  const consolidate = (stem: string, variants: LibraryStat[]) => {
+    const donor = variants.find((v) => v.rateStatus === 'SET')?.entry ?? variants[0].entry;
+    actions.update('library', (lib) => {
+      const next = lib.map((e) => (variants.some((v) => normKey(v.matchKey) === normKey(e.matchKey)) ? clean({ ...e, retired: true }) : e));
+      const exists = next.find((e) => normKey(e.matchKey) === normKey(stem));
+      if (exists) return next.map((e) => (normKey(e.matchKey) === normKey(stem) ? clean({ ...e, retired: undefined }) : e));
+      return [...next, clean({ ...donor, matchKey: stem, retired: undefined })];
+    });
+    actions.notify('ok', `Consolidated ${variants.length} variants into "${stem}". They now resolve through tier 2.`);
+  };
   const disciplines = [...new Set(state.data.library.map((e) => e.discipline).filter(Boolean))] as string[];
 
   const basisOpts = [{ value: '', label: `(default: ${settings.defaultBasis})` }, { value: 'RATE', label: 'RATE' }, { value: 'DUR', label: 'DUR' }];
@@ -62,6 +112,36 @@ export function Library({ route }: { route: Route }) {
         </>
       }
     >
+      <div className="mb-3 grid gap-3 lg:grid-cols-2">
+        <div className="card">
+          <h2 className="font-semibold">Add a key by hand</h2>
+          <p className="text-[12px] text-slate-500">Keys are normally discovered from the schedule. Add one by hand when you want a shorter, consolidated key for tier 2 matching to find.</p>
+          <div className="mt-2 flex gap-2">
+            <input className="input flex-1" placeholder="IXL Sim Mode Test (Adjacent Location)" value={newKey} onChange={(e) => setNewKey(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addKey(newKey)} />
+            <button className="btn" onClick={() => addKey(newKey)}>Add</button>
+          </div>
+        </div>
+        <div className="card">
+          <h2 className="font-semibold">Consolidate variant families</h2>
+          {families.length === 0 ? (
+            <p className="text-[12px] text-slate-500">No families found. A family is two or more keys that differ only by their last parenthetical group.</p>
+          ) : (
+            <>
+              <p className="text-[12px] text-slate-500">These keys differ only by their last parenthetical. Consolidating prices them once.</p>
+              <ul className="mt-1 max-h-32 overflow-auto text-[12px]">
+                {families.map((f) => (
+                  <li key={f.stem} className="flex items-center justify-between gap-2 py-0.5">
+                    <span className="truncate" title={f.variants.map((v) => v.matchKey).join('\n')}>
+                      <b>{f.stem}</b> <span className="text-slate-500">({f.variants.length} variants, {f.count} activities, {f.days} P6 days)</span>
+                    </span>
+                    <button className="btn shrink-0 py-0.5 text-[11px]" onClick={() => consolidate(f.stem, f.variants)}>Consolidate</button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      </div>
       <datalist id="disciplines">{disciplines.map((d) => <option key={d} value={d} />)}</datalist>
       <div className="mb-3 flex flex-wrap gap-3 text-[12px]">
         <span><Badge tone="green">SET</Badge> priced</span>

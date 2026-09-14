@@ -7,8 +7,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "build:standalone": "node scripts/build-standalone.mjs",
+    "build:all": "npm run build && npm run build:standalone",
     "preview": "vite preview",
     "serve": "node server/serve.mjs",
+    "serve:ps": "pwsh -NoProfile -File server/serve.ps1",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
