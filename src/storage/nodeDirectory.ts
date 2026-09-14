@@ -29,6 +29,15 @@ export class NodeDirectory implements Directory {
     }
   }
 
+  async readBytes(path: string): Promise<Uint8Array | null> {
+    try {
+      return new Uint8Array(await fs.readFile(this.abs(path)));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw err;
+    }
+  }
+
   async writeText(path: string, text: string): Promise<void> {
     await fs.mkdir(dirname(this.abs(path)), { recursive: true });
     await fs.writeFile(this.abs(path), text, 'utf8');

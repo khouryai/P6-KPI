@@ -20,6 +20,12 @@ export class MemoryAdapter implements StorageAdapter {
     return typeof v === 'string' ? v : new TextDecoder().decode(v);
   }
 
+  async readBinary(path: string): Promise<Uint8Array | null> {
+    const v = this.files.get(path);
+    if (v === undefined) return null;
+    return typeof v === 'string' ? new TextEncoder().encode(v) : v;
+  }
+
   async write(path: string, text: string): Promise<void> {
     this.files.set(path, text);
   }

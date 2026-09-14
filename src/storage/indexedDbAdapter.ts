@@ -59,6 +59,13 @@ export class IndexedDbAdapter implements StorageAdapter {
     return typeof v === 'string' ? v : new TextDecoder().decode(v);
   }
 
+  async readBinary(path: string): Promise<Uint8Array | null> {
+    const db = await this.db();
+    const v = (await tx(db, FILES, 'readonly', (s) => s.get(path))) as string | Uint8Array | undefined;
+    if (v === undefined) return null;
+    return typeof v === 'string' ? new TextEncoder().encode(v) : v;
+  }
+
   async write(path: string, text: string): Promise<void> {
     const db = await this.db();
     await tx(db, FILES, 'readwrite', (s) => s.put(text, path));

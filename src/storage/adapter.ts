@@ -16,6 +16,8 @@ export interface StorageAdapter {
   list(prefix?: string): Promise<string[]>;
   /** Read a text file. Returns null when it does not exist. */
   read(path: string): Promise<string | null>;
+  /** Read a binary file (a workbook in the folder). Returns null when it does not exist. */
+  readBinary(path: string): Promise<Uint8Array | null>;
   /** Write a text file atomically, creating directories as needed. */
   write(path: string, text: string): Promise<void>;
   /** Write a binary file (exports). */

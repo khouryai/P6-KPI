@@ -49,6 +49,19 @@ export class FsaDirectory implements Directory {
     }
   }
 
+  async readBytes(path: string): Promise<Uint8Array | null> {
+    const { dir, name } = splitPath(path);
+    try {
+      const d = await this.dirHandle(dir, false);
+      const fh = await d.getFileHandle(name, { create: false });
+      const file = await fh.getFile();
+      return new Uint8Array(await file.arrayBuffer());
+    } catch (err) {
+      if ((err as DOMException).name === 'NotFoundError') return null;
+      throw wrap(err, `read ${path}`);
+    }
+  }
+
   private async writeAny(path: string, data: string | Uint8Array): Promise<void> {
     const { dir, name } = splitPath(path);
     try {

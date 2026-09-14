@@ -60,6 +60,10 @@ export class FileSystemAdapter implements StorageAdapter {
     return this.withRetry(`read ${path}`, () => this.dir.readText(path));
   }
 
+  readBinary(path: string): Promise<Uint8Array | null> {
+    return this.withRetry(`read ${path}`, () => this.dir.readBytes(path));
+  }
+
   async write(path: string, text: string): Promise<void> {
     const tmp = `${path}.tmp`;
     await this.withRetry(`write ${path}`, async () => {
