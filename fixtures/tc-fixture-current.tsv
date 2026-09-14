@@ -1,0 +1,33 @@
+Activity ID	Activity Name	Original Duration	Remaining Duration	Start	Finish
+Sample Program - Master Schedule				31-Jan-25 A	8/26/2030
+  Phase 2		1814	1814	31-Jan-25 A	8/26/2030
+    Phase 2 - A10				03-Mar-25 A	1/29/2027
+                    0-P2-TC-A10-FA-0010	[T&C] A10 (Ph2) - Core Network Test	12	0	03-Mar-25 A	18-Mar-25 A
+                    0-P2-TC-A10-FA-0020	[T&C] A10 (Ph2) - Wayside SAT/SIT	15	0	01-Apr-25 A	21-Apr-25 A
+                    0-P2-TC-A10-FA-0030	[T&C] A10 (Ph2) - Pre-Simulation Test	10	4	18-Aug-26 A	9/4/2026
+                    0-P2-TC-A10-FA-0040	[T&C] A10 (Ph2) - Sim Mode Test (Adjacent Location) (DF: A10 → B20)	5	5	10/5/2026	10/9/2026
+                    0-P2-TC-A10-FA-0050	[T&C] A10 (Ph2) - Cutover (by BART)	20	20	1/4/2027	1/29/2027
+                    0-P2-TC-A10-FA-0060	[T&C] A10 (Ph2) - Old Switch Test (Deleted)	10	0	31-Jan-25 A	31-Jan-25 A
+    Phase 2 - B20				10/1/2026	3/12/2027
+                    0-P2-TC-B20-FA-0010	[T&C] B20 (Ph2) - Core Network Test	12	12	11/2/2026	11/17/2026
+                    0-P2-TC-B20-FA-0020	[T&C] B20 (Ph2) - Wayside SAT/SIT	15	15	2/1/2027	2/19/2027
+                    0-P2-TC-B20-FA-0030	[T&C] B20 (Ph2) - Sim Mode Test (Adjacent Location) (DF: B20 → A10)	5	5	10/12/2026	10/16/2026
+                    0-P2-TC-B20-FA-0040	[T&C] B20 (Ph2) - Cutover (By BART)	20	20	3/1/2027	3/26/2027
+                    0-P2-TC-B20-FA-0050	[T&C] B20 (Ph2) - Wiring Prep (By Others)	10	10	10/1/2026	10/14/2026
+                    0-P2-TC-B20-FA-0060	[T&C] B20 (Ph2) - Long Hammock Support	90	90	10/1/2026	2/5/2027
+                    0-P2-TC-B20-FA-0070	[T&C] B20 (Ph2) - Regression Test	10	10	3/1/2027	3/12/2027
+    Phase 2 - C30		600	590	31-Dec-25 A	8/26/2030
+                    0-P2-TC-C30-FA-0010	[T&C] C30 (Ph2) - Sim Mode Test (Adjacent Location) (DF: C30 → B20)	5	5	4/5/2027	4/9/2027
+                    0-P2-TC-C30-FA-0020	[T&C] C30 (Ph2) - Sim Mode Test (Adjacent Location) (DF: B20 → C30)	5	5	4/12/2027	4/16/2027
+                    0-P2-TC-C30-FA-0030	[T&C] C30 (Ph2) - Onboard Integration	20	20	6/5/2028	26-Aug-30
+                    0-P2-TC-C30-FA-0040	[T&C] C30 (Ph2) - Database Survey	15	15	46753	1/21/2028
+                    0-P2-TC-C30-FA-0050	[T&C] C30 (Ph2) - Milestone Release	0	0	31-Dec-25 A	31-Dec-25 A
+                    0-P2-TC-C30-FA-0060	[T&C] C30 (Ph2) - Core Network Test	12	12	01-Oct-26*	10/16/2026
+                    0-P2-TC-C30-FA-0070	[T&C] C30 (Ph2) - Axle Test (Cancelled)	10	10	5/3/2027	5/14/2027
+    Phase 2 - D40				5/1/2029	5/21/2029
+                    0-P2-TC-D40-FA-0010	[T&C] D40 (Ph2) - Core Network Test	12	12		
+                    0-P2-TC-D40-FA-0020	[T&C] D40 (Ph2) - Wayside SAT/SIT	15	15	5/1/2029	5/21/2029
+                    0-P2-TC-D40-FA-0030	[T&C] D40 (Ph2) - Special Test (Ad hoc)	5	5	6/4/2029	6/8/2029
+    Phase 2 - E50				3/6/2028	3/17/2028
+                    0-P2-TC-E50-FA-0010	[T&C] E50 (Ph2) - Pre-Simulation Test	10	10	3/6/2028	3/17/2028
+                    0-P2-MS-0010	[MS] - Program Milestone	0	0	8/26/2030	8/26/2030

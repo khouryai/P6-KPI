@@ -1,0 +1,845 @@
+{
+  "summary": {
+    "extractRows": 32,
+    "wbsRows": 7,
+    "activities": 25,
+    "locations": 5,
+    "activityTypesDiscovered": 16,
+    "activityTypes": 12,
+    "typesOnDefaults": 2,
+    "typesNeedingShifts": 1,
+    "inBudget": 19,
+    "excluded": 3,
+    "deletedOrCancelled": 2,
+    "review": 1,
+    "totalBudgetHours": 1943,
+    "earnedHours": 267.0,
+    "remainingHours": 1676.0,
+    "pctComplete": 0.13741636644364386,
+    "baselineMatched": 23,
+    "baselineFallback": 1,
+    "noDates": 1,
+    "pctFromTests": 5,
+    "pctFromP6": 14,
+    "pctFromOverride": 1,
+    "inProgress": 1,
+    "p6Actual": 3,
+    "testWindow": 1,
+    "notStarted": 20,
+    "loeFlags": 1,
+    "tier2Resolved": 4,
+    "onNoCurve": 2
+  },
+  "activities": {
+    "0-P2-TC-A10-FA-0010": {
+      "status": "IN BUDGET",
+      "matchKey": "Core Network Test",
+      "tier": 1,
+      "budget": 80,
+      "earned": 80,
+      "pct": 1,
+      "pctSource": "TESTS",
+      "blsrc": "BASELINE",
+      "esrc": "P6 ACTUAL",
+      "earnStart": "2025-03-03",
+      "earnEnd": "2025-03-18",
+      "loe": false,
+      "location": "A10"
+    },
+    "0-P2-TC-A10-FA-0020": {
+      "status": "IN BUDGET",
+      "matchKey": "Wayside SAT/SIT",
+      "tier": 1,
+      "budget": 80,
+      "earned": 80,
+      "pct": 1,
+      "pctSource": "OVERRIDE",
+      "blsrc": "BASELINE",
+      "esrc": "TEST WINDOW",
+      "earnStart": "2025-04-07",
+      "earnEnd": "2025-04-25",
+      "loe": false,
+      "location": "A10"
+    },
+    "0-P2-TC-A10-FA-0030": {
+      "status": "IN BUDGET",
+      "matchKey": "Pre-Simulation Test",
+      "tier": 1,
+      "budget": 60,
+      "earned": 42.0,
+      "pct": 0.7,
+      "pctSource": "TESTS",
+      "blsrc": "BASELINE",
+      "esrc": "IN PROGRESS",
+      "earnStart": "2026-08-18",
+      "earnEnd": "2026-08-31",
+      "loe": false,
+      "location": "A10"
+    },
+    "0-P2-TC-A10-FA-0040": {
+      "status": "IN BUDGET",
+      "matchKey": "Sim Mode Test (Adjacent Location)",
+      "tier": 2,
+      "budget": 80,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "A10"
+    },
+    "0-P2-TC-A10-FA-0050": {
+      "status": "EXCLUDED",
+      "matchKey": "Cutover (by BART)",
+      "tier": 1,
+      "budget": 0,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "A10"
+    },
+    "0-P2-TC-A10-FA-0060": {
+      "status": "DELETED",
+      "matchKey": "Old Switch Test",
+      "tier": null,
+      "budget": 0,
+      "earned": 0.0,
+      "pct": 1.0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "P6 ACTUAL",
+      "earnStart": "2025-01-31",
+      "earnEnd": "2025-01-31",
+      "loe": false,
+      "location": "A10"
+    },
+    "0-P2-TC-B20-FA-0010": {
+      "status": "IN BUDGET",
+      "matchKey": "Core Network Test",
+      "tier": 1,
+      "budget": 80,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "B20"
+    },
+    "0-P2-TC-B20-FA-0020": {
+      "status": "IN BUDGET",
+      "matchKey": "Wayside SAT/SIT",
+      "tier": 1,
+      "budget": 80,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "B20"
+    },
+    "0-P2-TC-B20-FA-0030": {
+      "status": "IN BUDGET",
+      "matchKey": "Sim Mode Test (Adjacent Location)",
+      "tier": 2,
+      "budget": 80,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "B20"
+    },
+    "0-P2-TC-B20-FA-0040": {
+      "status": "EXCLUDED",
+      "matchKey": "Cutover (by BART)",
+      "tier": 1,
+      "budget": 0,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "B20"
+    },
+    "0-P2-TC-B20-FA-0050": {
+      "status": "EXCLUDED",
+      "matchKey": "Wiring Prep (By Others)",
+      "tier": 1,
+      "budget": 0,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "B20"
+    },
+    "0-P2-TC-B20-FA-0060": {
+      "status": "IN BUDGET",
+      "matchKey": "Long Hammock Support",
+      "tier": 1,
+      "budget": 400,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": true,
+      "location": "B20"
+    },
+    "0-P2-TC-B20-FA-0070": {
+      "status": "IN BUDGET",
+      "matchKey": "Regression Test",
+      "tier": 1,
+      "budget": 0,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "B20"
+    },
+    "0-P2-TC-C30-FA-0010": {
+      "status": "IN BUDGET",
+      "matchKey": "Sim Mode Test (Adjacent Location)",
+      "tier": 2,
+      "budget": 100,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "C30"
+    },
+    "0-P2-TC-C30-FA-0020": {
+      "status": "IN BUDGET",
+      "matchKey": "Sim Mode Test (Adjacent Location)",
+      "tier": 2,
+      "budget": 100,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "C30"
+    },
+    "0-P2-TC-C30-FA-0030": {
+      "status": "IN BUDGET",
+      "matchKey": "Onboard Integration",
+      "tier": 1,
+      "budget": 125,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "C30"
+    },
+    "0-P2-TC-C30-FA-0040": {
+      "status": "IN BUDGET",
+      "matchKey": "Database Survey",
+      "tier": 1,
+      "budget": 300,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "C30"
+    },
+    "0-P2-TC-C30-FA-0050": {
+      "status": "IN BUDGET",
+      "matchKey": "Milestone Release",
+      "tier": 1,
+      "budget": 50,
+      "earned": 50,
+      "pct": 1,
+      "pctSource": "TESTS",
+      "blsrc": "BASELINE",
+      "esrc": "P6 ACTUAL",
+      "earnStart": "2025-12-31",
+      "earnEnd": "2025-12-31",
+      "loe": false,
+      "location": "C30"
+    },
+    "0-P2-TC-C30-FA-0060": {
+      "status": "IN BUDGET",
+      "matchKey": "Core Network Test",
+      "tier": 1,
+      "budget": 100,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "C30"
+    },
+    "0-P2-TC-C30-FA-0070": {
+      "status": "CANCELLED",
+      "matchKey": "Axle Test",
+      "tier": null,
+      "budget": 0,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "C30"
+    },
+    "0-P2-TC-D40-FA-0010": {
+      "status": "IN BUDGET",
+      "matchKey": "Core Network Test",
+      "tier": 1,
+      "budget": 80,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "NONE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "D40"
+    },
+    "0-P2-TC-D40-FA-0020": {
+      "status": "IN BUDGET",
+      "matchKey": "Wayside SAT/SIT",
+      "tier": 1,
+      "budget": 80,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "CURRENT",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "D40"
+    },
+    "0-P2-TC-D40-FA-0030": {
+      "status": "REVIEW",
+      "matchKey": "Special Test",
+      "tier": null,
+      "budget": 0,
+      "earned": 0,
+      "pct": 0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "D40"
+    },
+    "0-P2-TC-E50-FA-0010": {
+      "status": "IN BUDGET",
+      "matchKey": "Pre-Simulation Test",
+      "tier": 1,
+      "budget": 60,
+      "earned": 15.0,
+      "pct": 0.25,
+      "pctSource": "TESTS",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": "E50"
+    },
+    "0-P2-MS-0010": {
+      "status": "IN BUDGET",
+      "matchKey": "Program Milestone",
+      "tier": 1,
+      "budget": 8,
+      "earned": 0.0,
+      "pct": 0.0,
+      "pctSource": "P6",
+      "blsrc": "BASELINE",
+      "esrc": "NOT STARTED",
+      "earnStart": null,
+      "earnEnd": null,
+      "loe": false,
+      "location": ""
+    }
+  },
+  "curve": [
+    {
+      "periodEnd": "2025-01-31",
+      "planned": 0,
+      "forecast": 0,
+      "earned": 0.0
+    },
+    {
+      "periodEnd": "2025-02-28",
+      "planned": 0,
+      "forecast": 0,
+      "earned": 0.0
+    },
+    {
+      "periodEnd": "2025-03-31",
+      "planned": 80,
+      "forecast": 80,
+      "earned": 80.0
+    },
+    {
+      "periodEnd": "2025-04-30",
+      "planned": 160,
+      "forecast": 160,
+      "earned": 160.0
+    },
+    {
+      "periodEnd": "2025-05-31",
+      "planned": 160,
+      "forecast": 160,
+      "earned": 160.0
+    },
+    {
+      "periodEnd": "2025-06-30",
+      "planned": 160,
+      "forecast": 160,
+      "earned": 160.0
+    },
+    {
+      "periodEnd": "2025-07-31",
+      "planned": 160,
+      "forecast": 160,
+      "earned": 160.0
+    },
+    {
+      "periodEnd": "2025-08-31",
+      "planned": 160,
+      "forecast": 160,
+      "earned": 160.0
+    },
+    {
+      "periodEnd": "2025-09-30",
+      "planned": 160,
+      "forecast": 160,
+      "earned": 160.0
+    },
+    {
+      "periodEnd": "2025-10-31",
+      "planned": 160,
+      "forecast": 160,
+      "earned": 160.0
+    },
+    {
+      "periodEnd": "2025-11-30",
+      "planned": 160,
+      "forecast": 160,
+      "earned": 160.0
+    },
+    {
+      "periodEnd": "2025-12-31",
+      "planned": 210,
+      "forecast": 210,
+      "earned": 210.0
+    },
+    {
+      "periodEnd": "2026-01-31",
+      "planned": 210,
+      "forecast": 210,
+      "earned": 210.0
+    },
+    {
+      "periodEnd": "2026-02-28",
+      "planned": 210,
+      "forecast": 210,
+      "earned": 210.0
+    },
+    {
+      "periodEnd": "2026-03-31",
+      "planned": 210,
+      "forecast": 210,
+      "earned": 210.0
+    },
+    {
+      "periodEnd": "2026-04-30",
+      "planned": 210,
+      "forecast": 210,
+      "earned": 210.0
+    },
+    {
+      "periodEnd": "2026-05-31",
+      "planned": 210,
+      "forecast": 210,
+      "earned": 210.0
+    },
+    {
+      "periodEnd": "2026-06-30",
+      "planned": 210,
+      "forecast": 210,
+      "earned": 210.0
+    },
+    {
+      "periodEnd": "2026-07-31",
+      "planned": 210,
+      "forecast": 210,
+      "earned": 210.0
+    },
+    {
+      "periodEnd": "2026-08-31",
+      "planned": 270,
+      "forecast": 255.88235294117646,
+      "earned": 252.0
+    },
+    {
+      "periodEnd": "2026-09-30",
+      "planned": 430.9448818897638,
+      "forecast": 270,
+      "earned": null
+    },
+    {
+      "periodEnd": "2026-10-31",
+      "planned": 632.5826771653543,
+      "forecast": 524.488188976378,
+      "earned": null
+    },
+    {
+      "periodEnd": "2026-11-30",
+      "planned": 743.0708661417323,
+      "forecast": 698.9763779527559,
+      "earned": null
+    },
+    {
+      "periodEnd": "2026-12-31",
+      "planned": 840.7086614173229,
+      "forecast": 796.6141732283464,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-01-31",
+      "planned": 967.7777777777778,
+      "forecast": 894.251968503937,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-02-28",
+      "planned": 990.0,
+      "forecast": 990,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-03-31",
+      "planned": 1140.0,
+      "forecast": 990,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-04-30",
+      "planned": 1190,
+      "forecast": 1190,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-05-31",
+      "planned": 1190,
+      "forecast": 1190,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-06-30",
+      "planned": 1190,
+      "forecast": 1190,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-07-31",
+      "planned": 1190,
+      "forecast": 1190,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-08-31",
+      "planned": 1190,
+      "forecast": 1190,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-09-30",
+      "planned": 1190,
+      "forecast": 1190,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-10-31",
+      "planned": 1190,
+      "forecast": 1190,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-11-30",
+      "planned": 1190,
+      "forecast": 1190,
+      "earned": null
+    },
+    {
+      "periodEnd": "2027-12-31",
+      "planned": 1190,
+      "forecast": 1190,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-01-31",
+      "planned": 1490,
+      "forecast": 1490,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-02-29",
+      "planned": 1533.6363636363637,
+      "forecast": 1490,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-03-31",
+      "planned": 1550,
+      "forecast": 1550,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-04-30",
+      "planned": 1550,
+      "forecast": 1550,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-05-31",
+      "planned": 1551.3619854721549,
+      "forecast": 1550,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-06-30",
+      "planned": 1555.9019370460048,
+      "forecast": 1553.8485221674878,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-07-31",
+      "planned": 1560.593220338983,
+      "forecast": 1558.6206896551723,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-08-31",
+      "planned": 1565.2845036319613,
+      "forecast": 1563.392857142857,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-09-30",
+      "planned": 1569.824455205811,
+      "forecast": 1568.0110837438424,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-10-31",
+      "planned": 1574.5157384987892,
+      "forecast": 1572.7832512315272,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-11-30",
+      "planned": 1579.0556900726392,
+      "forecast": 1577.4014778325122,
+      "earned": null
+    },
+    {
+      "periodEnd": "2028-12-31",
+      "planned": 1583.7469733656174,
+      "forecast": 1582.173645320197,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-01-31",
+      "planned": 1588.4382566585957,
+      "forecast": 1586.9458128078818,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-02-28",
+      "planned": 1592.675544794189,
+      "forecast": 1591.256157635468,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-03-31",
+      "planned": 1597.366828087167,
+      "forecast": 1596.0283251231526,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-04-30",
+      "planned": 1601.906779661017,
+      "forecast": 1600.646551724138,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-05-31",
+      "planned": 1686.5980629539952,
+      "forecast": 1685.4187192118227,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-06-30",
+      "planned": 1691.1380145278451,
+      "forecast": 1690.036945812808,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-07-31",
+      "planned": 1695.8292978208233,
+      "forecast": 1694.8091133004925,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-08-31",
+      "planned": 1700.5205811138014,
+      "forecast": 1699.5812807881773,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-09-30",
+      "planned": 1705.0605326876514,
+      "forecast": 1704.1995073891626,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-10-31",
+      "planned": 1709.7518159806295,
+      "forecast": 1708.9716748768474,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-11-30",
+      "planned": 1714.2917675544795,
+      "forecast": 1713.5899014778324,
+      "earned": null
+    },
+    {
+      "periodEnd": "2029-12-31",
+      "planned": 1718.9830508474577,
+      "forecast": 1718.3620689655172,
+      "earned": null
+    },
+    {
+      "periodEnd": "2030-01-31",
+      "planned": 1723.6743341404358,
+      "forecast": 1723.134236453202,
+      "earned": null
+    },
+    {
+      "periodEnd": "2030-02-28",
+      "planned": 1727.911622276029,
+      "forecast": 1727.4445812807883,
+      "earned": null
+    },
+    {
+      "periodEnd": "2030-03-31",
+      "planned": 1732.6029055690074,
+      "forecast": 1732.2167487684728,
+      "earned": null
+    },
+    {
+      "periodEnd": "2030-04-30",
+      "planned": 1737.142857142857,
+      "forecast": 1736.834975369458,
+      "earned": null
+    },
+    {
+      "periodEnd": "2030-05-31",
+      "planned": 1741.8341404358353,
+      "forecast": 1741.607142857143,
+      "earned": null
+    },
+    {
+      "periodEnd": "2030-06-30",
+      "planned": 1746.3740920096852,
+      "forecast": 1746.2253694581282,
+      "earned": null
+    },
+    {
+      "periodEnd": "2030-07-31",
+      "planned": 1751.0653753026634,
+      "forecast": 1750.9975369458127,
+      "earned": null
+    },
+    {
+      "periodEnd": "2030-08-31",
+      "planned": 1763,
+      "forecast": 1763,
+      "earned": null
+    }
+  ],
+  "locationsDiscovered": [
+    "A10",
+    "B20",
+    "C30",
+    "D40",
+    "E50"
+  ],
+  "typesDiscovered": [
+    "Core Network Test",
+    "Wayside SAT/SIT",
+    "Pre-Simulation Test",
+    "Sim Mode Test (Adjacent Location) (DF: A10 \u2192 B20)",
+    "Cutover (by BART)",
+    "Sim Mode Test (Adjacent Location) (DF: B20 \u2192 A10)",
+    "Wiring Prep (By Others)",
+    "Long Hammock Support",
+    "Regression Test",
+    "Sim Mode Test (Adjacent Location) (DF: C30 \u2192 B20)",
+    "Sim Mode Test (Adjacent Location) (DF: B20 \u2192 C30)",
+    "Onboard Integration",
+    "Database Survey",
+    "Milestone Release",
+    "Special Test (Ad hoc)",
+    "Program Milestone"
+  ]
+}

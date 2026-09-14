@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+Thumbs.db
+
+# Real P6 exports and workbooks are commercially sensitive. Never commit them.
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+!fixtures/tc-fixture.xlsx
+!fixtures/*.csv
+
+# Live OneDrive storage folder, in case it is ever placed inside the repo
+TC-Budget/
+**/TC-Budget/
+*.lock
+local/
