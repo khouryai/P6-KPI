@@ -162,12 +162,16 @@ and **Restore from a backup**.
 **Double-click `Update.cmd`.** That is the whole routine. No re-downloading a zip, no
 copying folders about.
 
+**One last download first.** A folder that predates the updater has no `Update.cmd` in
+it. Download the folder from GitHub once more, copy it to your permanent path, and that
+is the last time you do it — from then on `Update.cmd` keeps the folder current.
+
 It fetches the current code from GitHub and replaces the program files in place:
 `dist\`, `standalone\`, `server\`, `public\`, `docs\` and the `.cmd` files. Then:
 
 - **Way B (local server):** the open window notices within a few seconds of you
   clicking back into it and shows a green **A newer build is on disk** bar. Click
-  **Reload**. If nothing is open, just start it as usual.
+  **Reload now**. If nothing is open, just start it as usual.
 - **Way A (taskbar app):** close the window and click the taskbar icon again. There is
   no cache to clear; the single file is read fresh each time.
 
