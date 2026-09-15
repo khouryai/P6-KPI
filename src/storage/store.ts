@@ -6,6 +6,8 @@ import type {
   ScheduleImport,
   Settings,
   Snapshot,
+  Subsystem,
+  TeamActual,
   TestProgress,
 } from '../engine/types';
 import { DEFAULT_SETTINGS } from '../engine/types';
@@ -19,6 +21,8 @@ export const FILES = {
   library: 'activity-library.json',
   overrides: 'activity-overrides.json',
   testProgress: 'test-progress.json',
+  subsystems: 'subsystems.json',
+  teamActuals: 'team-actuals.json',
   importsIndex: 'imports/index.json',
 } as const;
 
@@ -35,6 +39,8 @@ export type StoreData = {
   library: LibraryEntry[];
   overrides: ActivityOverride[];
   testProgress: TestProgress[];
+  subsystems: Subsystem[];
+  teamActuals: TeamActual[];
   importsIndex: ImportIndexEntry[];
   snapshots: Snapshot[];
   current: ScheduleImport | null;
@@ -52,6 +58,8 @@ export function emptyStoreData(): StoreData {
     library: [],
     overrides: [],
     testProgress: [],
+    subsystems: [],
+    teamActuals: [],
     importsIndex: [],
     snapshots: [],
     current: null,
@@ -81,9 +89,11 @@ const CANONICAL: RegExp[] = [
   /^activity-library\.json$/,
   /^activity-overrides\.json$/,
   /^test-progress\.json$/,
+  /^subsystems\.json$/,
+  /^team-actuals\.json$/,
   /^\.lock$/,
 ];
-const STEMS = ['settings', 'locations', 'activity-library', 'activity-overrides', 'test-progress'];
+const STEMS = ['settings', 'locations', 'activity-library', 'activity-overrides', 'test-progress', 'subsystems', 'team-actuals'];
 const CANONICAL_IMPORT = /^(index|\d{4}-\d{2}-\d{2}T\d{4,6}-(current|baseline))\.json$/;
 const CANONICAL_SNAPSHOT = /^\d{4}-\d{2}-\d{2}(-\d+)?\.json$/;
 
@@ -137,6 +147,11 @@ export class Store {
     data.library = parseJson<LibraryEntry[]>(await a.read(FILES.library), [], FILES.library, problems);
     data.overrides = parseJson<ActivityOverride[]>(await a.read(FILES.overrides), [], FILES.overrides, problems);
     data.testProgress = parseJson<TestProgress[]>(await a.read(FILES.testProgress), [], FILES.testProgress, problems);
+    // Absent in every store written before crews could be split by subsystem. An
+    // empty list is the correct reading of "this job has not been split yet", so a
+    // missing file is not a problem to report.
+    data.subsystems = parseJson<Subsystem[]>(await a.read(FILES.subsystems), [], FILES.subsystems, problems);
+    data.teamActuals = parseJson<TeamActual[]>(await a.read(FILES.teamActuals), [], FILES.teamActuals, problems);
     data.importsIndex = parseJson<ImportIndexEntry[]>(await a.read(FILES.importsIndex), [], FILES.importsIndex, problems);
     for (const kind of ['current', 'baseline'] as const) {
       const latest = [...data.importsIndex].filter((i) => i.kind === kind).sort((x, y) => x.importedAt.localeCompare(y.importedAt)).pop();

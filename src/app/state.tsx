@@ -357,8 +357,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!store) throw new Error('No storage open');
     if (bundle?.kind !== 'tc-budget-backup') throw new Error('That file is not a T&C Budget backup.');
     const b = bundle.data;
-    for (const key of ['settings', 'locations', 'library', 'overrides', 'testProgress'] as const) {
-      await store.saveFile(key, b[key]);
+    // A backup taken before subsystems existed has neither key. Default them so a
+    // restore from an old file does not write "undefined" over a newer store.
+    for (const key of ['settings', 'locations', 'library', 'overrides', 'testProgress', 'subsystems', 'teamActuals'] as const) {
+      await store.saveFile(key, b[key] ?? (key === 'settings' ? b.settings : []));
     }
     let index = stateRef.current.data.importsIndex;
     for (const kind of ['current', 'baseline'] as const) {
@@ -392,6 +394,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       library: d.library,
       overrides: d.overrides,
       testProgress: d.testProgress,
+      subsystems: d.subsystems,
+      teamActuals: d.teamActuals,
       current: d.current?.activities ?? [],
       baseline: d.baseline?.activities ?? null,
       snapshots: d.snapshots,

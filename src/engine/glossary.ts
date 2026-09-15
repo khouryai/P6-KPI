@@ -1,0 +1,135 @@
+/**
+ * What the abbreviations mean.
+ *
+ * This screen is full of shorthand that is obvious to whoever built it and opaque
+ * to everyone else: OD, RD, LOE, EV, CPI, tier 2, DUR. Every definition lives here
+ * once, keyed by the exact column label, so a table header explains itself on hover
+ * without each screen inventing its own wording.
+ *
+ * Definitions say what the number MEANS and where it comes from, not what it is
+ * called. "Original Duration" is not an explanation of "OD".
+ */
+export const GLOSSARY: Record<string, string> = {
+  // --- identity ------------------------------------------------------------
+  'Activity ID': 'The P6 activity code, e.g. 0-P2-TC-W40-FA-0100. Everything joins on this. Segment 2 is the phase, 3 the work type, 4 the location.',
+  Activity: 'The activity name exactly as P6 exported it.',
+  Phase: 'Second segment of the Activity ID. P2 is Phase 2, P3 is Phase 3.',
+  Location: 'Fourth segment of the Activity ID, e.g. W40. Each location can carry its own complexity factor.',
+  'Work type': 'Third segment of the Activity ID. TC is test and commissioning, AC is acceptance.',
+  Type: 'The activity type, stripped of the location and phase prefix. This is what the rate library is keyed on.',
+  'Match key': 'The rate library entry this activity resolved to. Tier 1 is an exact match; tier 2 dropped the last bracketed phrase to find one.',
+  Tier: 'How the activity found its rate. 1 = exact match on the type. 2 = matched after dropping the last bracketed phrase, which can over-consolidate.',
+  Discipline: 'A free-text grouping you set on the rate library entry. Not derived from P6.',
+
+  // --- rating --------------------------------------------------------------
+  Basis: 'How the budget is calculated. RATE = a fixed number of shifts you set, independent of P6. DUR = P6 original duration in days.',
+  RATE: 'A fixed number of shifts you set. The budget does not change when the schedule does.',
+  DUR: 'Driven by the P6 original duration. The budget changes when the schedule does.',
+  Crew: 'How many people the activity takes. Split it by subsystem to see the workload each group carries.',
+  Subsystem: 'The resource group doing the work: ATS, IXL, COMMS and so on. An activity can need several at once.',
+  Shift: 'Hours in one shift for this activity type. A crew line can override it where one group works a shorter shift.',
+  'Shift hours': 'Hours in one shift for this activity type.',
+  Shifts: 'How many shifts one instance of this activity takes. Only used on the RATE basis.',
+  OD: 'Original Duration: the activity length in days as P6 planned it. Drives the budget on the DUR basis.',
+  RD: 'Remaining Duration: days P6 still expects the activity to take. (OD − RD) ÷ OD is the fallback percent complete.',
+  'P6 days': 'Total original duration across every activity of this type, in days.',
+  Complexity: 'The location factor the standard hours are multiplied by. 1.00 means no adjustment.',
+  LOE: 'Level of Effort. A DUR-basis activity longer than the level-of-effort threshold, so its hours are probably a placeholder rather than real work.',
+  'Std hours': 'Standard hours before the location complexity factor: crew × shift hours × shifts (or × P6 days).',
+  Override: 'A budget figure you typed by hand for this one activity. It replaces the calculated hours entirely.',
+
+  // --- money ---------------------------------------------------------------
+  Budget: 'Budgeted man-hours. Crew × shift hours × shifts (or P6 days), times the location complexity, rounded.',
+  'Budget hours': 'Budgeted man-hours. Crew × shift hours × shifts (or P6 days), times the location complexity, rounded.',
+  Earned: 'Budget hours × percent complete. What the work done so far was worth, NOT what it cost.',
+  'Earned hours': 'Budget hours × percent complete. What the work done so far was worth, NOT what it cost.',
+  Built: 'Hours the team actually spent, from timesheets. This is what the work cost.',
+  'Built hours': 'Hours the team actually spent, from timesheets. This is what the work cost.',
+  Remaining: 'Budget minus earned. The value of the work still to do.',
+  Variance: 'Earned minus built. Negative means the hours spent were worth less than they cost.',
+  Factor: 'Earned ÷ built. Above 1.00 the team is ahead of the budget; below 1.00 every hour spent earns less than an hour.',
+  'To complete': 'Remaining budget ÷ factor. What finishing the job costs if the team keeps converting hours at the rate it has so far.',
+  Forecast: 'Built so far plus the hours still to come at the current rate. The estimate of what the whole job will cost.',
+  'At completion': 'Budget minus forecast. Negative is the size of the overrun if nothing changes.',
+  Share: 'This subsystem as a percentage of the whole budget.',
+
+  // --- progress ------------------------------------------------------------
+  '%': 'Percent complete. Taken from your override first, then test case counts, then P6 duration.',
+  '% complete': 'Percent complete. Taken from your override first, then test case counts, then P6 duration.',
+  'Pct source': 'Where the percent complete came from. OVERRIDE = you typed it. TESTS = test case counts. P6 = (OD − RD) ÷ OD, the weakest of the three.',
+  Tests: 'Test cases for this activity: how many there are and how many have passed.',
+  'Tests done': 'How many of them have passed.',
+  Status: 'IN BUDGET carries hours. EXCLUDED is priced at zero on purpose. REVIEW has no rate library entry yet. DELETED and CANCELLED came in that way from P6.',
+  'Rate status': 'SET = you priced it. DEFAULT = still on the global defaults. NEEDS SHIFTS = RATE basis with no shift count, so it prices at zero. NO MATCH = no library entry.',
+  'Earn window': 'The dates hours accrue between. TEST WINDOW = dates you typed. P6 ACTUAL = actual start to actual finish. IN PROGRESS = actual start to the data date. NOT STARTED earns nothing.',
+  Baseline: 'The baseline import’s dates, which drive the planned curve. Falls back to current dates when the activity is not in the baseline.',
+  'Baseline source': 'BASELINE = matched in the baseline import. CURRENT = not in it, so current dates were used. NONE = no usable dates at all.',
+  Start: 'Activity start date from the current schedule.',
+  Finish: 'Activity finish date from the current schedule.',
+
+  // --- curves and dates ----------------------------------------------------
+  Planned: 'Cumulative budget hours spread evenly between each activity’s baseline start and finish.',
+  'Data date': 'The date progress is reported up to. The earned curve stops here, because past it nothing has been reported yet.',
+  'Status date': 'The date a snapshot is stamped with.',
+  Snapshot: 'A frozen copy of every activity’s percent complete and earned hours on a given date. Never recalculated afterwards.',
+  Month: 'Calendar month. Hours are credited to the month they accrue in, spread evenly across the activity’s dates.',
+
+  // --- the exact short labels the tables use -------------------------------
+  // Written out rather than aliased, because a definition that reads naturally
+  // under the header it belongs to is worth more than one shared string.
+  'Budget h': 'Budgeted man-hours. Crew × shift hours × shifts (or P6 days), times the location complexity, rounded.',
+  'Earned h': 'Budget hours × percent complete. What the work done is worth, not what it cost.',
+  'Remaining h': 'Budget hours not yet earned. The value of the work still to do.',
+  'Built h': 'Hours the team actually spent, from timesheets.',
+  'Std h': 'Standard hours before the location complexity factor is applied.',
+  'Std h / instance': 'Standard hours for ONE activity of this type, before the location complexity factor.',
+  'Override h': 'A budget figure typed by hand for this activity. It replaces the calculated hours entirely.',
+  'Override note': 'Why the hours were overridden. Free text, for whoever reads this next.',
+  'Shift h': 'Hours in one shift for this activity type.',
+  'Duration shifts': 'How many shifts one instance takes. Only used on the RATE basis; without it a RATE type prices at zero.',
+  Rate: 'How this activity type is priced: the basis, the crew and the shift length.',
+  Cx: 'Complexity factor from the location. Standard hours are multiplied by it. 1.00 means no adjustment.',
+  'Complexity factor': 'Multiplier applied to standard hours for work at this location. 1.00 means no adjustment.',
+  Effective: 'The value actually in use, whether you set it or it fell back to the global default.',
+  Include: 'Whether this activity type carries budget hours. Types marked (by BART), (by Others) or (Deleted) default to N.',
+  Loc: 'Location: fourth segment of the Activity ID, e.g. W40.',
+  'LOE flag': 'Level of Effort: a DUR-basis activity longer than the threshold, so its hours are probably a placeholder rather than real work.',
+  '% override': 'A percent complete you typed by hand. It beats test case counts and P6.',
+  '% src': 'Where the percent complete came from. OVERRIDE = you typed it. TESTS = test case counts. P6 = (OD − RD) ÷ OD, the weakest of the three.',
+  Source: 'Where this figure came from, rather than what it is.',
+  'BL start': 'Baseline start. Drives the planned curve.',
+  'BL finish': 'Baseline finish. Drives the planned curve.',
+  'BL src': 'BASELINE = matched in the baseline import. CURRENT = not in it, so current dates were used. NONE = no usable dates at all.',
+  'Cur start': 'Start date in the current schedule. Drives the forecast curve.',
+  'Cur finish': 'Finish date in the current schedule. Drives the forecast curve.',
+  'Earn start': 'First day this activity accrues earned hours.',
+  'Earn end': 'Last day this activity accrues earned hours. Hours spread evenly between the two.',
+  Window: 'The dates hours accrue between. TEST WINDOW = dates you typed. P6 ACTUAL = actual start to actual finish. IN PROGRESS = actual start to the data date.',
+  'Test start': 'The date testing actually began. Overrides the P6 dates for earning hours.',
+  'Test end': 'The date testing finished. Overrides the P6 dates for earning hours.',
+  'Test cases': 'How many test cases this activity contains, and how many have passed.',
+  'Tests total': 'How many test cases this activity contains. Percent complete becomes passed ÷ total.',
+  'Test coverage': 'How many in-budget activities have test case counts keyed, rather than falling back to P6 duration.',
+  Coverage: 'How many in-budget activities have test case counts keyed, rather than falling back to P6 duration.',
+  'Total P6 days': 'Original duration summed across every activity of this type, in days.',
+  Count: 'How many activities of this type are in the current import.',
+  Activities: 'How many activities fall in this group.',
+  'In budget': 'Activities carrying hours. Excludes REVIEW, EXCLUDED, DELETED and CANCELLED.',
+  Complete: 'Percent of this group’s budget hours that have been earned.',
+  Subsystems: 'Resource groups: ATS, IXL, COMMS and so on. An activity can need several at once, so the activity counts overlap while the hours do not.',
+  'Cum earned': 'Earned hours from the first month up to and including this one.',
+  'Cum built': 'Hours the team has built from the first month up to and including this one.',
+  'Cum variance': 'Earned minus built since the start of the job. This is the hole, or the cushion.',
+  Person: 'Who the hours were charged by. Optional: the rollup works per group either way, but per person is how most timesheet exports come.',
+  'Needing REVIEW': 'Activities whose type has no rate library entry yet, so they carry no hours. Price the type and they join the budget.',
+  'Activities needing REVIEW': 'Activities whose type has no rate library entry yet, so they carry no hours. Price the type and they join the budget.',
+};
+
+/** The definition for a column label, if there is one. Case and spacing tolerant. */
+export function define(term: string | undefined | null): string | undefined {
+  if (!term) return undefined;
+  const raw = term.trim();
+  if (GLOSSARY[raw]) return GLOSSARY[raw];
+  const hit = Object.keys(GLOSSARY).find((k) => k.toLowerCase() === raw.toLowerCase());
+  return hit ? GLOSSARY[hit] : undefined;
+}

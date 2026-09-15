@@ -207,6 +207,91 @@ schedules and every snapshot) downloads as one JSON file and restores into any o
 which is also how you move between machines. A restore replaces the edited files but
 *appends* the schedules and snapshots, so the append-only history is never rewritten.
 
+## Crews, and who the hours belong to
+
+An ATSCTP test takes one ATS engineer and one IXL engineer. Priced as "a crew of
+two" the budget is right and the staffing question is unanswerable: nothing says
+whether it is the ATS team or the IXL team that runs out of people.
+
+So a library entry can carry a **crew breakdown** instead of a headcount: a line per
+subsystem, each with a count and optionally its own shift length. `crewSize` still
+works and is still the quickest way to price a type; where a breakdown exists it
+replaces the headcount, and the headcount becomes the sum of the lines. The hours
+are identical either way — that is the point. `stdHoursFor` sums the lines rather
+than multiplying crew by shift, which is the same arithmetic unless one group works
+a shorter shift, and then it is the arithmetic you wanted.
+
+**The split is of the final budget figure, not of the standard hours.** An override
+or a location complexity factor therefore carries through to every group, and the
+parts always add back to the number on the Budget Master. `allocate()` splits an
+integer total into integers by largest remainder, so 24 hours across three equal
+groups reads 8/8/8 rather than three copies of 7.999999. A rollup that disagrees
+with the total it was cut from is worse than no rollup.
+
+Subsystem codes are **never a list you have to maintain first**. They are whatever
+you type on a crew line; the Subsystems screen discovers them and lets you put a
+name against a code afterwards, exactly as locations work. Hours from a crew with no
+breakdown land under `''`, shown as Unassigned, so they are never lost and the gap
+is visible.
+
+A subsystem rollup is **not a partition**: an activity needing two groups counts
+under both, so the activity counts across groups exceed the number of activities.
+The hours do not overlap, so the hour totals still add back. That is stated on the
+screen rather than left to be discovered.
+
+## Earned against built
+
+The budget says what finished work was **worth**. Timesheets say what it **cost**.
+Tracking only the first tells you how the job is going and nothing about whether it
+is making money. Earning 5,000 hours in a month the team built 6,000 is a 1,000-hour
+hole, and if that rate holds the rest of the job costs more than it is worth.
+
+`TeamActual` is one row per month per subsystem, optionally per person, because that
+is how timesheet exports come. `burnSummary` puts earned and built side by side per
+month, cumulatively, and per subsystem within each month. The `factor` is earned
+divided by built: below 1.00, every hour spent earns less than an hour. The
+reforecast divides the remaining budget by that factor to get the hours still to
+come, which is the earned-value estimate at completion expressed in hours rather
+than currency, and is the number that answers "do we need to re-forecast".
+
+Two honesty rules:
+
+- **`phasedEarned` can be less than `totalEarned`.** An activity with a percent
+  complete but no usable dates earns hours that belong to no month. The monthly rows
+  are then short of the project total. The gap is computed, stated in a note and
+  shown on the screen, rather than being quietly absorbed into whichever month was
+  nearest.
+- **Hours built against a subsystem holding no budget are flagged.** Nothing can
+  ever be earned there, so those hours are pure loss unless a crew is missing a
+  group. Silence would make it look like efficiency.
+
+The monthly table trims empty months off each end, because the curve runs to the
+last date in the schedule and a five-year programme otherwise shows forty rows of
+zeros carrying the same cumulative figure. A gap in the *middle* is kept — a month
+where the team built nothing is worth seeing — and hidden behind a toggle that says
+how many it is hiding.
+
+Reading the hours in is deliberately forgiving: `parseTeamHours` reads both shapes
+the data actually arrives in (months across the top, or one row per month), and
+`parseMonth` takes `2026-08`, `Aug-26`, `August 2026`, `08/2026`, an Excel serial or
+a full date. Nobody should have to reformat a working spreadsheet to get their
+numbers in. Totals rows are dropped rather than double counted, and re-pasting a
+month replaces it rather than adding the hours twice.
+
+## Explaining the abbreviations
+
+The screens are full of shorthand that is obvious to whoever built it and opaque to
+everyone else: OD, RD, LOE, Cx, BL src, factor, tier 2. `src/engine/glossary.ts`
+defines every term once, keyed by the exact column label, and `SortableTable` looks
+the label up automatically — so a column called `OD` explains itself on hover
+without any screen repeating the text, and a definition cannot drift between two
+tables that use the same header.
+
+Definitions say what a number **means and where it comes from**, never what it is
+short for: "Original Duration" is not an explanation of "OD". `tests/glossary.test.ts`
+enforces both halves — that every short label the screens use is defined or
+explicitly marked self-evident, and that no definition is too short to be one.
+
 ## Rules for the Windows launcher scripts
 
 `start.cmd`, `Create Desktop App.cmd`, `Update.cmd` and the two `.ps1` files beside

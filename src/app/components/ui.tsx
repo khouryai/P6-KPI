@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { define } from '../../engine/glossary';
 
 export type Tone = 'good' | 'warn' | 'bad' | 'info' | 'purple' | 'muted';
 
@@ -94,22 +95,38 @@ export function Notice({ tone, children }: { tone: 'info' | 'warn' | 'error' | '
 }
 
 /** A KPI card: mono label, large tabular number, muted supporting line. */
+/**
+ * A label that explains itself on hover. The definition comes from the glossary
+ * unless one is passed, so the abbreviations stay defined in exactly one place.
+ */
+export function Term({ text, hint }: { text: string; hint?: string }) {
+  const explain = hint === undefined ? define(text) : hint || undefined;
+  if (!explain) return <>{text}</>;
+  return (
+    <span className="term" title={explain}>
+      {text}
+    </span>
+  );
+}
+
 export function Stat({
   label,
   value,
   sub,
   tone,
   primary,
+  hint,
 }: {
   label: string;
   value: React.ReactNode;
   sub?: React.ReactNode;
   tone?: 'good' | 'warn' | 'bad';
   primary?: boolean;
+  hint?: string;
 }) {
   return (
     <div className={`kpi-card${primary ? ' kpi-primary' : ''}`}>
-      <div className="kpi-label">{label}</div>
+      <div className="kpi-label"><Term text={label} hint={hint} /></div>
       <div className={`kpi-value${tone ? ` tone-${tone}` : ''}`}>{value}</div>
       {sub && <div className="kpi-sub">{sub}</div>}
     </div>
@@ -148,6 +165,12 @@ export type Column<T> = {
   render?: (row: T) => React.ReactNode;
   num?: boolean;
   width?: string;
+  /**
+   * What the column means. Left out, the glossary is consulted for the label, so
+   * a column called "OD" explains itself without every screen repeating the text.
+   * Pass an empty string to say deliberately that there is nothing to explain.
+   */
+  hint?: string;
 };
 
 /** A sortable table. Sorting is by the column's raw value. */
@@ -195,7 +218,7 @@ export function SortableTable<T>({
                 style={c.width ? { width: c.width } : undefined}
                 onClick={() => toggle(c.key)}
               >
-                {c.label}
+                <Term text={c.label} hint={c.hint} />
                 {sort?.key === c.key && <span className="ml-1 text-[var(--hitachi-red)]">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
               </th>
             ))}

@@ -686,6 +686,40 @@ select.cell-input { padding: 3px 22px 3px 6px; }
 .strip-dirty { color: var(--hitachi-red-hover); background: var(--hitachi-red-light); border-color: rgba(230, 0, 18, 0.18); }
 .strip-new { color: var(--good); background: var(--good-light); border-color: var(--good-border); }
 
+/* A term that carries a definition. The underline is the only signal that hovering
+   will tell you something, so it has to be visible without being loud. */
+.term {
+  cursor: help;
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  opacity: 0.95;
+}
+.term:hover { opacity: 1; text-decoration-color: var(--hitachi-red); }
+
+/* The crew breakdown shown inside a table cell: "ATS 1  IXL 1". Clicking it opens
+   the editor, so the whole thing is a button that does not look like one. */
+.crew-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  justify-content: flex-end;
+  width: 100%;
+  cursor: pointer;
+}
+.crew-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.crew-chips:hover .crew-chip { border-color: rgba(230, 0, 18, 0.4); background: var(--hitachi-red-light); }
+
 .toast {
   position: fixed;
   right: 20px;

@@ -8,3 +8,5 @@ export * from './discover';
 export * from './match';
 export * from './curves';
 export * from './compute';
+export * from './glossary';
+export * from './teamHours';

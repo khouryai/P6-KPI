@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, Select, Badge, statusTone, Notice, type Column } from '../components/ui';
-import type { LibraryStat, LibraryEntry, Basis } from '../../engine/types';
+import type { LibraryStat, LibraryEntry, Basis, CrewLine } from '../../engine/types';
+import { crewLines } from '../../engine/compute';
 import { dropLastParenthetical } from '../../engine/match';
 import { fmtHours, num } from '../format';
 import { normKey } from '../../engine/keys';
@@ -13,6 +14,7 @@ export function Library({ route }: { route: Route }) {
   const [filter, setFilter] = useState('');
   const [showRetired, setShowRetired] = useState(false);
   const [newKey, setNewKey] = useState('');
+  const [crewFor, setCrewFor] = useState<string | null>(null);
   const settings = state.data.settings;
 
   const edit = (key: string, patch: Partial<LibraryEntry>) => {
@@ -31,6 +33,18 @@ export function Library({ route }: { route: Route }) {
     return r;
   }, [model.library, flag, filter]);
   const retired = state.data.library.filter((e) => e.retired);
+
+  /**
+   * Every subsystem code already in use, from the crews and from the names screen.
+   * Offered as suggestions so codes stay consistent without being a fixed list you
+   * have to maintain before you can price anything.
+   */
+  const knownSubsystems = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of state.data.library) for (const l of crewLines(e)) if (l.subsystem.trim()) set.add(l.subsystem.trim());
+    for (const s of state.data.subsystems) if (s.code.trim()) set.add(s.code.trim());
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [state.data.library, state.data.subsystems]);
 
   const addKey = (raw: string) => {
     const key = raw.trim();
@@ -92,7 +106,40 @@ export function Library({ route }: { route: Route }) {
     { key: 'disc', label: 'Discipline', value: (r) => r.entry.discipline ?? '', render: (r) => <CellInput value={r.entry.discipline ?? ''} list="disciplines" onCommit={(v) => edit(r.matchKey, { discipline: v.trim() || undefined })} /> },
     { key: 'inc', label: 'Include', value: (r) => `${r.entry.includeOverride ?? ''}${r.include}`, render: (r) => <span className="flex items-center gap-1"><Select value={r.entry.includeOverride ?? ''} options={incOpts} onChange={(v) => edit(r.matchKey, { includeOverride: (v || undefined) as 'Y' | 'N' | undefined })} /><Badge tone={r.include === 'Y' ? 'good' : 'muted'}>{r.include}</Badge></span> },
     { key: 'basis', label: 'Basis', value: (r) => r.basisEff, render: (r) => <Select value={r.entry.basis ?? ''} options={basisOpts} onChange={(v) => edit(r.matchKey, { basis: (v || undefined) as Basis | undefined })} /> },
-    { key: 'crew', label: 'Crew', value: (r) => r.crewEff, num: true, render: (r) => <CellInput type="number" value={r.entry.crewSize?.toString() ?? ''} placeholder={String(settings.defaultCrew)} onCommit={(v) => edit(r.matchKey, { crewSize: num(v) })} /> },
+    {
+      key: 'crew',
+      label: 'Crew',
+      value: (r) => r.crewEff,
+      num: true,
+      width: '148px',
+      render: (r) =>
+        r.crewEffLines.length ? (
+          <button
+            className="crew-chips"
+            title={`${r.crewEff} people across ${r.crewEffLines.length} subsystems. Click to change.`}
+            onClick={() => setCrewFor(r.matchKey)}
+          >
+            {r.crewEffLines.map((l) => (
+              <span key={`${l.subsystem}-${l.shiftHours ?? ''}`} className="crew-chip">
+                {l.subsystem || 'Unassigned'} {l.count}
+                {l.shiftHours !== undefined && <span className="opacity-60"> @{l.shiftHours}h</span>}
+              </span>
+            ))}
+          </button>
+        ) : (
+          <div className="flex items-center justify-end gap-1">
+            <CellInput
+              type="number"
+              value={r.entry.crewSize?.toString() ?? ''}
+              placeholder={String(settings.defaultCrew)}
+              onCommit={(v) => edit(r.matchKey, { crewSize: num(v) })}
+            />
+            <button className="btn-link shrink-0 text-[11px] font-normal" title="Say which subsystems make up this crew, so the hours can be counted per group" onClick={() => setCrewFor(r.matchKey)}>
+              split
+            </button>
+          </div>
+        ),
+    },
     { key: 'shift', label: 'Shift h', value: (r) => r.shiftEff, num: true, render: (r) => <CellInput type="number" value={r.entry.shiftHours?.toString() ?? ''} placeholder={String(settings.defaultShiftHours)} onCommit={(v) => edit(r.matchKey, { shiftHours: num(v) })} /> },
     { key: 'shifts', label: 'Duration shifts', value: (r) => r.entry.durationShifts ?? null, num: true, render: (r) => <CellInput type="number" value={r.entry.durationShifts?.toString() ?? ''} placeholder={r.basisEff === 'RATE' ? 'required' : 'n/a'} onCommit={(v) => edit(r.matchKey, { durationShifts: num(v) })} /> },
     { key: 'std', label: 'Std h / instance', value: (r) => r.stdHoursIfRate, num: true, render: (r) => (r.basisEff === 'RATE' ? fmtHours(r.stdHoursIfRate) : <span className="text-[var(--text-subtle)]" title="DUR basis: crew x shift hours x P6 original duration per activity">per P6 days</span>) },
@@ -142,6 +189,17 @@ export function Library({ route }: { route: Route }) {
           )}
         </div>
       </div>
+      {crewFor && (
+        <CrewEditor
+          matchKey={crewFor}
+          entry={state.data.library.find((e) => normKey(e.matchKey) === normKey(crewFor)) ?? { matchKey: crewFor }}
+          defaultCrew={settings.defaultCrew}
+          defaultShift={settings.defaultShiftHours}
+          onChange={(crew) => edit(crewFor, { crew })}
+          onClose={() => setCrewFor(null)}
+        />
+      )}
+      <datalist id="subsystem-codes">{knownSubsystems.map((c) => <option key={c} value={c} />)}</datalist>
       <datalist id="disciplines">{disciplines.map((d) => <option key={d} value={d} />)}</datalist>
       <div className="mb-3 flex flex-wrap gap-3 text-[12px]">
         <span><Badge tone="good">SET</Badge> priced</span>
@@ -174,6 +232,113 @@ export function Library({ route }: { route: Route }) {
   );
 }
 
+/**
+ * Says who makes up the crew, not just how many.
+ *
+ * "Two resources at eight hours" prices an ATSCTP correctly and tells you nothing
+ * about whether the ATS team or the IXL team is the one that runs out of people.
+ * One line per subsystem fixes that without changing a single budget figure: the
+ * headcount is still the sum, so the hours are identical either way.
+ */
+function CrewEditor({
+  matchKey,
+  entry,
+  defaultCrew,
+  defaultShift,
+  onChange,
+  onClose,
+}: {
+  matchKey: string;
+  entry: LibraryEntry;
+  defaultCrew: number;
+  defaultShift: number;
+  onChange: (crew: CrewLine[] | undefined) => void;
+  onClose: () => void;
+}) {
+  const lines = entry.crew ?? [];
+  const set = (next: CrewLine[]) => onChange(next.length ? next : undefined);
+  const patch = (i: number, p: Partial<CrewLine>) => set(lines.map((l, j) => (j === i ? { ...l, ...p } : l)));
+  const headcount = crewLines(entry).reduce((s, l) => s + l.count, 0);
+  const effShift = entry.shiftHours ?? defaultShift;
+  const hoursPerShift = crewLines(entry).reduce((s, l) => s + l.count * (l.shiftHours ?? effShift), 0);
+
+  return (
+    <div className="card mb-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="card-title">Crew for <span className="mono">{matchKey}</span></h2>
+        <button className="btn btn-mini" onClick={onClose}>Done</button>
+      </div>
+      <p className="mt-1 text-[12px] text-[var(--text-muted)]">
+        One line per resource group. An ATSCTP needing one ATS engineer and one IXL engineer is two lines of one, not a crew of two — same hours,
+        but now you can see which group carries them.
+      </p>
+
+      <div className="mt-2 space-y-1">
+        {lines.map((l, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2">
+            <input
+              className="input w-44"
+              list="subsystem-codes"
+              placeholder="ATS"
+              value={l.subsystem}
+              onChange={(e) => patch(i, { subsystem: e.target.value })}
+            />
+            <label className="flex items-center gap-1 text-[12px] text-[var(--text-muted)]">
+              people
+              <input
+                className="input w-20"
+                type="number"
+                min={0}
+                step="0.5"
+                value={Number.isFinite(l.count) ? l.count : ''}
+                onChange={(e) => patch(i, { count: e.target.value === '' ? Number.NaN : Number(e.target.value) })}
+              />
+            </label>
+            <label className="flex items-center gap-1 text-[12px] text-[var(--text-muted)]" title="Leave blank unless this group works a different shift length from the rest of the crew">
+              shift h
+              <input
+                className="input w-20"
+                type="number"
+                min={0}
+                placeholder={String(effShift)}
+                value={l.shiftHours ?? ''}
+                onChange={(e) => patch(i, { shiftHours: e.target.value === '' ? undefined : Number(e.target.value) })}
+              />
+            </label>
+            <button className="btn-link text-[11px] font-normal" onClick={() => set(lines.filter((_, j) => j !== i))}>
+              remove
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          className="btn btn-mini"
+          onClick={() => set([...lines, { subsystem: '', count: lines.length ? 1 : (entry.crewSize ?? defaultCrew) }])}
+        >
+          Add a group
+        </button>
+        {lines.length > 0 && (
+          <button className="btn btn-mini" title="Go back to pricing this type as a plain headcount" onClick={() => set([])}>
+            Remove the breakdown
+          </button>
+        )}
+        <span className="text-[12px] text-[var(--text-muted)]">
+          {lines.length === 0 ? (
+            <>No breakdown: this type prices as a crew of {entry.crewSize ?? defaultCrew}, and its hours land under Unassigned.</>
+          ) : (
+            <>
+              Crew of <b>{headcount}</b>, <b>{hoursPerShift}</b> hours per shift.
+              {lines.some((l) => !l.subsystem.trim()) && ' A line with no subsystem counts as Unassigned.'}
+            </>
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /** Drop undefined fields so the JSON stays tidy. */
 function clean(e: LibraryEntry): LibraryEntry {
   const out: LibraryEntry = { matchKey: e.matchKey };
@@ -181,5 +346,8 @@ function clean(e: LibraryEntry): LibraryEntry {
     const v = e[k];
     if (v !== undefined && v !== null && v !== '') (out as Record<string, unknown>)[k] = v;
   }
+  // An empty breakdown is the same as no breakdown, and writing [] would make the
+  // entry look split when it is not.
+  if (e.crew && e.crew.length) out.crew = e.crew;
   return out;
 }

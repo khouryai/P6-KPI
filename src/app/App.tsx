@@ -9,6 +9,8 @@ import { Locations } from './screens/Locations';
 import { BudgetMaster } from './screens/BudgetMaster';
 import { TestProgress } from './screens/TestProgress';
 import { Rollup } from './screens/Rollup';
+import { Subsystems } from './screens/Subsystems';
+import { TeamHours } from './screens/TeamHours';
 import { Snapshots } from './screens/Snapshots';
 import { Settings } from './screens/Settings';
 
@@ -35,6 +37,12 @@ function Shell() {
       break;
     case 'rollup':
       screen = <Rollup />;
+      break;
+    case 'subsystems':
+      screen = <Subsystems />;
+      break;
+    case 'team':
+      screen = <TeamHours />;
       break;
     case 'snapshots':
       screen = <Snapshots />;

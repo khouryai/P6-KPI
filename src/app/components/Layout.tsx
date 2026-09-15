@@ -19,6 +19,7 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
     items: [
       { id: 'library', label: 'Activity Library' },
       { id: 'locations', label: 'Locations' },
+      { id: 'subsystems', label: 'Subsystems' },
       { id: 'budget', label: 'Budget Master' },
     ],
   },
@@ -27,6 +28,7 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
     items: [
       { id: 'rollup', label: 'By Phase & Location' },
       { id: 'progress', label: 'Test Progress' },
+      { id: 'team', label: 'Earned vs Built' },
       { id: 'snapshots', label: 'Snapshots' },
     ],
   },

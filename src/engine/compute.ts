@@ -1,5 +1,15 @@
 import type {
   ActivityOverride,
+  BurnCell,
+  BurnRow,
+  BurnSummary,
+  CrewLine,
+  MonthlyEarned,
+  Reforecast,
+  Subsystem,
+  SubsystemCell,
+  SubsystemStat,
+  TeamActual,
   ActivityStatus,
   BaselineSource,
   Basis,
@@ -45,7 +55,33 @@ export function effectiveBasis(entry: LibraryEntry, settings: Settings): Basis {
   return entry.basis ?? settings.defaultBasis;
 }
 
+/** The code used for hours that were never attributed to a subsystem. */
+export const UNASSIGNED = '';
+
+/**
+ * The crew breakdown in effect, with blank and non-positive lines dropped and
+ * repeated subsystems merged. Empty when the entry is priced as a plain headcount.
+ */
+export function crewLines(entry: LibraryEntry): CrewLine[] {
+  if (!entry.crew || !entry.crew.length) return [];
+  const merged = new Map<string, CrewLine>();
+  for (const line of entry.crew) {
+    const count = Number(line?.count);
+    if (!Number.isFinite(count) || count <= 0) continue;
+    const code = (line.subsystem ?? '').trim();
+    // Lines for the same subsystem at different shift lengths stay separate, since
+    // merging them would lose the shift length.
+    const k = `${normKey(code)}|${line.shiftHours ?? ''}`;
+    const prev = merged.get(k);
+    if (prev) prev.count += count;
+    else merged.set(k, { subsystem: code, count, shiftHours: line.shiftHours });
+  }
+  return [...merged.values()];
+}
+
 export function effectiveCrew(entry: LibraryEntry, settings: Settings): number {
+  const lines = crewLines(entry);
+  if (lines.length) return lines.reduce((s, l) => s + l.count, 0);
   return entry.crewSize ?? settings.defaultCrew;
 }
 
@@ -56,6 +92,7 @@ export function effectiveShiftHours(entry: LibraryEntry, settings: Settings): nu
 export function isOnDefaults(entry: LibraryEntry): boolean {
   return (
     entry.basis === undefined &&
+    (entry.crew === undefined || crewLines(entry).length === 0) &&
     entry.crewSize === undefined &&
     entry.shiftHours === undefined &&
     entry.durationShifts === undefined
@@ -69,12 +106,75 @@ export function libraryRateStatus(entry: LibraryEntry, settings: Settings): Rate
   return 'SET';
 }
 
+/**
+ * Hours per person-unit for each crew line: count times that line's shift length.
+ * This is both the per-shift cost of the crew and the weight used to split the
+ * budget between subsystems, so the two can never drift apart.
+ */
+export function crewWeights(entry: LibraryEntry, settings: Settings): { key: string; weight: number }[] {
+  const shift = effectiveShiftHours(entry, settings);
+  const lines = crewLines(entry);
+  if (!lines.length) return [{ key: UNASSIGNED, weight: (entry.crewSize ?? settings.defaultCrew) * shift }];
+  const byCode = new Map<string, number>();
+  for (const l of lines) {
+    const code = l.subsystem.trim();
+    byCode.set(code, (byCode.get(code) ?? 0) + l.count * (l.shiftHours ?? shift));
+  }
+  return [...byCode].map(([key, weight]) => ({ key, weight }));
+}
+
 /** Standard hours for one instance of an activity under a library entry. */
 export function stdHoursFor(entry: LibraryEntry, settings: Settings, originalDuration: number | null): number {
-  const crew = effectiveCrew(entry, settings);
-  const shift = effectiveShiftHours(entry, settings);
-  if (effectiveBasis(entry, settings) === 'RATE') return crew * shift * (entry.durationShifts ?? 0);
-  return crew * shift * Math.max(0, originalDuration ?? 0);
+  const units =
+    effectiveBasis(entry, settings) === 'RATE' ? (entry.durationShifts ?? 0) : Math.max(0, originalDuration ?? 0);
+  // Summing the crew lines rather than crew x shift lets one group work a shorter
+  // shift than the rest. With no breakdown the two are identical.
+  return crewWeights(entry, settings).reduce((s, w) => s + w.weight, 0) * units;
+}
+
+/**
+ * Split a total across weighted buckets so the parts sum to the total EXACTLY.
+ *
+ * An integer total is split into integers by largest remainder, so a budget of 24
+ * hours across three equal groups reads 8/8/8 and not 8.0000001. Anything else is
+ * split proportionally with the rounding residue landing on the largest bucket.
+ * Either way no rollup by subsystem can disagree with the budget it came from.
+ */
+export function allocate(total: number, weights: { key: string; weight: number }[]): Record<string, number> {
+  const usable = weights.filter((w) => Number.isFinite(w.weight) && w.weight > 0);
+  if (!usable.length || !Number.isFinite(total)) return { [UNASSIGNED]: Number.isFinite(total) ? total : 0 };
+  if (usable.length === 1) return { [usable[0].key]: total };
+  const sum = usable.reduce((s, w) => s + w.weight, 0);
+  const out: Record<string, number> = {};
+
+  if (Number.isInteger(total)) {
+    const exact = usable.map((w) => ({ key: w.key, want: (total * w.weight) / sum }));
+    const floors = exact.map((e) => ({ key: e.key, base: Math.floor(e.want), rem: e.want - Math.floor(e.want) }));
+    let left = total - floors.reduce((s, f) => s + f.base, 0);
+    // Biggest fractional part first, so the spare hours go where they are most owed.
+    const order = [...floors].sort((a, b) => b.rem - a.rem);
+    for (const f of floors) out[f.key] = f.base;
+    for (const f of order) {
+      if (left <= 0) break;
+      out[f.key] += 1;
+      left -= 1;
+    }
+    return out;
+  }
+
+  let running = 0;
+  usable.forEach((w, i) => {
+    const v = i === usable.length - 1 ? total - running : (total * w.weight) / sum;
+    out[w.key] = v;
+    running += v;
+  });
+  return out;
+}
+
+function scaleRecord(rec: Record<string, number>, factor: number): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(rec)) out[k] = v * factor;
+  return out;
 }
 
 /** Excel ROUND(x, 0): half away from zero. */
@@ -176,6 +276,10 @@ export function computeModel(input: ModelInput): Model {
     const pctSource: PctSource = tpe ? tpe.source : 'P6';
     const earnedHours = budgetHours * pctComplete;
 
+    // The split is of the FINAL budget figure, not of the standard hours, so an
+    // override or the rounding both carry through to every subsystem proportionally.
+    const subsystemHours = inBudget && entry ? allocate(budgetHours, crewWeights(entry, settings)) : { [UNASSIGNED]: 0 };
+
     // Earn window.
     const testStart = tp?.testStartOverride && isValidISO(tp.testStartOverride) ? tp.testStartOverride : null;
     const testEnd = tp?.testEndOverride && isValidISO(tp.testEndOverride) ? tp.testEndOverride : null;
@@ -228,6 +332,8 @@ export function computeModel(input: ModelInput): Model {
       earnWindowSource,
       onPlannedCurve: budgetHours > 0 && !!baselineStart && !!baselineFinish,
       onForecastCurve: budgetHours > 0 && !!a.startDate && !!a.finishDate,
+      subsystemHours,
+      subsystemEarned: scaleRecord(subsystemHours, pctComplete),
     });
   }
 
@@ -247,6 +353,7 @@ export function computeModel(input: ModelInput): Model {
       include: effectiveInclude(entry),
       basisEff,
       crewEff,
+      crewEffLines: crewLines(entry),
       shiftEff,
       rateStatus: libraryRateStatus(entry, settings),
       stdHoursIfRate: basisEff === 'RATE' ? crewEff * shiftEff * (entry.durationShifts ?? 0) : null,
@@ -303,9 +410,10 @@ export function computeModel(input: ModelInput): Model {
   for (const m of snapshotMarkers) snapByDate.set(m.statusDate, (snapByDate.get(m.statusDate) ?? 0) + m.earnedHours);
 
   let curve: CurvePoint[] = [];
+  let periods: string[] = [];
   if (dates.length) {
     dates.sort();
-    const periods = monthEndsBetween(dates[0], dates[dates.length - 1]);
+    periods = monthEndsBetween(dates[0], dates[dates.length - 1]);
     curve = periods.map((p) => {
       let planned = 0;
       let forecast = 0;
@@ -369,10 +477,26 @@ export function computeModel(input: ModelInput): Model {
     tier2Resolved: count((r) => r.matchTier === 2),
     onNoCurve: count((r) => r.status === 'IN BUDGET' && r.budgetHours > 0 && !r.onPlannedCurve && !r.onForecastCurve),
     latestStatusDate: latestStatus,
+    typesWithCrewSplit: libraryStats.filter((l) => l.crewEffLines.length > 0).length,
+    unassignedHours: rows.reduce((s, r) => s + (r.subsystemHours[UNASSIGNED] ?? 0), 0),
   };
   if (!hasBaseline) notes.push('No baseline import. The planned curve mirrors the forecast for every activity.');
   if (summary.onNoCurve > 0) {
     notes.push(`${summary.onNoCurve} in-budget activities have hours but no usable dates. They count in the total but appear on no curve.`);
+  }
+
+  const subsystemDefs = input.subsystems ?? [];
+  const subsystems = subsystemRollup(rows, subsystemDefs);
+  const burn = burnSummary(rows, monthlyEarned(rows, periods, dataDate), input.teamActuals ?? [], subsystemDefs);
+  if (burn.builtWithNoBudget.length) {
+    notes.push(
+      `Hours were built against ${burn.builtWithNoBudget.map((c) => c || 'Unassigned').join(', ')}, which hold no budget. Those hours can never be earned back.`,
+    );
+  }
+  if (Math.abs(burn.unphasedEarned) > 0.5) {
+    notes.push(
+      `${Math.round(burn.unphasedEarned)} earned hours belong to no month, because those activities have no usable dates. The monthly earned-against-built rows are that much short of the project total.`,
+    );
   }
 
   const groups: Record<GroupDim, GroupStat[]> = {
@@ -382,7 +506,19 @@ export function computeModel(input: ModelInput): Model {
     workType: groupRows(rows, 'workType'),
   };
 
-  return { rows, groups, library: libraryStats, locations: locationStats, curve, snapshotMarkers, summary, testProgressChecks, notes };
+  return {
+    rows,
+    subsystems,
+    burn,
+    groups,
+    library: libraryStats,
+    locations: locationStats,
+    curve,
+    snapshotMarkers,
+    summary,
+    testProgressChecks,
+    notes,
+  };
 }
 
 const DIM_VALUE: Record<GroupDim, (r: BudgetRow) => string> = {
@@ -442,6 +578,257 @@ export function groupRows(rows: BudgetRow[], dim: GroupDim): GroupStat[] {
   }
   // Biggest budget first: that is the order someone reviewing progress wants.
   return out.sort((a, b) => b.budgetHours - a.budgetHours || a.label.localeCompare(b.label));
+}
+
+// ---------------------------------------------------------------------------
+// Subsystems: who the hours belong to
+// ---------------------------------------------------------------------------
+
+export function subsystemLabel(code: string, subsystems: Subsystem[]): string {
+  const c = code.trim();
+  if (c === '') return 'Unassigned';
+  const named = subsystems.find((s) => normKey(s.code) === normKey(c));
+  return named?.name ? `${c} — ${named.name}` : c;
+}
+
+function sumRecord(rows: BudgetRow[], pick: (r: BudgetRow) => Record<string, number>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const r of rows) {
+    for (const [code, h] of Object.entries(pick(r))) out.set(code, (out.get(code) ?? 0) + h);
+  }
+  return out;
+}
+
+/**
+ * Hours per subsystem, and the same hours cut by phase and by location.
+ *
+ * This is not a partition: an activity needing an ATS and an IXL engineer appears
+ * under both, so the activity counts overlap. The hours do not overlap — every hour
+ * belongs to exactly one subsystem — so the hour totals still add back to the budget.
+ */
+export function subsystemRollup(rows: BudgetRow[], subsystems: Subsystem[]): SubsystemStat[] {
+  const budget = sumRecord(rows, (r) => r.subsystemHours);
+  const earned = sumRecord(rows, (r) => r.subsystemEarned);
+  // A subsystem the user named but has not used yet still deserves a row, so the
+  // naming screen and this one agree on what exists.
+  for (const s of subsystems) if (!budget.has(s.code.trim())) budget.set(s.code.trim(), 0);
+  const totalBudget = [...budget.values()].reduce((a, b) => a + b, 0);
+
+  const cut = (code: string, dim: 'phase' | 'location'): SubsystemCell[] => {
+    const by = new Map<string, { b: number; e: number }>();
+    for (const r of rows) {
+      const h = r.subsystemHours[code];
+      if (h === undefined) continue;
+      const k = dim === 'phase' ? r.phase : r.location;
+      const cell = by.get(k) ?? { b: 0, e: 0 };
+      cell.b += h;
+      cell.e += r.subsystemEarned[code] ?? 0;
+      by.set(k, cell);
+    }
+    return [...by]
+      .map(([key, v]) => ({
+        key,
+        label: DIM_LABEL[dim](key),
+        budgetHours: v.b,
+        earnedHours: v.e,
+        pctComplete: v.b ? v.e / v.b : 0,
+      }))
+      .sort((a, b) => b.budgetHours - a.budgetHours || a.label.localeCompare(b.label));
+  };
+
+  return [...budget.keys()]
+    .map((code) => {
+      const b = budget.get(code) ?? 0;
+      const e = earned.get(code) ?? 0;
+      return {
+        code,
+        label: subsystemLabel(code, subsystems),
+        activities: rows.filter((r) => (r.subsystemHours[code] ?? 0) > 0).length,
+        budgetHours: b,
+        earnedHours: e,
+        remainingHours: b - e,
+        pctComplete: b ? e / b : 0,
+        shareOfBudget: totalBudget ? b / totalBudget : 0,
+        byPhase: cut(code, 'phase'),
+        byLocation: cut(code, 'location'),
+      };
+    })
+    .sort((a, b) => b.budgetHours - a.budgetHours || a.code.localeCompare(b.code));
+}
+
+// ---------------------------------------------------------------------------
+// Earned per month, and earned against built
+// ---------------------------------------------------------------------------
+
+/**
+ * Hours earned IN each month, per subsystem. Stops at the data date for the same
+ * reason the earned curve does: past it nothing has been reported yet, and a zero
+ * there would read as "we earned nothing" rather than "we do not know".
+ */
+export function monthlyEarned(rows: BudgetRow[], periods: string[], dataDate: string | null): MonthlyEarned[] {
+  const out: MonthlyEarned[] = [];
+  let prevTotal = 0;
+  let prevBy = new Map<string, number>();
+  for (const p of periods) {
+    if (dataDate && p > dataDate) break;
+    let total = 0;
+    const by = new Map<string, number>();
+    for (const r of rows) {
+      if (!r.earnStart) continue;
+      const f = accruedFraction(p, r.earnStart, r.earnEnd);
+      if (f <= 0) continue;
+      total += r.earnedHours * f;
+      for (const [code, h] of Object.entries(r.subsystemEarned)) by.set(code, (by.get(code) ?? 0) + h * f);
+    }
+    const bySubsystem: Record<string, number> = {};
+    for (const code of new Set([...by.keys(), ...prevBy.keys()])) {
+      bySubsystem[code] = (by.get(code) ?? 0) - (prevBy.get(code) ?? 0);
+    }
+    out.push({ month: p.slice(0, 7), periodEnd: p, earned: total - prevTotal, bySubsystem });
+    prevTotal = total;
+    prevBy = by;
+  }
+  return out;
+}
+
+function reforecastOf(code: string, label: string, budgetHours: number, cumEarned: number, cumBuilt: number): Reforecast {
+  const factor = cumBuilt > 0 ? cumEarned / cumBuilt : null;
+  const remainingHours = budgetHours - cumEarned;
+  // Dividing by the rate achieved so far is the estimate at completion. A factor of
+  // zero would divide to infinity, so it is treated as "no rate yet".
+  const hoursToComplete = factor && factor > 0 ? remainingHours / factor : null;
+  const forecastTotalHours = hoursToComplete === null ? null : cumBuilt + hoursToComplete;
+  return {
+    code,
+    label,
+    budgetHours,
+    cumEarned,
+    cumBuilt,
+    factor,
+    remainingHours,
+    hoursToComplete,
+    forecastTotalHours,
+    varianceAtCompletion: forecastTotalHours === null ? null : budgetHours - forecastTotalHours,
+  };
+}
+
+/**
+ * Earned against built, month by month.
+ *
+ * Earned is what the budget says the completed work was worth. Built is what the
+ * timesheets say it cost. Earning 5,000 in a month the team built 6,000 is a
+ * 1,000-hour hole, and at that rate the rest of the job costs more than it is worth;
+ * that is what `factor` and the reforecast are for.
+ */
+export function burnSummary(
+  rows: BudgetRow[],
+  months: MonthlyEarned[],
+  actuals: TeamActual[],
+  subsystems: Subsystem[],
+): BurnSummary {
+  const clean = actuals.filter((a) => /^\d{4}-\d{2}$/.test((a.month ?? '').trim()) && Number.isFinite(a.hours));
+  const builtByMonth = new Map<string, Map<string, number>>();
+  for (const a of clean) {
+    const m = a.month.trim();
+    const code = (a.subsystem ?? '').trim();
+    const inner = builtByMonth.get(m) ?? new Map<string, number>();
+    inner.set(code, (inner.get(code) ?? 0) + a.hours);
+    builtByMonth.set(m, inner);
+  }
+
+  const earnedByMonth = new Map(months.map((m) => [m.month, m]));
+  const everyMonth = [...new Set([...earnedByMonth.keys(), ...builtByMonth.keys()])].sort();
+
+  /*
+   * Trim the empty months off each end. The curve runs to the last date in the
+   * schedule, which on a five year programme is dozens of months in which nothing
+   * has been earned and nothing has been built; a cumulative figure repeated down
+   * forty identical rows reads as data and is not. A gap in the MIDDLE is kept,
+   * because a month where the team built nothing is worth seeing.
+   */
+  const carries = (m: string) => (earnedByMonth.get(m)?.earned ?? 0) !== 0 || (builtByMonth.get(m)?.size ?? 0) > 0;
+  const first = everyMonth.findIndex(carries);
+  const last = everyMonth.length - 1 - [...everyMonth].reverse().findIndex(carries);
+  const allMonths = first < 0 ? [] : everyMonth.slice(first, last + 1);
+
+  const budgetBy = sumRecord(rows, (r) => r.subsystemHours);
+  const earnedBy = sumRecord(rows, (r) => r.subsystemEarned);
+
+  let cumEarned = 0;
+  let cumBuilt = 0;
+  const rowsOut: BurnRow[] = allMonths.map((month) => {
+    const e = earnedByMonth.get(month);
+    const built = builtByMonth.get(month) ?? new Map<string, number>();
+    const earned = e?.earned ?? 0;
+    const builtTotal = [...built.values()].reduce((a, b) => a + b, 0);
+    cumEarned += earned;
+    cumBuilt += builtTotal;
+    const codes = [...new Set([...Object.keys(e?.bySubsystem ?? {}), ...built.keys()])];
+    const bySubsystem: BurnCell[] = codes
+      .map((code) => {
+        const ce = e?.bySubsystem[code] ?? 0;
+        const cb = built.get(code) ?? 0;
+        return {
+          code,
+          label: subsystemLabel(code, subsystems),
+          earned: ce,
+          built: cb,
+          variance: ce - cb,
+          factor: cb > 0 ? ce / cb : null,
+        };
+      })
+      .sort((a, b) => b.built - a.built || a.label.localeCompare(b.label));
+    return {
+      month,
+      earned,
+      built: builtTotal,
+      variance: earned - builtTotal,
+      cumEarned,
+      cumBuilt,
+      cumVariance: cumEarned - cumBuilt,
+      factor: builtTotal > 0 ? earned / builtTotal : null,
+      bySubsystem,
+    };
+  });
+
+  const totalEarned = rows.reduce((s, r) => s + r.earnedHours, 0);
+  const phasedEarned = months.reduce((s, m) => s + m.earned, 0);
+  const totalBuilt = clean.reduce((s, a) => s + a.hours, 0);
+  const builtBy = new Map<string, number>();
+  for (const a of clean) {
+    const code = (a.subsystem ?? '').trim();
+    builtBy.set(code, (builtBy.get(code) ?? 0) + a.hours);
+  }
+
+  const codes = [...new Set([...budgetBy.keys(), ...builtBy.keys(), ...subsystems.map((x) => x.code.trim())])];
+  const bySubsystem = codes
+    .map((code) =>
+      reforecastOf(
+        code,
+        subsystemLabel(code, subsystems),
+        budgetBy.get(code) ?? 0,
+        earnedBy.get(code) ?? 0,
+        builtBy.get(code) ?? 0,
+      ),
+    )
+    .sort((a, b) => b.budgetHours - a.budgetHours || a.code.localeCompare(b.code));
+
+  return {
+    months: rowsOut,
+    totalEarned,
+    phasedEarned,
+    unphasedEarned: totalEarned - phasedEarned,
+    totalBuilt,
+    project: reforecastOf(
+      '',
+      'Whole project',
+      rows.reduce((s, r) => s + r.budgetHours, 0),
+      totalEarned,
+      totalBuilt,
+    ),
+    bySubsystem,
+    builtWithNoBudget: [...builtBy.keys()].filter((c) => (budgetBy.get(c) ?? 0) === 0 && builtBy.get(c)! > 0),
+  };
 }
 
 /** Build the snapshot that a "take snapshot" action would write, without writing it. */

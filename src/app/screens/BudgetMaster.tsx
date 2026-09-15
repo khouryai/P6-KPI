@@ -25,6 +25,7 @@ export function BudgetMaster({ route }: { route: Route }) {
   const [phase, setPhase] = useState(route.params.get('phase') ?? '');
   const [work, setWork] = useState(route.params.get('work') ?? '');
   const [disc, setDisc] = useState(route.params.get('disc') ?? '');
+  const [sub, setSub] = useState(route.params.get('sub') ?? '');
   const [status, setStatus] = useState('');
   const [win, setWin] = useState('');
   const [text, setText] = useState('');
@@ -36,6 +37,9 @@ export function BudgetMaster({ route }: { route: Route }) {
     if (phase) r = r.filter((x) => x.phase === phase);
     if (work) r = r.filter((x) => x.workType === work);
     if (disc) r = r.filter((x) => x.discipline === disc);
+    // An activity can draw on several subsystems, so this narrows to the ones that
+    // draw on this group at all rather than to a group that "owns" the activity.
+    if (sub) r = r.filter((x) => (x.subsystemHours[sub] ?? 0) > 0);
     if (status) r = r.filter((x) => x.status === status);
     if (win) r = r.filter((x) => x.earnWindowSource === win);
     if (text.trim()) {
@@ -43,7 +47,7 @@ export function BudgetMaster({ route }: { route: Route }) {
       r = r.filter((x) => x.activityId.toLowerCase().includes(t) || x.activity.activityName.toLowerCase().includes(t) || x.matchKey.toLowerCase().includes(t));
     }
     return r;
-  }, [model.rows, flag, loc, phase, work, disc, status, win, text]);
+  }, [model.rows, flag, loc, phase, work, disc, sub, status, win, text]);
 
   const setOverride = (id: string, v: string) => {
     const n = num(v);
@@ -58,6 +62,7 @@ export function BudgetMaster({ route }: { route: Route }) {
 
   const opts = (vals: string[]) => [{ value: '', label: 'All' }, ...vals.filter(Boolean).sort().map((v) => ({ value: v, label: v }))];
   const locs = [...new Set(model.rows.map((r) => r.location))];
+  const subs = model.subsystems.map((x) => x.code).filter(Boolean);
   const phases = [...new Set(model.rows.map((r) => r.phase))];
   const works = [...new Set(model.rows.map((r) => r.workType))];
   const discs = [...new Set(model.rows.map((r) => r.discipline))];
@@ -104,6 +109,11 @@ export function BudgetMaster({ route }: { route: Route }) {
           <select className="input" value={loc} onChange={(e) => setLoc(e.target.value)}>{opts(locs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All locations' : o.label}</option>)}</select>
           <select className="input" value={work} onChange={(e) => setWork(e.target.value)}>{opts(works).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All work types' : o.label}</option>)}</select>
           <select className="input" value={disc} onChange={(e) => setDisc(e.target.value)}>{opts(discs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All disciplines' : o.label}</option>)}</select>
+          {subs.length > 0 && (
+            <select className="input" value={sub} onChange={(e) => setSub(e.target.value)} title="Activities whose crew includes this subsystem">
+              {opts(subs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All subsystems' : o.label}</option>)}
+            </select>
+          )}
           <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>{opts(['IN BUDGET', 'EXCLUDED', 'REVIEW', 'DELETED', 'CANCELLED']).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All statuses' : o.label}</option>)}</select>
           <select className="input" value={win} onChange={(e) => setWin(e.target.value)}>{opts(['TEST WINDOW', 'P6 ACTUAL', 'IN PROGRESS', 'NOT STARTED']).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All windows' : o.label}</option>)}</select>
           <select className="input" value={flag ?? ''} onChange={(e) => { window.location.hash = e.target.value ? `#/budget?flag=${e.target.value}` : '#/budget'; }}>
