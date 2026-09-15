@@ -425,10 +425,10 @@ export function TeamHours() {
             </div>
             <div className="table-wrap" style={{ maxHeight: 200 }}>
               <table className="tbl">
-                <thead><tr><th>Month</th><th>{labelsAre === 'subsystem' ? 'Subsystem' : 'Person'}</th><th className="text-right">Built h</th></tr></thead>
+                <thead><tr><th>Month</th><th>{labelsAre === 'subsystem' ? 'Subsystem' : 'Person'}</th><th className="num">Built h</th></tr></thead>
                 <tbody>
                   {pending.rows.slice(0, 40).map((r, i) => (
-                    <tr key={i}><td className="mono">{r.month}</td><td>{r.label || <span className="text-[var(--text-subtle)]">(blank)</span>}</td><td className="text-right">{fmtHours(r.hours)}</td></tr>
+                    <tr key={i}><td className="mono">{r.month}</td><td>{r.label || <span className="text-[var(--text-subtle)]">(blank)</span>}</td><td className="num">{fmtHours(r.hours)}</td></tr>
                   ))}
                 </tbody>
               </table>

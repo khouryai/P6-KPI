@@ -553,6 +553,8 @@ select.cell-input { padding: 3px 22px 3px 6px; }
 
 /* Controls inside a table must not collapse to the width of their arrow. */
 .tbl td .cell-input { min-width: 48px; }
+/* A code column carries a word, not a number: give it room for "Unassigned". */
+.tbl td .cell-input.cell-wide { min-width: 96px; }
 .tbl td select.cell-input { min-width: 92px; }
 .tbl td input[type='date'].cell-input { min-width: 120px; }
 
@@ -601,6 +603,18 @@ select.cell-input { padding: 3px 22px 3px 6px; }
 .tbl tbody tr:last-child td { border-bottom: 0; }
 
 .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* A header is mono and letter-spaced; its trailing space would otherwise push a
+   right-aligned heading a hair off the column of figures underneath it. */
+.tbl th.num { padding-right: calc(14px - 0.06em); }
+
+/* An editable cell is an input filling the cell, and the input's own padding was
+   insetting its text from the column edge while the header stayed at the cell
+   padding. Pulling the control out by its padding puts the two back on the same
+   line, and a number in an input now right-aligns like every other number. */
+.tbl td .cell-input { margin: -3px -6px; width: calc(100% + 12px); }
+.tbl td select.cell-input { margin-right: 0; width: calc(100% + 6px); }
+.tbl td.num .cell-input { text-align: right; }
 
 .table-wrap {
   overflow: auto;
@@ -800,6 +814,15 @@ select.cell-input { padding: 3px 22px 3px 6px; }
 .bar.is-bad > span { background: var(--bad-dot); }
 .bar.is-muted > span { background: var(--gray-400); }
 .bar-lg { height: 10px; }
+
+/* The phase whose curve and cards are on show. It has to read as picked without
+   moving anything, since the tiles sit in a tight grid. */
+.phase-picked {
+  box-shadow: inset 3px 0 0 var(--hitachi-red);
+  padding-left: 9px;
+  margin-left: -12px;
+  border-radius: 2px;
+}
 
 /* The next-steps checklist on the dashboard. */
 .step {

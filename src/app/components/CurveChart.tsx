@@ -66,7 +66,8 @@ export const CurveChart = forwardRef<HTMLDivElement, { curve: CurvePoint[]; data
   return (
     <div ref={ref} className="w-full" style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
+        {/* The top margin is the DATA DATE label's room: at 8 it was cropped by the frame. */}
+        <ComposedChart data={data} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={{ stroke: GRID }} interval="preserveStartEnd" minTickGap={28} />
           <YAxis

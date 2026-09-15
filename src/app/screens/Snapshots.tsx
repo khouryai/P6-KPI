@@ -64,7 +64,7 @@ export function Snapshots() {
               <summary className="cursor-pointer">Preview lines</summary>
               <div className="mt-1 max-h-64 overflow-auto">
                 <table className="tbl">
-                  <thead><tr><th>Activity ID</th><th className="text-right">% complete</th><th className="text-right">Budget h</th><th className="text-right">Earned h</th></tr></thead>
+                  <thead><tr><th>Activity ID</th><th className="num">% complete</th><th className="num">Budget h</th><th className="num">Earned h</th></tr></thead>
                   <tbody>{preview.lines.map((l) => <tr key={l.activityId}><td className="font-mono text-[11px]">{l.activityId}</td><td className="num">{fmtPct(l.pctComplete, 0)}</td><td className="num">{fmtHours(l.budgetHours)}</td><td className="num">{fmtHours(l.earnedHours, 1)}</td></tr>)}</tbody>
                 </table>
               </div>
@@ -75,7 +75,7 @@ export function Snapshots() {
       <div className="card mt-4">
         <h2 className="card-title">Past snapshots</h2>
         <table className="tbl mt-2">
-          <thead><tr><th>Status date</th><th>Taken</th><th className="text-right">Lines</th><th className="text-right">Budget h</th><th className="text-right">Earned h</th><th className="text-right">Curve at date</th><th>Note</th><th></th></tr></thead>
+          <thead><tr><th>Status date</th><th>Taken</th><th className="num">Lines</th><th className="num">Budget h</th><th className="num">Earned h</th><th className="num">Curve at date</th><th>Note</th><th></th></tr></thead>
           <tbody>
             {state.data.snapshots.map((s, i) => {
               const e = s.lines.reduce((x, l) => x + l.earnedHours, 0);
@@ -101,7 +101,7 @@ export function Snapshots() {
         {open !== null && state.data.snapshots[open] && (
           <div className="mt-2 max-h-64 overflow-auto">
             <table className="tbl">
-              <thead><tr><th>Activity ID</th><th className="text-right">% complete</th><th className="text-right">Budget h</th><th className="text-right">Earned h</th></tr></thead>
+              <thead><tr><th>Activity ID</th><th className="num">% complete</th><th className="num">Budget h</th><th className="num">Earned h</th></tr></thead>
               <tbody>{state.data.snapshots[open].lines.map((l) => <tr key={l.activityId}><td className="font-mono text-[11px]">{l.activityId}</td><td className="num">{fmtPct(l.pctComplete, 0)}</td><td className="num">{fmtHours(l.budgetHours)}</td><td className="num">{fmtHours(l.earnedHours, 1)}</td></tr>)}</tbody>
             </table>
           </div>

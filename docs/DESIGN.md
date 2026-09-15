@@ -79,6 +79,15 @@ bucket), so group totals always add back to the whole. That invariant is asserte
 every dimension in `tests/rollup.test.ts` and against the real workbook in the parity
 suite.
 
+The Dashboard can be cut down to one phase. `buildCurve(rows, snapshots, dataDate)`
+takes the rows rather than reading the model, so a phase curve is the same arithmetic
+over a subset and cannot disagree with the programme curve it is part of; the snapshot
+diamonds are cut to the same rows, and the percentages are of the subset's own budget,
+which is what "Phase 2 is 40 per cent done" means. `rowTotals(rows)` does the same for
+the four KPI cards, counting activities over budgeted rows only so the cards and the
+phase tiles under them agree. Data quality and the summary stay whole-programme, and
+the screen says so.
+
 ## Test progress is schedule-driven
 
 The Test Progress screen lists **every budgeted activity**, always. There is no list
@@ -183,8 +192,12 @@ rasterises through a detached SVG where custom properties do not resolve.
   reported, never merged.
 - Advisory `.lock` with owner and timestamp, refreshed every minute, warned about if a
   recent foreign lock exists. Never enforced.
-- Read once into memory; write only on explicit Save. Imports and snapshots are the
-  exception: confirming an import or writing a snapshot is the explicit action.
+- Read once into memory; written back a second or so after the edits stop. Auto-save is
+  on by default, is a per-machine preference in the browser rather than a stored setting,
+  and backs off after a failed write until the next edit so a folder that has gone offline
+  cannot produce an error every second. Save now stays on the bar, and turning auto-save
+  off restores write-only-on-Save. Imports and snapshots are written when confirmed,
+  as before.
 - Imports and snapshots are append only.
 
 ## Where the data can live
@@ -228,8 +241,14 @@ integer total into integers by largest remainder, so 24 hours across three equal
 groups reads 8/8/8 rather than three copies of 7.999999. A rollup that disagrees
 with the total it was cut from is worse than no rollup.
 
+Most activity types are one group's work, so the Activity Library has a **Subsystem
+column you type into**, and the split editor is for the genuine two-group cases only.
+Naming a group carries the headcount across unchanged (`assignSubsystem`), so it never
+moves a budget figure; clearing it puts the entry back to a plain headcount and keeps a
+count only if one was ever set by hand, so an entry does not silently read as priced.
+
 Subsystem codes are **never a list you have to maintain first**. They are whatever
-you type on a crew line; the Subsystems screen discovers them and lets you put a
+you type on a crew line or in that column; the Subsystems screen discovers them and lets you put a
 name against a code afterwards, exactly as locations work. Hours from a crew with no
 breakdown land under `''`, shown as Unassigned, so they are never lost and the gap
 is visible.

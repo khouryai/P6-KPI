@@ -97,6 +97,16 @@ export function Settings() {
             )}
             {state.adapterKind === 'memory' && <Notice tone="error">Nothing is being saved. Choose a folder or browser storage below.</Notice>}
           </div>
+          <label className="flex cursor-pointer items-start gap-2 text-[12px]">
+            <input type="checkbox" className="mt-0.5" checked={state.autoSave} onChange={(e) => actions.setAutoSave(e.target.checked)} />
+            <span>
+              <span className="font-semibold">Save automatically</span>
+              <span className="block text-[var(--text-muted)]">
+                Changes are written a second or so after you stop editing, so there is nothing to remember. Save now stays on the bar for when you want to be sure. Turn
+                this off and nothing is written until you press it.
+              </span>
+            </span>
+          </label>
           <div className="flex flex-wrap gap-2">
             <button className="btn" onClick={() => void actions.chooseFolder()}>{state.adapterKind === 'filesystem' ? 'Choose a different folder…' : 'Use a OneDrive folder…'}</button>
             {state.adapterKind !== 'indexeddb' && <button className="btn" onClick={() => void actions.useBrowserStorage()}>Save in this browser instead</button>}
