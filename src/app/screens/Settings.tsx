@@ -50,17 +50,17 @@ export function Settings() {
 
   const Field = ({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) => (
     <label className="block text-[12px]">
-      <div className="font-semibold text-slate-700">{label}</div>
+      <div className="font-semibold text-[var(--text)]">{label}</div>
       <div className="mt-1">{children}</div>
-      {hint && <div className="mt-0.5 text-slate-500">{hint}</div>}
+      {hint && <div className="mt-0.5 text-[var(--text-muted)]">{hint}</div>}
     </label>
   );
 
   return (
-    <Page title="Settings" subtitle="Defaults apply wherever a library entry or location leaves a value blank. Changes take effect immediately in the model and are written on Save.">
+    <Page eyebrow="Setup" title="Settings" subtitle="Defaults apply wherever a library entry or location leaves a value blank. Changes take effect immediately in the model and are written on Save.">
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="card space-y-3">
-          <h2 className="font-semibold">Dates</h2>
+          <h2 className="card-title">Dates</h2>
           <Field label="Data date" hint="The as-of date of the current P6 export. In-progress work earns from its actual start up to this date, and the earned curve stops here. Changing it moves the end of the earned curve.">
             <input className="input" type="date" value={s.dataDate} onChange={(e) => set({ dataDate: e.target.value })} />
           </Field>
@@ -69,7 +69,7 @@ export function Settings() {
           </Field>
         </div>
         <div className="card space-y-3">
-          <h2 className="font-semibold">Budget defaults</h2>
+          <h2 className="card-title">Budget defaults</h2>
           <Field label="Default basis" hint="Used when a library entry has no basis. RATE: crew x shift hours x duration shifts. DUR: crew x shift hours x P6 original duration.">
             <select className="input" value={s.defaultBasis} onChange={(e) => set({ defaultBasis: e.target.value as S['defaultBasis'] })}>
               <option value="DUR">DUR</option>
@@ -84,7 +84,7 @@ export function Settings() {
           </div>
         </div>
         <div className="card space-y-3">
-          <h2 className="font-semibold">Storage</h2>
+          <h2 className="card-title">Storage</h2>
           <div className="text-[12px]">
             {state.adapterKind === 'filesystem' && (
               <>Data lives in the OneDrive folder <b>{state.folderName}</b> as plain JSON. Version history in OneDrive gives point in time recovery of every file.</>
@@ -107,8 +107,8 @@ export function Settings() {
           </Notice>
         </div>
         <div className="card space-y-3">
-          <h2 className="font-semibold">Backup and restore</h2>
-          <p className="text-[12px] text-slate-600">
+          <h2 className="card-title">Backup and restore</h2>
+          <p className="text-[12px] text-[var(--text-muted)]">
             One JSON file holding everything: settings, locations, the rate library, overrides, test progress, both schedules and every snapshot. Use it to move to another machine, or as a safety net when saving in the browser.
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -120,13 +120,13 @@ export function Settings() {
           </div>
         </div>
         <div className="card space-y-3">
-          <h2 className="font-semibold">Export</h2>
-          <p className="text-[12px] text-slate-600">Writes an .xlsx with the same sheet names and column layouts as the original workbook (values, no formulas) into the folder's <code>exports</code> sub-folder, so project controls can still be handed a spreadsheet. Curve CSV and chart PNG are on the Dashboard.</p>
+          <h2 className="card-title">Export</h2>
+          <p className="text-[12px] text-[var(--text-muted)]">Writes an .xlsx with the same sheet names and column layouts as the original workbook (values, no formulas) into the folder's <code>exports</code> sub-folder, so project controls can still be handed a spreadsheet. Curve CSV and chart PNG are on the Dashboard.</p>
           <button className="btn btn-primary" disabled={busy} onClick={() => void exportXlsx()}>{busy ? 'Building…' : 'Export workbook (.xlsx)'}</button>
         </div>
         <div className="card lg:col-span-2">
-          <h2 className="font-semibold">Known limitations, by design</h2>
-          <ul className="mt-1 list-disc space-y-1 pl-5 text-[12px] text-slate-600">
+          <h2 className="card-title">Known limitations, by design</h2>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-[12px] text-[var(--text-muted)]">
             <li>The curve spread is calendar-linear and ignores the P6 work calendar. An activity spanning a holiday shutdown accrues straight through it.</li>
             <li>Under RATE basis the budget is independent of P6 duration. A schedule change moves the curves but not the total.</li>
             <li>Percent complete from P6 duration is a weak proxy for progress and is only the fallback.</li>

@@ -65,7 +65,7 @@ export function BudgetMaster({ route }: { route: Route }) {
     { key: 'key', label: 'Match key', value: (r) => r.matchKey, render: (r) => <span className="block max-w-xs truncate" title={`${r.matchKey}${r.matchTier === 2 ? ' (tier 2: last parenthetical dropped)' : ''}`}>{r.matchKey}{r.matchTier === 2 && <Badge tone="purple"> T2</Badge>}</span> },
     { key: 'status', label: 'Status', value: (r) => r.status, render: (r) => <Badge tone={statusTone(r.status)}>{r.status}</Badge> },
     { key: 'rate', label: 'Rate', value: (r) => r.rateStatus, render: (r) => (r.status === 'IN BUDGET' ? <Badge tone={statusTone(r.rateStatus)}>{r.rateStatus}</Badge> : '') },
-    { key: 'basis', label: 'Basis', value: (r) => r.basis ?? '', render: (r) => <>{r.basis ?? ''}{r.loeFlag && <Badge tone="amber"> LOE?</Badge>}</> },
+    { key: 'basis', label: 'Basis', value: (r) => r.basis ?? '', render: (r) => <>{r.basis ?? ''}{r.loeFlag && <Badge tone="warn"> LOE?</Badge>}</> },
     { key: 'od', label: 'OD', value: (r) => r.activity.originalDuration, num: true },
     { key: 'cx', label: 'Cx', value: (r) => r.complexity, num: true, render: (r) => (r.complexity === null ? '' : r.complexity.toFixed(2)) },
     { key: 'std', label: 'Std h', value: (r) => r.stdHours, num: true, render: (r) => fmtHours(r.stdHours) },
@@ -75,8 +75,8 @@ export function BudgetMaster({ route }: { route: Route }) {
     { key: 'bls', label: 'BL start', value: (r) => r.baselineStart, render: (r) => fmtDate(r.baselineStart) },
     { key: 'blf', label: 'BL finish', value: (r) => r.baselineFinish, render: (r) => fmtDate(r.baselineFinish) },
     { key: 'blsrc', label: 'BL src', value: (r) => r.baselineSource, render: (r) => <Badge tone={statusTone(r.baselineSource)}>{r.baselineSource}</Badge> },
-    { key: 'cs', label: 'Cur start', value: (r) => r.currentStart, render: (r) => <>{fmtDate(r.currentStart)}{r.activity.actualStart ? ' A' : ''}{!r.currentStart && r.activity.startRaw ? <span className="text-red-600" title="unparseable">{` (${r.activity.startRaw})`}</span> : null}</> },
-    { key: 'cf', label: 'Cur finish', value: (r) => r.currentFinish, render: (r) => <>{fmtDate(r.currentFinish)}{r.activity.actualFinish ? ' A' : ''}{!r.currentFinish && r.activity.finishRaw ? <span className="text-red-600" title="unparseable">{` (${r.activity.finishRaw})`}</span> : null}</> },
+    { key: 'cs', label: 'Cur start', value: (r) => r.currentStart, render: (r) => <>{fmtDate(r.currentStart)}{r.activity.actualStart ? ' A' : ''}{!r.currentStart && r.activity.startRaw ? <span className="text-[var(--bad)]" title="unparseable">{` (${r.activity.startRaw})`}</span> : null}</> },
+    { key: 'cf', label: 'Cur finish', value: (r) => r.currentFinish, render: (r) => <>{fmtDate(r.currentFinish)}{r.activity.actualFinish ? ' A' : ''}{!r.currentFinish && r.activity.finishRaw ? <span className="text-[var(--bad)]" title="unparseable">{` (${r.activity.finishRaw})`}</span> : null}</> },
     { key: 'pct', label: '% complete', value: (r) => r.pctComplete, num: true, render: (r) => fmtPct(r.pctComplete, 0) },
     { key: 'pctsrc', label: '% src', value: (r) => r.pctSource, render: (r) => <Badge tone={statusTone(r.pctSource)}>{r.pctSource}</Badge> },
     { key: 'es', label: 'Earn start', value: (r) => r.earnStart, render: (r) => fmtDate(r.earnStart) },
@@ -87,10 +87,10 @@ export function BudgetMaster({ route }: { route: Route }) {
   ];
 
   return (
-    <Page
+    <Page eyebrow="Budget"
       title="Budget Master"
       subtitle={`${rows.length} of ${model.rows.length} activities shown. Budget ${fmtHours(total)} h, earned ${fmtHours(earned)} h. The hours override is the only editable field.`}
-      actions={
+      toolbar={
         <>
           <input className="input" placeholder="Search ID, name, key" value={text} onChange={(e) => setText(e.target.value)} />
           <select className="input" value={loc} onChange={(e) => setLoc(e.target.value)}>{opts(locs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All locations' : o.label}</option>)}</select>
@@ -104,7 +104,7 @@ export function BudgetMaster({ route }: { route: Route }) {
         </>
       }
     >
-      <SortableTable rows={rows} columns={columns} rowKey={(r) => `${r.activityId}#${r.activity.sortOrder}`} maxHeight="calc(100vh - 200px)" rowClass={(r) => (r.status === 'REVIEW' ? 'bg-red-50' : r.baselineSource === 'NONE' ? 'bg-red-50/60' : r.status !== 'IN BUDGET' ? 'text-slate-400' : '')} />
+      <SortableTable rows={rows} columns={columns} rowKey={(r) => `${r.activityId}#${r.activity.sortOrder}`} maxHeight="calc(100vh - 200px)" rowClass={(r) => (r.status === 'REVIEW' ? 'row-bad' : r.baselineSource === 'NONE' ? 'row-bad' : r.status !== 'IN BUDGET' ? 'row-muted' : '')} />
     </Page>
   );
 }

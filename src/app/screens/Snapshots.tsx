@@ -31,9 +31,9 @@ export function Snapshots() {
   };
 
   return (
-    <Page title="Snapshots" subtitle="A snapshot records percent complete per in-budget activity on a chosen status date. Snapshots are the audit trail and a cross-check, plotted as markers against the continuous earned curve. Insert only: no edit, no delete.">
+    <Page eyebrow="Progress" title="Snapshots" subtitle="A snapshot records percent complete per in-budget activity on a chosen status date. Snapshots are the audit trail and a cross-check, plotted as markers against the continuous earned curve. Insert only: no edit, no delete.">
       <div className="card">
-        <h2 className="font-semibold">Take a snapshot</h2>
+        <h2 className="card-title">Take a snapshot</h2>
         <div className="mt-2 flex flex-wrap items-end gap-3">
           <label className="text-[12px]">
             Status date
@@ -53,13 +53,13 @@ export function Snapshots() {
             <div>
               Will write <b>{preview.lines.length}</b> lines to <code>snapshots/{date}{existing ? `-${existing}` : ''}.json</code>: budget <b>{fmtHours(budget)} h</b>, earned <b>{fmtHours(earned, 1)} h</b> ({fmtPct(budget ? earned / budget : 0)}).
               {curveAt && curveAt.earned !== null && (
-                <span className="ml-2 text-slate-500">
+                <span className="ml-2 text-[var(--text-muted)]">
                   The earned curve at {fmtDate(date)} reads {fmtHours(curveAt.earned, 1)} h; the difference of {fmtHours(earned - curveAt.earned, 1)} h is work whose earn window is not yet fully elapsed, or activities earning without a window.
                 </span>
               )}
-              {!curveAt && <span className="ml-2 text-amber-700">This date is not a month end, so the marker will not sit on a curve period.</span>}
+              {!curveAt && <span className="ml-2 text-[var(--warn)]">This date is not a month end, so the marker will not sit on a curve period.</span>}
             </div>
-            {existing > 0 && <div className="mt-1 text-amber-700">A snapshot for this date already exists. A second one will be written alongside it, not over it.</div>}
+            {existing > 0 && <div className="mt-1 text-[var(--warn)]">A snapshot for this date already exists. A second one will be written alongside it, not over it.</div>}
             <details className="mt-2">
               <summary className="cursor-pointer">Preview lines</summary>
               <div className="mt-1 max-h-64 overflow-auto">
@@ -73,7 +73,7 @@ export function Snapshots() {
         )}
       </div>
       <div className="card mt-4">
-        <h2 className="font-semibold">Past snapshots</h2>
+        <h2 className="card-title">Past snapshots</h2>
         <table className="tbl mt-2">
           <thead><tr><th>Status date</th><th>Taken</th><th className="text-right">Lines</th><th className="text-right">Budget h</th><th className="text-right">Earned h</th><th className="text-right">Curve at date</th><th>Note</th><th></th></tr></thead>
           <tbody>
@@ -89,13 +89,13 @@ export function Snapshots() {
                   <td className="num">{s.lines.length}</td>
                   <td className="num">{fmtHours(b)}</td>
                   <td className="num">{fmtHours(e, 1)}</td>
-                  <td className="num">{c && c.earned !== null ? <>{fmtHours(c.earned, 1)} {far && <Badge tone="amber">off curve</Badge>}</> : <span className="text-slate-400">n/a</span>}</td>
+                  <td className="num">{c && c.earned !== null ? <>{fmtHours(c.earned, 1)} {far && <Badge tone="warn">off curve</Badge>}</> : <span className="text-[var(--text-subtle)]">n/a</span>}</td>
                   <td>{s.note ?? ''}</td>
-                  <td><button className="text-blue-700 underline" onClick={() => setOpen(open === i ? null : i)}>{open === i ? 'hide' : 'lines'}</button></td>
+                  <td><button className="btn-link" onClick={() => setOpen(open === i ? null : i)}>{open === i ? 'hide' : 'lines'}</button></td>
                 </tr>
               );
             })}
-            {state.data.snapshots.length === 0 && <tr><td colSpan={8} className="py-4 text-center text-slate-400">No snapshots yet.</td></tr>}
+            {state.data.snapshots.length === 0 && <tr><td colSpan={8} className="py-4 text-center text-[var(--text-subtle)]">No snapshots yet.</td></tr>}
           </tbody>
         </table>
         {open !== null && state.data.snapshots[open] && (
@@ -106,7 +106,7 @@ export function Snapshots() {
             </table>
           </div>
         )}
-        <p className="mt-2 text-[11px] text-slate-500">A marker far off the earned curve means the underlying data (rates, dates, test counts) changed after the snapshot was taken.</p>
+        <p className="mt-2 text-[11px] text-[var(--text-muted)]">A marker far off the earned curve means the underlying data (rates, dates, test counts) changed after the snapshot was taken.</p>
       </div>
     </Page>
   );

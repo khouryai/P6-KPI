@@ -88,24 +88,24 @@ export function TestProgress({ route }: { route: Route }) {
 
   const columns: Column<Row>[] = [
     { key: 'id', label: 'Activity ID', value: (r) => r.activityId, render: (r) => <span className="font-mono text-[11px]">{r.activityId}</span> },
-    { key: 'name', label: 'Activity', value: (r) => r.check.activityName ?? '', render: (r) => (r.check.activityName ? <span className="block max-w-xs truncate" title={r.check.activityName}>{r.check.activityName}</span> : <span className="text-red-600">ID not in extract</span>) },
-    { key: 'st', label: 'Budget status', value: (r) => r.check.status, render: (r) => <Badge tone={r.check.matched ? statusTone(r.check.status) : 'red'}>{r.check.status}</Badge> },
+    { key: 'name', label: 'Activity', value: (r) => r.check.activityName ?? '', render: (r) => (r.check.activityName ? <span className="block max-w-xs truncate" title={r.check.activityName}>{r.check.activityName}</span> : <span className="text-[var(--bad)]">ID not in extract</span>) },
+    { key: 'st', label: 'Budget status', value: (r) => r.check.status, render: (r) => <Badge tone={r.check.matched ? statusTone(r.check.status) : 'bad'}>{r.check.status}</Badge> },
     { key: 'tot', label: 'Tests total', value: (r) => r.testsTotal ?? null, num: true, render: (r) => <CellInput type="number" className="cell-input text-right" value={r.testsTotal?.toString() ?? ''} onCommit={(v) => edit(r.activityId, { testsTotal: num(v) })} /> },
     { key: 'comp', label: 'Tests complete', value: (r) => r.testsComplete ?? null, num: true, render: (r) => <CellInput type="number" className="cell-input text-right" value={r.testsComplete?.toString() ?? ''} onCommit={(v) => edit(r.activityId, { testsComplete: num(v) })} /> },
     { key: 'ov', label: '% override (0..1)', value: (r) => r.pctOverride ?? null, num: true, render: (r) => <CellInput type="number" className="cell-input text-right" value={r.pctOverride?.toString() ?? ''} placeholder="—" title="Beats the test counts. 0 to 1." onCommit={(v) => { let n = num(v); if (n !== undefined && n > 1) n = n / 100; edit(r.activityId, { pctOverride: n }); }} /> },
-    { key: 'eff', label: 'Effective %', value: (r) => r.check.pctEffective, num: true, render: (r) => (r.check.pctEffective === null ? <span className="text-slate-400">P6 fallback</span> : fmtPct(r.check.pctEffective, 0)) },
+    { key: 'eff', label: 'Effective %', value: (r) => r.check.pctEffective, num: true, render: (r) => (r.check.pctEffective === null ? <span className="text-[var(--text-subtle)]">P6 fallback</span> : fmtPct(r.check.pctEffective, 0)) },
     { key: 'ts', label: 'Test start', value: (r) => r.testStartOverride ?? '', render: (r) => <CellInput type="date" value={r.testStartOverride ?? ''} onCommit={(v) => edit(r.activityId, { testStartOverride: isValidISO(v) ? v : undefined })} /> },
     { key: 'te', label: 'Test end', value: (r) => r.testEndOverride ?? '', render: (r) => <CellInput type="date" value={r.testEndOverride ?? ''} onCommit={(v) => edit(r.activityId, { testEndOverride: isValidISO(v) ? v : undefined })} /> },
     { key: 'upd', label: 'Updated', value: (r) => r.updatedAt, render: (r) => r.updatedAt.slice(0, 10) },
-    { key: 'x', label: '', value: () => '', render: (r) => <button className="text-[11px] text-red-700 underline" onClick={() => remove(r.activityId)}>remove</button> },
+    { key: 'x', label: '', value: () => '', render: (r) => <button className="btn-link danger text-[11px]" onClick={() => remove(r.activityId)}>remove</button> },
   ];
 
   const unmatched = model.summary.testProgressNotMatching;
   return (
-    <Page
+    <Page eyebrow="Progress"
       title="Test Progress"
       subtitle={`${state.data.testProgress.length} rows keyed. Tests complete / tests total drives percent complete; a direct override beats it; P6 duration is the fallback. Test window dates override the P6 actual dates for the earned curve.`}
-      actions={
+      toolbar={
         <>
           <input className="input" placeholder="Filter" value={text} onChange={(e) => setText(e.target.value)} />
           {flag && <a className="btn" href="#/progress">Clear filter</a>}
@@ -119,7 +119,7 @@ export function TestProgress({ route }: { route: Route }) {
       )}
       <div className="mb-3 grid gap-3 lg:grid-cols-2">
         <div className="card">
-          <h2 className="font-semibold">Add an activity</h2>
+          <h2 className="card-title">Add an activity</h2>
           <div className="mt-2 flex gap-2">
             <input className="input flex-1 font-mono" list="budgeted-ids" placeholder="0-P2-TC-W40-FA-0100" value={newId} onChange={(e) => setNewId(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add(newId)} />
             <button className="btn" onClick={() => add(newId)}>Add</button>
@@ -131,14 +131,14 @@ export function TestProgress({ route }: { route: Route }) {
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) void applyFile(f); }}
         >
-          <h2 className="font-semibold">Load counts from a file or a paste</h2>
-          <p className="text-[12px] text-slate-500">Columns: Activity ID, Tests total, Tests complete, then optional % override, test start, test end. Existing rows are updated, new IDs added. Drop an .xlsx or .csv here, or paste below.</p>
+          <h2 className="card-title">Load counts from a file or a paste</h2>
+          <p className="text-[12px] text-[var(--text-muted)]">Columns: Activity ID, Tests total, Tests complete, then optional % override, test start, test end. Existing rows are updated, new IDs added. Drop an .xlsx or .csv here, or paste below.</p>
           <input className="mt-1 block text-[12px]" type="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt" onChange={(e) => e.target.files?.[0] && void applyFile(e.target.files[0])} />
           <textarea className="input mt-1 h-16 w-full font-mono text-[11px]" value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={'0-P2-TC-W40-FA-0100\t120\t46'} />
           <button className="btn mt-1" disabled={!paste.trim()} onClick={applyPaste}>Apply pasted block</button>
         </div>
       </div>
-      <SortableTable rows={rows} columns={columns} rowKey={(r) => r.activityId} maxHeight="calc(100vh - 330px)" rowClass={(r) => (r.check.matched ? '' : 'bg-red-50')} />
+      <SortableTable rows={rows} columns={columns} rowKey={(r) => r.activityId} maxHeight="calc(100vh - 330px)" rowClass={(r) => (r.check.matched ? '' : 'row-bad')} />
     </Page>
   );
 }

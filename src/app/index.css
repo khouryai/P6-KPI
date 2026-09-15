@@ -1,47 +1,747 @@
+@import './../assets/fonts/fonts.css';
 @import "tailwindcss";
 
+/* ===========================================================================
+   Design tokens — ported verbatim from cx-portal's canonical :root sheet
+   (khouryai/cx-portal styles.css, see its DESIGN_TOKENS.md). Values are not
+   adjusted here: the two applications are meant to look like one product, so
+   this sheet is a copy, not a variation. Only tokens this app has no use for
+   (Test Register skin slots, PDF markup colors) are left out.
+
+   Rules of engagement, same as there:
+   - New colors go through tokens, not raw hex.
+   - This is the only bare :root block. Do not open another.
+   - There is no dark mode, by decision.
+   =========================================================================== */
 :root {
-  color-scheme: light;
+  /* ── Brand — Hitachi red ── */
+  --hitachi-red: #e60012;
+  --hitachi-red-hover: #b80010;
+  --hitachi-red-light: #fff1f2;
+  --primary: #e60012;
+  --primary-hover: #b80010;
+  /* ── Warm neutral ink scale ── */
+  --black: #0a0a0c;
+  --near-black: #131316;
+  --charcoal: #1d1e22;
+  --gray-900: #2a2c31;
+  --gray-800: #3a3c43;
+  --gray-700: #54575f;
+  --gray-600: #74777f;
+  --gray-500: #9a9da4;
+  --gray-400: #c2c5cb;
+  --gray-300: #dfe1e5;
+  --gray-200: #ececef;
+  --gray-100: #f4f4f6;
+  --gray-50: #fafaf8;
+  --white: #ffffff;
+  /* ── Slate (cool gray) — dark chrome only ── */
+  --slate-900: #111827;
+  --slate-800: #1f2937;
+  --slate-700: #374151;
+  --slate-600: #4b5563;
+  --slate-500: #6b7280;
+  --slate-300: #d1d5db;
+  --slate-200: #e5e7eb;
+  --slate-100: #f3f4f6;
+  --slate-50: #f9fafb;
+  --dark-surface: #111827;
+  --dark-surface-2: #172033;
+  --dark-surface-3: #1f2937;
+  /* ── Semantic surfaces / text / borders ── */
+  --bg: #f4f4f4;
+  --app-bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f9fafb;
+  --surface-3: #f3f4f6;
+  --card-bg: #ffffff;
+  --text: #1a1a1a;
+  --text-main: #131316;
+  --text-muted: #6e7179;
+  --text-subtle: #697280;
+  --border: #ebebeb;
+  --border-strong: #d8d8d8;
+  --line-soft: #e4e7ec;
+  --line-strong: #cfd5df;
+  /* ── Status ── */
+  --good: #0d7a4f;
+  --good-light: #e8f4ee;
+  --warn: #a8550a;
+  --warn-light: #fbf0e1;
+  --bad: #c01017;
+  --bad-light: #fdeaeb;
+  --info: #1d4eaf;
+  --info-light: #e8efff;
+  --good-border: rgba(13, 122, 79, 0.28);
+  --warn-border: rgba(168, 85, 10, 0.30);
+  --bad-border: rgba(192, 16, 23, 0.26);
+  --info-border: rgba(29, 78, 175, 0.26);
+  --accent-purple: #6d28d9;
+  --accent-purple-light: #f1eaf9;
+  --pending: #6b21a8;
+  --pending-light: #f1eaf9;
+  --red-600: #c01017;
+  --red-300: #fca5a5;
+  /* ── Status mid-dots ── */
+  --good-dot: #16a571;
+  --warn-dot: #e0900b;
+  --bad-dot: #e51b22;
+  --info-dot: #3a76e8;
+  --pending-dot: #9333d9;
+  /* ── Accents ── */
+  --accent-blue: #2563eb;
+  --accent-blue-strong: #1d4ed8;
+  --brand-blue: #1d4eaf;
+  --accent-indigo: #6366f1;
+  --accent-amber: #f59e0b;
+  --green-700: #15803d;
+  /* ── Typography ── */
+  --f-display: 'Archivo', system-ui, -apple-system, sans-serif;
+  --f-ui: 'Archivo', system-ui, -apple-system, sans-serif;
+  --f-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --f-input: var(--f-ui);
+  --f-number: var(--f-ui);
+  --input-size: 14px;
+  --input-weight: 500;
+  --number-size: 28px;
+  --number-weight: 600;
+  /* ── Elevation / shape / motion ── */
+  --shadow-sm: 0 1px 2px rgba(15, 17, 21, 0.05), 0 1px 1px rgba(15, 17, 21, 0.03);
+  --shadow-md: 0 1px 2px rgba(15, 17, 21, 0.04), 0 6px 16px -8px rgba(15, 17, 21, 0.14);
+  --shadow-lg: 0 2px 6px rgba(15, 17, 21, 0.06), 0 28px 56px -20px rgba(15, 17, 21, 0.30);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 140ms;
+  --dur: 220ms;
+  --ring: 0 0 0 3px rgba(230, 0, 18, 0.10);
+  /* ── Spacing ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  /* ── Focus ring — the one visible focus style ── */
+  --focus-ring: 2px solid rgba(230, 0, 18, 0.35);
+  --focus-ring-offset: 2px;
 }
+
+/* Expose the tokens to Tailwind utilities so `text-muted`, `bg-surface-2`,
+   `border-line-soft` and friends resolve to the same values as var(--…). */
+@theme inline {
+  --color-brand: var(--hitachi-red);
+  --color-brand-hover: var(--hitachi-red-hover);
+  --color-ink: var(--text);
+  --color-ink-main: var(--text-main);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-app: var(--app-bg);
+  --color-line: var(--border);
+  --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
+  --color-good: var(--good);
+  --color-good-light: var(--good-light);
+  --color-warn: var(--warn);
+  --color-warn-light: var(--warn-light);
+  --color-bad: var(--bad);
+  --color-bad-light: var(--bad-light);
+  --color-info: var(--info);
+  --color-info-light: var(--info-light);
+  --font-sans: var(--f-ui);
+  --font-mono: var(--f-mono);
+  --radius-card: var(--radius-lg);
+}
+
+/* ===========================================================================
+   Base
+   =========================================================================== */
+* { border-color: var(--border); }
+
+html { color-scheme: light; }
 
 body {
-  @apply bg-slate-50 text-slate-800 text-[13px] antialiased;
-  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  font-family: var(--f-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--app-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-.btn {
-  @apply inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-medium text-slate-700 shadow-sm hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed;
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
-.btn-primary {
-  @apply border-blue-700 bg-blue-700 text-white hover:bg-blue-800;
+
+::selection { background: rgba(230, 0, 18, 0.14); }
+
+/* A mono uppercase micro-label. The single most recognisable mark of this
+   design language: it carries every eyebrow, KPI label and table header. */
+.eyebrow {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
 }
-.btn-danger {
-  @apply border-red-700 bg-red-700 text-white hover:bg-red-800;
+
+/* ===========================================================================
+   Side navigation — near-black chrome with a red brand wash
+   =========================================================================== */
+.sidenav {
+  background:
+    radial-gradient(800px 400px at -20% -20%, rgba(230, 0, 18, 0.10), transparent 60%),
+    linear-gradient(180deg, #0c0c0f 0%, var(--black) 100%);
+  color: var(--white);
 }
-.input {
-  @apply rounded border border-slate-300 bg-white px-2 py-1 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-300;
+
+.sidenav-brand {
+  padding: 22px 18px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
+.sidenav-brand-name {
+  font-family: var(--f-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--white);
+  line-height: 1.1;
+}
+.sidenav-brand-sub {
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+
+.sidenav-links { padding: 6px 12px; }
+
+.sidenav-section-label {
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.32);
+  padding: 14px 12px 4px;
+}
+
+.nav-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 11px;
+  font-family: var(--f-ui);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: rgba(255, 255, 255, 0.6);
+  padding: 7px 12px;
+  border-radius: 7px;
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--easing), background var(--dur-fast) var(--easing);
+}
+.nav-link:hover { color: var(--white); background: rgba(255, 255, 255, 0.04); }
+.nav-link.active { color: var(--white); background: rgba(255, 255, 255, 0.06); }
+/* The red rail that marks the current screen. */
+.nav-link.active::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  border-radius: 3px;
+  background: var(--hitachi-red);
+  box-shadow: 0 0 14px var(--hitachi-red);
+}
+
+.sidenav-foot {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 12px 16px;
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.nav-count {
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 6px;
+  background: var(--hitachi-red);
+  color: var(--white);
+}
+
+/* ===========================================================================
+   Page hero — eyebrow, title, sub, and an optional chip-stat rail
+   =========================================================================== */
+.page-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: 18px 28px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-soft);
+}
+.ph-eyebrow {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  margin-bottom: 3px;
+}
+.ph-title {
+  font-family: var(--f-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text);
+  margin: 0;
+}
+.ph-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.35;
+  max-width: 105ch;
+}
+.ph-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* Chip-stat: mono micro-label plus a tabular number in a tinted pill. */
+.ph-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  line-height: 1;
+}
+.ph-stat-lbl {
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+.ph-stat-val {
+  font-family: var(--f-number);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.ph-stat.tone-red { background: var(--bad-light); border-color: transparent; }
+.ph-stat.tone-amber { background: var(--warn-light); border-color: transparent; }
+.ph-stat.tone-blue { background: var(--info-light); border-color: transparent; }
+.ph-stat.tone-good { background: var(--good-light); border-color: transparent; }
+.ph-stat.tone-red .ph-stat-val { color: var(--bad); }
+.ph-stat.tone-amber .ph-stat-val { color: var(--warn); }
+.ph-stat.tone-blue .ph-stat-val { color: var(--info); }
+.ph-stat.tone-good .ph-stat-val { color: var(--good); }
+.ph-stat.tone-muted .ph-stat-val { color: var(--text-subtle); }
+.ph-stat.tone-red .ph-stat-lbl { color: var(--bad); opacity: 0.72; }
+.ph-stat.tone-amber .ph-stat-lbl { color: var(--warn); opacity: 0.72; }
+.ph-stat.tone-blue .ph-stat-lbl { color: var(--info); opacity: 0.72; }
+.ph-stat.tone-good .ph-stat-lbl { color: var(--good); opacity: 0.72; }
+
+/* ===========================================================================
+   Cards and KPI cards
+   =========================================================================== */
 .card {
-  @apply rounded-md border border-slate-200 bg-white p-4 shadow-sm;
+  background: var(--card-bg);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-4);
 }
+
+.card-title {
+  font-family: var(--f-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin: 0;
+}
+
+.kpi-card {
+  background: var(--card-bg);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  padding: 22px;
+  transition: transform var(--dur) var(--easing), border-color var(--dur) var(--easing), box-shadow var(--dur) var(--easing);
+}
+.kpi-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-md);
+}
+.kpi-label {
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+.kpi-value {
+  font-family: var(--f-number);
+  font-size: 42px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 8px;
+}
+.kpi-value.tone-good { color: var(--good); }
+.kpi-value.tone-warn { color: var(--warn); }
+.kpi-value.tone-bad { color: var(--bad); }
+.kpi-sub { font-size: 12px; color: var(--text-muted); }
+.kpi-sub strong { color: var(--text); font-weight: 600; }
+
+/* The one highlighted card in a row, as on the cx-portal dashboard. */
+.kpi-card.kpi-primary {
+  background: linear-gradient(180deg, var(--white) 0%, #fffafa 100%);
+  border-color: rgba(230, 0, 18, 0.18);
+  box-shadow: var(--shadow-md);
+}
+.kpi-card.kpi-primary .kpi-value { color: var(--text-main); }
+
+/* ===========================================================================
+   Buttons — one interaction grammar: 8px radius, fast transition, 1px press.
+   Solid Hitachi red is the primary action; bordered surface is everything else.
+   =========================================================================== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--f-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--white);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 8px 13px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--easing), border-color var(--dur-fast) var(--easing),
+    color var(--dur-fast) var(--easing), transform var(--dur-fast) var(--easing), box-shadow var(--dur-fast) var(--easing);
+}
+.btn:hover:not(:disabled) { background: var(--surface-2); border-color: var(--line-strong); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary {
+  color: var(--white);
+  background: var(--hitachi-red);
+  border-color: var(--hitachi-red);
+  padding: 9px 14px;
+  box-shadow: 0 1px 2px rgba(230, 0, 18, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.btn-primary:hover:not(:disabled) { background: var(--hitachi-red-hover); border-color: var(--hitachi-red-hover); }
+
+.btn-danger {
+  color: var(--white);
+  background: var(--bad);
+  border-color: var(--bad);
+  box-shadow: 0 1px 2px rgba(192, 16, 23, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.btn-danger:hover:not(:disabled) { background: #9c0d13; border-color: #9c0d13; }
+
+.btn-mini {
+  font-size: 11.5px;
+  padding: 4px 9px;
+  gap: 4px;
+  color: var(--text-muted);
+  box-shadow: none;
+}
+
+/* A plain text link-button, for inline row actions. */
+.btn-link {
+  font-family: var(--f-ui);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand-blue);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.btn-link:hover { color: var(--accent-blue-strong); }
+.btn-link.danger { color: var(--bad); }
+
+/* ===========================================================================
+   Form controls
+   =========================================================================== */
+.input,
+.cell-input {
+  font-family: var(--f-input);
+  font-size: var(--input-size);
+  font-weight: var(--input-weight);
+  color: var(--text);
+  background: var(--white);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 7px 11px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+  transition: border-color var(--dur-fast) var(--easing), box-shadow var(--dur-fast) var(--easing);
+}
+.input:focus,
+.cell-input:focus {
+  outline: none;
+  border-color: rgba(230, 0, 18, 0.45);
+  box-shadow: var(--ring);
+}
+.input::placeholder,
+.cell-input::placeholder { color: var(--text-subtle); opacity: 0.7; }
+
+select.input,
+select.cell-input {
+  font-size: 12.5px;
+  border-radius: 7px;
+  padding: 8px 26px 8px 11px;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23777' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+
+/* Inside a table the control has to disappear until touched, or the grid reads
+   as a form. Same focus treatment, no resting chrome. */
+.cell-input {
+  width: 100%;
+  font-size: 12.5px;
+  padding: 3px 6px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.cell-input:hover { border-color: var(--border-strong); background: var(--white); }
+.cell-input:focus { background: var(--white); }
+select.cell-input { padding: 3px 22px 3px 6px; }
+
+/* Controls inside a table must not collapse to the width of their arrow. */
+.tbl td .cell-input { min-width: 48px; }
+.tbl td select.cell-input { min-width: 92px; }
+.tbl td input[type='date'].cell-input { min-width: 120px; }
+
+.form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.form-hint { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
+
+/* ===========================================================================
+   Tables
+   =========================================================================== */
 .tbl {
-  @apply w-full border-collapse text-[12px];
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
 }
 .tbl th {
-  @apply sticky top-0 z-10 border-b border-slate-300 bg-slate-100 px-2 py-1.5 text-left font-semibold text-slate-700 whitespace-nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  white-space: nowrap;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-strong);
+  padding: 10px 14px;
 }
+.tbl th:hover { color: var(--text); }
 .tbl td {
-  @apply border-b border-slate-100 px-2 py-1 align-top whitespace-nowrap;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--gray-100);
+  vertical-align: top;
+  white-space: nowrap;
+  color: var(--text);
 }
-.tbl tr:hover td {
-  @apply bg-blue-50/40;
+.tbl tbody tr:hover td { background: var(--surface-2); }
+.tbl tbody tr:last-child td { border-bottom: 0; }
+
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.table-wrap {
+  overflow: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
 }
-.num {
-  @apply text-right tabular-nums;
-}
+
+.mono { font-family: var(--f-mono); font-size: 11.5px; }
+
+/* ===========================================================================
+   Badges and tags
+   =========================================================================== */
 .badge {
-  @apply inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold leading-tight;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--f-ui);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+  border-radius: 999px;
+  padding: 3px 9px 3px 7px;
+  border: 1px solid transparent;
+  white-space: nowrap;
 }
-.cell-input {
-  @apply w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-[12px] hover:border-slate-300 focus:border-blue-400 focus:bg-white focus:outline-none;
+/* The leading dot is what makes these read as status rather than decoration. */
+.badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
 }
+.badge-good { color: var(--good); background: var(--good-light); border-color: var(--good-border); }
+.badge-warn { color: var(--warn); background: var(--warn-light); border-color: var(--warn-border); }
+.badge-bad { color: var(--bad); background: var(--bad-light); border-color: var(--bad-border); }
+.badge-info { color: var(--info); background: var(--info-light); border-color: var(--info-border); }
+.badge-purple { color: var(--accent-purple); background: var(--accent-purple-light); border-color: rgba(109, 40, 217, 0.22); }
+.badge-muted { color: var(--text-muted); background: var(--surface-3); border-color: var(--border); }
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+/* ===========================================================================
+   Banners and inline notices
+   =========================================================================== */
+.notice {
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.notice-info { color: var(--info); background: var(--info-light); border-color: var(--info-border); }
+.notice-ok { color: var(--good); background: var(--good-light); border-color: var(--good-border); }
+.notice-warn { color: var(--warn); background: var(--warn-light); border-color: var(--warn-border); }
+.notice-error { color: var(--bad); background: var(--bad-light); border-color: var(--bad-border); }
+.notice a { text-decoration: underline; text-underline-offset: 2px; }
+
+/* Full-width strips across the top of the work area. */
+.strip {
+  font-size: 12px;
+  padding: 7px 28px;
+  border-bottom: 1px solid;
+}
+.strip-quiet { color: var(--text-muted); background: var(--surface); border-color: var(--line-soft); }
+.strip-warn { color: var(--warn); background: var(--warn-light); border-color: var(--warn-border); }
+.strip-error { color: var(--bad); background: var(--bad-light); border-color: var(--bad-border); }
+.strip-dirty { color: var(--hitachi-red-hover); background: var(--hitachi-red-light); border-color: rgba(230, 0, 18, 0.18); }
+
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 50;
+  max-width: 34rem;
+  font-size: 13px;
+  border-radius: 10px;
+  padding: 11px 15px;
+  border: 1px solid;
+  box-shadow: var(--shadow-lg);
+  animation: toast-in var(--dur) var(--easing);
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Drop targets on the import and test progress screens. */
+.dropzone {
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  transition: border-color var(--dur-fast) var(--easing), background var(--dur-fast) var(--easing);
+}
+.dropzone:hover { border-color: rgba(230, 0, 18, 0.4); background: var(--hitachi-red-light); }
+
+/* A small run of label/value pairs, as used in the import preview. */
+.factlet {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+.factlet-label {
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+.factlet-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+}
+
+/* Row-level tints. A full-strength status background is right for a badge but
+   far too heavy across a whole row, so these are low-alpha washes of the same
+   ink, and they survive the hover rule above. */
+.tbl tbody tr.row-warn td { background: rgba(168, 85, 10, 0.055); }
+.tbl tbody tr.row-bad td { background: rgba(192, 16, 23, 0.055); }
+.tbl tbody tr.row-warn:hover td { background: rgba(168, 85, 10, 0.10); }
+.tbl tbody tr.row-bad:hover td { background: rgba(192, 16, 23, 0.10); }
+.tbl tbody tr.row-muted td { color: var(--text-subtle); }
+
+hr.rule { border: 0; border-top: 1px solid var(--line-soft); margin: 0; }

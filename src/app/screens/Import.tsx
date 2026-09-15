@@ -155,15 +155,15 @@ export function Import() {
   const cols = grid ? columnCount(grid) : 0;
 
   return (
-    <Page title="Import" subtitle="Drop the P6 export straight in. Excel is never needed: .xlsx, .csv and P6's own .xer are all read directly. Two independent targets, the current (live) schedule and the baseline.">
+    <Page eyebrow="Schedule" title="Import" subtitle="Drop the P6 export straight in. Excel is never needed: .xlsx, .csv and P6's own .xer are all read directly. Two independent targets, the current (live) schedule and the baseline.">
       <div className="mb-3 flex items-center gap-2">
-        <span className="text-slate-600">Import target:</span>
+        <span className="text-[var(--text-muted)]">Import target:</span>
         {(['current', 'baseline'] as ImportKind[]).map((k) => (
           <button key={k} className={`btn ${kind === k ? 'btn-primary' : ''}`} onClick={() => { setKind(k); reset(); }}>
             {k === 'current' ? 'Current schedule' : 'Baseline schedule'}
           </button>
         ))}
-        <span className="ml-3 text-[12px] text-slate-500">
+        <span className="ml-3 text-[12px] text-[var(--text-muted)]">
           {kind === 'current'
             ? state.data.current ? `Latest: ${state.data.current.sourceFilename}, ${fmtDateTime(state.data.current.importedAt)}` : 'Nothing imported yet'
             : state.data.baseline ? `Latest: ${state.data.baseline.sourceFilename}, ${fmtDateTime(state.data.baseline.importedAt)}` : 'Nothing imported yet. The planned curve mirrors the forecast until a baseline exists.'}
@@ -172,7 +172,7 @@ export function Import() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div
-          className="card border-2 border-dashed border-slate-300"
+          className="card dropzone"
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
@@ -180,32 +180,32 @@ export function Import() {
             if (f) void loadFile(f);
           }}
         >
-          <h2 className="font-semibold">1. Drop the P6 export</h2>
-          <p className="mt-1 text-[12px] text-slate-500">
+          <h2 className="card-title">1. Drop the P6 export</h2>
+          <p className="mt-1 text-[12px] text-[var(--text-muted)]">
             Drag the file here, or pick it. Accepts <b>.xer</b> (P6's own export, no Excel involved), <b>.xlsx</b> and <b>.csv</b>. Nothing is imported until you confirm the preview.
           </p>
           <input className="mt-3 block text-[12px]" type="file" accept=".xer,.xlsx,.xlsm,.xls,.csv,.tsv,.txt" onChange={(e) => e.target.files?.[0] && void loadFile(e.target.files[0])} />
         </div>
         <div className="card">
-          <h2 className="font-semibold">2. Paste rows</h2>
-          <p className="mt-1 text-[12px] text-slate-500">If you already have the export open somewhere, select the columns, copy, and paste here.</p>
+          <h2 className="card-title">2. Paste rows</h2>
+          <p className="mt-1 text-[12px] text-[var(--text-muted)]">If you already have the export open somewhere, select the columns, copy, and paste here.</p>
           <textarea className="input mt-2 h-28 w-full font-mono text-[11px]" placeholder={'Activity ID\tActivity Name\tOriginal Duration\tRemaining Duration\tStart\tFinish'} value={paste} onChange={(e) => setPaste(e.target.value)} />
           <button className="btn mt-2" disabled={!paste.trim()} onClick={loadPaste}>
             Parse pasted rows
           </button>
         </div>
         <div className="card">
-          <h2 className="font-semibold">3. A file already in the folder</h2>
-          <p className="mt-1 text-[12px] text-slate-500">Exports saved into the storage folder or its exports sub-folder.</p>
+          <h2 className="card-title">3. A file already in the folder</h2>
+          <p className="mt-1 text-[12px] text-[var(--text-muted)]">Exports saved into the storage folder or its exports sub-folder.</p>
           <button className="btn mt-2" disabled={state.adapterKind !== 'filesystem'} onClick={() => void actions.listFolderFiles().then(setFolderFiles).catch(fail)}>
             List files
           </button>
           {folderFiles && (
             <ul className="mt-2 max-h-28 overflow-auto text-[12px]">
-              {folderFiles.length === 0 && <li className="text-slate-400">No schedule files found in the folder.</li>}
+              {folderFiles.length === 0 && <li className="text-[var(--text-subtle)]">No schedule files found in the folder.</li>}
               {folderFiles.map((f) => (
                 <li key={f}>
-                  <button className="text-blue-700 underline" onClick={() => void loadFolderFile(f)}>{f}</button>
+                  <button className="btn-link" onClick={() => void loadFolderFile(f)}>{f}</button>
                 </li>
               ))}
             </ul>
@@ -219,10 +219,10 @@ export function Import() {
         <div className="card mt-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="font-semibold">
+              <h2 className="card-title">
                 Preview: {pending.name} {pending.type === 'xer' && <Badge tone="purple">P6 native .xer</Badge>}
               </h2>
-              <div className="text-[12px] text-slate-500">Importing as the {kind} schedule. Check the mapping and the counts, then confirm.</div>
+              <div className="text-[12px] text-[var(--text-muted)]">Importing as the {kind} schedule. Check the mapping and the counts, then confirm.</div>
             </div>
             <div className="flex gap-2">
               <button className="btn" onClick={reset}>Discard</button>
@@ -233,17 +233,17 @@ export function Import() {
           </div>
 
           {pending.type === 'workbook' && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded bg-slate-50 px-3 py-2 text-[12px]">
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded bg-[var(--surface-2)] px-3 py-2 text-[12px]">
               <span className="font-semibold">Sheet</span>
               <select className="input" value={pending.sheet} onChange={(e) => { setPending({ ...pending, sheet: e.target.value }); setMapOverride(null); }}>
                 {pending.wb.SheetNames.map((n) => <option key={n} value={n}>{n}</option>)}
               </select>
-              <span className="text-slate-500">{pending.wb.SheetNames.length} sheets in this workbook.</span>
+              <span className="text-[var(--text-muted)]">{pending.wb.SheetNames.length} sheets in this workbook.</span>
             </div>
           )}
 
           {pending.type === 'xer' && xer && (
-            <div className="mt-3 flex flex-wrap items-end gap-3 rounded bg-slate-50 px-3 py-2 text-[12px]">
+            <div className="mt-3 flex flex-wrap items-end gap-3 rounded bg-[var(--surface-2)] px-3 py-2 text-[12px]">
               {xer.projects.length > 1 && (
                 <label>
                   <div className="font-semibold">Project</div>
@@ -257,7 +257,7 @@ export function Import() {
                 <div className="font-semibold">Hours per day</div>
                 <input className="input mt-1 w-24" type="number" step="0.5" value={hoursPerDay} onChange={(e) => setHoursPerDay(Number(e.target.value) || 8)} />
               </label>
-              <div className="text-slate-600">
+              <div className="text-[var(--text-muted)]">
                 XER holds durations in hours. {xer.calendarHours.length > 0
                   ? <>Converted using each activity's own calendar: {xer.calendarHours.map((c) => `${c.name} at ${c.hoursPerDay} h`).join(', ')}.</>
                   : <>No calendar was found in the file, so the value above is used for every activity.</>}
@@ -266,18 +266,18 @@ export function Import() {
           )}
 
           {pending.type !== 'xer' && layout && grid && (
-            <div className="mt-3 rounded bg-slate-50 px-3 py-2">
+            <div className="mt-3 rounded bg-[var(--surface-2)] px-3 py-2">
               <div className="flex items-baseline gap-2 text-[12px]">
                 <span className="font-semibold">Column mapping</span>
                 {layout.fromHeader
-                  ? <span className="text-slate-500">Matched from the header in row {(layout.headerRow ?? 0) + 1}. Change any that are wrong.</span>
-                  : <span className="text-amber-700">No header row recognised, so columns are read by position. Check these carefully.</span>}
-                {mapOverride && <button className="text-blue-700 underline" onClick={() => setMapOverride(null)}>reset to detected</button>}
+                  ? <span className="text-[var(--text-muted)]">Matched from the header in row {(layout.headerRow ?? 0) + 1}. Change any that are wrong.</span>
+                  : <span className="text-[var(--warn)]">No header row recognised, so columns are read by position. Check these carefully.</span>}
+                {mapOverride && <button className="btn-link" onClick={() => setMapOverride(null)}>reset to detected</button>}
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
                 {FIELD_ORDER.map((f) => (
                   <label key={f} className="text-[11px]">
-                    <div className="font-semibold text-slate-600">{FIELD_LABELS[f]}</div>
+                    <div className="font-semibold text-[var(--text-muted)]">{FIELD_LABELS[f]}</div>
                     <select
                       className="input mt-0.5 w-full"
                       value={layout.map[f] === null ? '' : String(layout.map[f])}
@@ -307,9 +307,9 @@ export function Import() {
               ['IDs with no location segment', preview.noId],
               [kind === 'current' ? 'Not in the baseline' : 'Not in the current schedule', preview.missingInOther ?? 'n/a'],
             ].map(([k, v]) => (
-              <div key={String(k)} className="rounded bg-slate-50 px-2 py-1">
-                <div className="text-slate-500">{k}</div>
-                <div className="font-semibold">{v}</div>
+              <div key={String(k)} className="factlet">
+                <div className="factlet-label">{k}</div>
+                <div className="factlet-value">{v}</div>
               </div>
             ))}
           </div>
@@ -318,7 +318,7 @@ export function Import() {
             <div className="mt-2"><Notice tone="error">No activity rows were found. Check the column mapping above: the Activity Name column decides what is an activity and what is a WBS summary row.</Notice></div>
           )}
           {kind === 'current' && (preview.newTypes.length > 0 || preview.newLocs.length > 0) && (
-            <div className="mt-2 text-[12px] text-slate-600">
+            <div className="mt-2 text-[12px] text-[var(--text-muted)]">
               Confirming will also write {preview.newLocs.length ? `${preview.newLocs.length} new location${preview.newLocs.length === 1 ? '' : 's'} (${preview.newLocs.join(', ')})` : 'no new locations'} and{' '}
               {preview.newTypes.length ? `${preview.newTypes.length} new library type${preview.newTypes.length === 1 ? '' : 's'} on default rates` : 'no new library types'}. Existing entries keep their rates.
             </div>
@@ -329,7 +329,7 @@ export function Import() {
           )}
           {parsed.warnings.length > 0 && (
             <details className="mt-2 text-[12px]">
-              <summary className="cursor-pointer text-amber-800">{parsed.warnings.length} row warnings</summary>
+              <summary className="cursor-pointer text-[var(--warn)]">{parsed.warnings.length} row warnings</summary>
               <ul className="mt-1 max-h-40 overflow-auto">
                 {parsed.warnings.map((w, i) => <li key={i}>Row {w.row}: {w.message}</li>)}
               </ul>
@@ -350,12 +350,12 @@ export function Import() {
                   {preview.acts.slice(0, 15).map((a: P6Activity) => (
                     <tr key={a.sortOrder}>
                       <td><pre className="m-0 font-mono text-[11px]">{a.rawActivityId}</pre></td>
-                      <td><Badge tone={a.rowType === 'WBS' ? 'slate' : 'green'}>{a.rowType}</Badge></td>
+                      <td><Badge tone={a.rowType === 'WBS' ? 'muted' : 'good'}>{a.rowType}</Badge></td>
                       <td className="max-w-md truncate" title={a.activityName}>{a.activityName}</td>
                       <td className="num">{a.originalDuration ?? ''}</td>
                       <td className="num">{a.remainingDuration ?? ''}</td>
-                      <td>{fmtDate(a.startDate)}{a.actualStart ? ' A' : ''}{!a.startDate && a.startRaw ? <span className="text-red-600"> ({a.startRaw})</span> : ''}</td>
-                      <td>{fmtDate(a.finishDate)}{a.actualFinish ? ' A' : ''}{!a.finishDate && a.finishRaw ? <span className="text-red-600"> ({a.finishRaw})</span> : ''}</td>
+                      <td>{fmtDate(a.startDate)}{a.actualStart ? ' A' : ''}{!a.startDate && a.startRaw ? <span className="text-[var(--bad)]"> ({a.startRaw})</span> : ''}</td>
+                      <td>{fmtDate(a.finishDate)}{a.actualFinish ? ' A' : ''}{!a.finishDate && a.finishRaw ? <span className="text-[var(--bad)]"> ({a.finishRaw})</span> : ''}</td>
                       <td>{a.location}</td>
                       <td>{a.activityType}</td>
                     </tr>
@@ -368,8 +368,8 @@ export function Import() {
       )}
 
       <div className="card mt-4">
-        <h2 className="font-semibold">Import history</h2>
-        <p className="text-[12px] text-slate-500">Imports are append only. The most recent of each kind is in use. Restoring writes a new import with the old rows, so nothing is ever overwritten.</p>
+        <h2 className="card-title">Import history</h2>
+        <p className="text-[12px] text-[var(--text-muted)]">Imports are append only. The most recent of each kind is in use. Restoring writes a new import with the old rows, so nothing is ever overwritten.</p>
         <table className="tbl mt-2">
           <thead><tr><th>Imported</th><th>Kind</th><th>Source</th><th className="text-right">Rows</th><th>File</th><th></th></tr></thead>
           <tbody>
@@ -378,20 +378,20 @@ export function Import() {
               return (
                 <tr key={h.file}>
                   <td>{fmtDateTime(h.importedAt)}</td>
-                  <td><Badge tone={h.kind === 'current' ? 'blue' : 'purple'}>{h.kind}</Badge> {inUse && <Badge tone="green">in use</Badge>}</td>
+                  <td><Badge tone={h.kind === 'current' ? 'info' : 'purple'}>{h.kind}</Badge> {inUse && <Badge tone="good">in use</Badge>}</td>
                   <td>{h.sourceFilename}</td>
                   <td className="num">{h.rowCount}</td>
-                  <td className="text-slate-500">{h.file}</td>
+                  <td className="text-[var(--text-muted)]">{h.file}</td>
                   <td>
-                    <button className="text-blue-700 underline" onClick={() => void actions.readImport(h).then((imp) => imp && setViewing({ entry: h, imp })).catch(fail)}>view</button>
+                    <button className="btn-link" onClick={() => void actions.readImport(h).then((imp) => imp && setViewing({ entry: h, imp })).catch(fail)}>view</button>
                     {!inUse && (
-                      <button className="ml-2 text-blue-700 underline" onClick={() => { if (confirm(`Restore ${h.file} as the ${h.kind} schedule?`)) void actions.restoreImport(h).catch(fail); }}>restore</button>
+                      <button className="btn-link ml-2" onClick={() => { if (confirm(`Restore ${h.file} as the ${h.kind} schedule?`)) void actions.restoreImport(h).catch(fail); }}>restore</button>
                     )}
                   </td>
                 </tr>
               );
             })}
-            {history.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-slate-400">No imports yet.</td></tr>}
+            {history.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-[var(--text-subtle)]">No imports yet.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -399,7 +399,7 @@ export function Import() {
       {viewing && (
         <div className="card mt-4">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold">{viewing.entry.file} ({viewing.imp.activities.length} rows)</h2>
+            <h2 className="card-title">{viewing.entry.file} ({viewing.imp.activities.length} rows)</h2>
             <button className="btn" onClick={() => setViewing(null)}>Close</button>
           </div>
           <div className="mt-2 max-h-96 overflow-auto">

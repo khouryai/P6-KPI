@@ -88,6 +88,56 @@ invents one. Two actions on the Activity Library screen close that loop:
 A retired entry is excluded from matching and from the type count, and is never re-added by
 a later import.
 
+## Visual design — shared with cx-portal
+
+The look is not invented here. The canonical `:root` token sheet at the top of
+`src/app/index.css` is a **verbatim copy** of the one in `khouryai/cx-portal`
+(`styles.css`, documented in that repo's `DESIGN_TOKENS.md`). Values were not
+adjusted: the two applications are meant to read as one product. Only tokens
+this app has no use for were left out (Test Register skin slots, PDF markup pen
+colors).
+
+The same rules of engagement apply here:
+
+- **New colors go through tokens, not raw hex.** If a value you need does not
+  exist, add it to the token sheet in the right category and use `var(--name)`.
+- **Never open a second bare `:root {}` block.**
+- Dark mode was deliberately removed there; it is not reintroduced here.
+
+What carries the family resemblance, beyond the palette:
+
+- **Archivo** for UI and display, **IBM Plex Mono** for every eyebrow, KPI
+  label, table header and identifier. Both are self-hosted in
+  `src/assets/fonts/`, copied from cx-portal's vendored `@fontsource` files, so
+  there is no network call and the standalone build inlines them as data URIs
+  (~120 KB of the single file). Latin subsets only.
+- **The mono uppercase micro-label** — 9.5 to 10.5px, 0.06 to 0.16em tracking.
+  It is the most recognisable mark of the language.
+- **The chip-stat** — mono micro-label plus a bold tabular number in a tinted
+  pill, semantic tone per status. Used for the page hero rail
+  (`Page stats={…}`), the import preview tiles (`.factlet`) and the data
+  quality counts.
+- **One button grammar** — 8px radius, `--dur-fast` transition, 1px press,
+  0.45 disabled opacity, and two roles only: solid Hitachi red is the primary
+  action, bordered surface is everything else.
+- **Status badges carry a leading dot** and a complete triple (strong ink, pale
+  background, soft border tint of the same ink).
+- **The sidenav** is near-black with a red radial brand wash, mono section
+  labels, and a glowing red rail on the active item.
+
+Two departures, both deliberate:
+
+- Row-level tints are low-alpha washes (`.row-warn`, `.row-bad`) rather than
+  the full `--warn-light` background. A status color sized for a badge is far
+  too heavy across an entire table row.
+- Filter banks live in their own toolbar row under the hero, not inside it.
+  This app has screens with five filters; putting them in the hero crushed the
+  title column.
+
+Chart colors stay literal hex rather than `var(--…)`, matching cx-portal's own
+exception for Chart.js palettes. Here the reason is the PNG export: it
+rasterises through a detached SVG where custom properties do not resolve.
+
 ## Storage rules
 
 - Plain JSON only, never a single binary file written on every change.

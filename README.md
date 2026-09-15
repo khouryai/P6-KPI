@@ -11,6 +11,8 @@ budget and track Testing and Commissioning man hours on the BART CBTC program.
 - Keeps all state as plain JSON in a OneDrive folder. No server, no database, no account,
   no network call at runtime.
 - **Runs on a laptop with no Node.js, no installer and no admin rights.**
+- Shares its visual design system with `khouryai/cx-portal`, down to the token
+  sheet and typefaces, so the two read as one product.
 
 The engine reproduces the source workbook's figures exactly for the same inputs
 (`tests/workbook-parity.test.ts`).

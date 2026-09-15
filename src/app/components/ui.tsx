@@ -1,18 +1,13 @@
 import React, { useMemo, useState } from 'react';
 
-export function Badge({ tone, children }: { tone: 'green' | 'amber' | 'red' | 'slate' | 'blue' | 'purple'; children: React.ReactNode }) {
-  const cls = {
-    green: 'bg-emerald-100 text-emerald-800',
-    amber: 'bg-amber-100 text-amber-800',
-    red: 'bg-red-100 text-red-800',
-    slate: 'bg-slate-200 text-slate-700',
-    blue: 'bg-blue-100 text-blue-800',
-    purple: 'bg-purple-100 text-purple-800',
-  }[tone];
-  return <span className={`badge ${cls}`}>{children}</span>;
+export type Tone = 'good' | 'warn' | 'bad' | 'info' | 'purple' | 'muted';
+
+export function Badge({ tone, children }: { tone: Tone; children: React.ReactNode }) {
+  return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
-export function statusTone(s: string): 'green' | 'amber' | 'red' | 'slate' | 'blue' | 'purple' {
+/** Map a domain status string to a semantic tone. One place, so no screen hand-maps. */
+export function statusTone(s: string): Tone {
   switch (s) {
     case 'IN BUDGET':
     case 'SET':
@@ -21,50 +16,129 @@ export function statusTone(s: string): 'green' | 'amber' | 'red' | 'slate' | 'bl
     case 'OVERRIDE':
     case 'P6 ACTUAL':
     case 'TEST WINDOW':
-      return 'green';
+      return 'good';
     case 'DEFAULT':
     case 'CURRENT':
     case 'IN PROGRESS':
     case 'P6':
-      return 'amber';
+      return 'warn';
     case 'REVIEW':
     case 'NEEDS SHIFTS':
     case 'NO MATCH':
     case 'NONE':
-      return 'red';
+      return 'bad';
     case 'EXCLUDED':
     case 'DELETED':
     case 'CANCELLED':
     case 'NOT STARTED':
-      return 'slate';
+      return 'muted';
     default:
-      return 'blue';
+      return 'info';
   }
 }
 
-export function Page({ title, subtitle, actions, children }: { title: string; subtitle?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode }) {
+export type HeroStat = { label: string; value: React.ReactNode; tone?: 'red' | 'amber' | 'blue' | 'good' | 'muted' };
+
+/**
+ * The page header: mono eyebrow, display title, muted subtitle, and either a
+ * chip-stat rail or a row of actions on the right.
+ */
+export function Page({
+  eyebrow,
+  title,
+  subtitle,
+  stats,
+  actions,
+  toolbar,
+  children,
+}: {
+  eyebrow?: string;
+  title: string;
+  subtitle?: React.ReactNode;
+  stats?: HeroStat[];
+  actions?: React.ReactNode;
+  /** A filter bank. Rendered as its own full-width row so it never squeezes the title. */
+  toolbar?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex h-full flex-col">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-white px-5 py-3">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-900">{title}</h1>
-          {subtitle && <div className="mt-0.5 text-[12px] text-slate-500">{subtitle}</div>}
+      <div className="page-hero">
+        <div className="min-w-0">
+          {eyebrow && <div className="ph-eyebrow">{eyebrow}</div>}
+          <h1 className="ph-title">{title}</h1>
+          {subtitle && <div className="ph-sub">{subtitle}</div>}
         </div>
-        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          {stats && stats.length > 0 && (
+            <div className="flex flex-wrap items-center justify-end gap-[7px]">
+              {stats.map((s) => (
+                <span key={s.label} className={`ph-stat${s.tone ? ` tone-${s.tone}` : ''}`}>
+                  <span className="ph-stat-lbl">{s.label}</span>
+                  <span className="ph-stat-val">{s.value}</span>
+                </span>
+              ))}
+            </div>
+          )}
+          {actions && <div className="ph-actions">{actions}</div>}
+        </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-5">{children}</div>
+      {toolbar && <div className="flex flex-wrap items-center gap-2 border-b border-[var(--line-soft)] bg-[var(--surface)] px-7 py-2.5">{toolbar}</div>}
+      <div className="min-h-0 flex-1 overflow-auto px-7 py-6">{children}</div>
     </div>
   );
 }
 
 export function Notice({ tone, children }: { tone: 'info' | 'warn' | 'error' | 'ok'; children: React.ReactNode }) {
-  const cls = {
-    info: 'border-blue-200 bg-blue-50 text-blue-900',
-    warn: 'border-amber-300 bg-amber-50 text-amber-900',
-    error: 'border-red-300 bg-red-50 text-red-900',
-    ok: 'border-emerald-300 bg-emerald-50 text-emerald-900',
-  }[tone];
-  return <div className={`rounded border px-3 py-2 text-[12px] ${cls}`}>{children}</div>;
+  return <div className={`notice notice-${tone}`}>{children}</div>;
+}
+
+/** A KPI card: mono label, large tabular number, muted supporting line. */
+export function Stat({
+  label,
+  value,
+  sub,
+  tone,
+  primary,
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: 'good' | 'warn' | 'bad';
+  primary?: boolean;
+}) {
+  return (
+    <div className={`kpi-card${primary ? ' kpi-primary' : ''}`}>
+      <div className="kpi-label">{label}</div>
+      <div className={`kpi-value${tone ? ` tone-${tone}` : ''}`}>{value}</div>
+      {sub && <div className="kpi-sub">{sub}</div>}
+    </div>
+  );
+}
+
+/** A card with a display-weight title and optional right-hand meta. */
+export function Panel({
+  title,
+  meta,
+  children,
+  className = '',
+}: {
+  title?: React.ReactNode;
+  meta?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`card ${className}`}>
+      {(title || meta) && (
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          {typeof title === 'string' ? <h2 className="card-title">{title}</h2> : title}
+          {meta && <div className="text-[11.5px] text-[var(--text-muted)]">{meta}</div>}
+        </div>
+      )}
+      {children}
+    </div>
+  );
 }
 
 export type Column<T> = {
@@ -77,7 +151,14 @@ export type Column<T> = {
 };
 
 /** A sortable table. Sorting is by the column's raw value. */
-export function SortableTable<T>({ rows, columns, rowKey, defaultSort, maxHeight = 'calc(100vh - 260px)', rowClass }: {
+export function SortableTable<T>({
+  rows,
+  columns,
+  rowKey,
+  defaultSort,
+  maxHeight = 'calc(100vh - 290px)',
+  rowClass,
+}: {
   rows: T[];
   columns: Column<T>[];
   rowKey: (row: T) => string;
@@ -103,14 +184,19 @@ export function SortableTable<T>({ rows, columns, rowKey, defaultSort, maxHeight
   }, [rows, columns, sort]);
   const toggle = (key: string) => setSort((s) => (s && s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
   return (
-    <div className="overflow-auto rounded border border-slate-200 bg-white" style={{ maxHeight }}>
+    <div className="table-wrap" style={{ maxHeight }}>
       <table className="tbl">
         <thead>
           <tr>
             {columns.map((c) => (
-              <th key={c.key} className={`cursor-pointer select-none ${c.num ? 'text-right' : ''}`} style={c.width ? { width: c.width } : undefined} onClick={() => toggle(c.key)}>
+              <th
+                key={c.key}
+                className={`cursor-pointer select-none ${c.num ? 'text-right' : ''}`}
+                style={c.width ? { width: c.width } : undefined}
+                onClick={() => toggle(c.key)}
+              >
                 {c.label}
-                {sort?.key === c.key && <span className="ml-1 text-slate-400">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
+                {sort?.key === c.key && <span className="ml-1 text-[var(--hitachi-red)]">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
               </th>
             ))}
           </tr>
@@ -127,7 +213,7 @@ export function SortableTable<T>({ rows, columns, rowKey, defaultSort, maxHeight
           ))}
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={columns.length} className="py-6 text-center text-slate-400">
+              <td colSpan={columns.length} className="py-8 text-center text-[var(--text-subtle)]">
                 Nothing to show.
               </td>
             </tr>
@@ -139,7 +225,15 @@ export function SortableTable<T>({ rows, columns, rowKey, defaultSort, maxHeight
 }
 
 /** Text input that commits on blur or Enter, so typing does not re-render the whole table on every key. */
-export function CellInput({ value, onCommit, type = 'text', placeholder, className = 'cell-input', title, list }: {
+export function CellInput({
+  value,
+  onCommit,
+  type = 'text',
+  placeholder,
+  className = 'cell-input',
+  title,
+  list,
+}: {
   value: string;
   onCommit: (v: string) => void;
   type?: 'text' | 'number' | 'date';
@@ -180,7 +274,17 @@ export function CellInput({ value, onCommit, type = 'text', placeholder, classNa
   );
 }
 
-export function Select({ value, options, onChange, className = 'cell-input' }: { value: string; options: { value: string; label: string }[]; onChange: (v: string) => void; className?: string }) {
+export function Select({
+  value,
+  options,
+  onChange,
+  className = 'cell-input',
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+  className?: string;
+}) {
   return (
     <select className={className} value={value} onChange={(e) => onChange(e.target.value)}>
       {options.map((o) => (
@@ -189,16 +293,5 @@ export function Select({ value, options, onChange, className = 'cell-input' }: {
         </option>
       ))}
     </select>
-  );
-}
-
-export function Stat({ label, value, sub, tone }: { label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: 'ok' | 'warn' | 'bad' }) {
-  const color = tone === 'bad' ? 'text-red-700' : tone === 'warn' ? 'text-amber-700' : 'text-slate-900';
-  return (
-    <div className="card">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold tabular-nums ${color}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-[12px] text-slate-500">{sub}</div>}
-    </div>
   );
 }

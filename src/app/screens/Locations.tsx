@@ -26,7 +26,7 @@ export function Locations() {
     { key: 'budget', label: 'Budget h', value: (r) => r.budgetHours, num: true, render: (r) => fmtHours(r.budgetHours) },
   ];
   return (
-    <Page title="Locations" subtitle={`Discovered from the 4th segment of every Activity ID. ${model.locations.length} locations. Leave the factor blank to use the default of ${def.toFixed(2)}. The factor multiplies RATE and DUR hours; an activity override bypasses it.`}>
+    <Page eyebrow="Budget" title="Locations" subtitle={`Discovered from the 4th segment of every Activity ID. ${model.locations.length} locations. Leave the factor blank to use the default of ${def.toFixed(2)}. The factor multiplies RATE and DUR hours; an activity override bypasses it.`}>
       <SortableTable rows={model.locations} columns={columns} rowKey={(r) => r.code} />
     </Page>
   );

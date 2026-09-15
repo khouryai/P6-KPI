@@ -81,7 +81,7 @@ export function Library({ route }: { route: Route }) {
   };
   const disciplines = [...new Set(state.data.library.map((e) => e.discipline).filter(Boolean))] as string[];
 
-  const basisOpts = [{ value: '', label: `(default: ${settings.defaultBasis})` }, { value: 'RATE', label: 'RATE' }, { value: 'DUR', label: 'DUR' }];
+  const basisOpts = [{ value: '', label: `${settings.defaultBasis} (auto)` }, { value: 'RATE', label: 'RATE' }, { value: 'DUR', label: 'DUR' }];
   const incOpts = [{ value: '', label: '(auto)' }, { value: 'Y', label: 'Y' }, { value: 'N', label: 'N' }];
 
   const columns: Column<LibraryStat>[] = [
@@ -90,22 +90,22 @@ export function Library({ route }: { route: Route }) {
     { key: 'days', label: 'Total P6 days', value: (r) => r.totalP6Days, num: true },
     { key: 'status', label: 'Rate status', value: (r) => r.rateStatus, render: (r) => <Badge tone={statusTone(r.rateStatus)}>{r.rateStatus}</Badge> },
     { key: 'disc', label: 'Discipline', value: (r) => r.entry.discipline ?? '', render: (r) => <CellInput value={r.entry.discipline ?? ''} list="disciplines" onCommit={(v) => edit(r.matchKey, { discipline: v.trim() || undefined })} /> },
-    { key: 'inc', label: 'Include', value: (r) => `${r.entry.includeOverride ?? ''}${r.include}`, render: (r) => <span className="flex items-center gap-1"><Select value={r.entry.includeOverride ?? ''} options={incOpts} onChange={(v) => edit(r.matchKey, { includeOverride: (v || undefined) as 'Y' | 'N' | undefined })} /><Badge tone={r.include === 'Y' ? 'green' : 'slate'}>{r.include}</Badge></span> },
+    { key: 'inc', label: 'Include', value: (r) => `${r.entry.includeOverride ?? ''}${r.include}`, render: (r) => <span className="flex items-center gap-1"><Select value={r.entry.includeOverride ?? ''} options={incOpts} onChange={(v) => edit(r.matchKey, { includeOverride: (v || undefined) as 'Y' | 'N' | undefined })} /><Badge tone={r.include === 'Y' ? 'good' : 'muted'}>{r.include}</Badge></span> },
     { key: 'basis', label: 'Basis', value: (r) => r.basisEff, render: (r) => <Select value={r.entry.basis ?? ''} options={basisOpts} onChange={(v) => edit(r.matchKey, { basis: (v || undefined) as Basis | undefined })} /> },
     { key: 'crew', label: 'Crew', value: (r) => r.crewEff, num: true, render: (r) => <CellInput type="number" value={r.entry.crewSize?.toString() ?? ''} placeholder={String(settings.defaultCrew)} onCommit={(v) => edit(r.matchKey, { crewSize: num(v) })} /> },
     { key: 'shift', label: 'Shift h', value: (r) => r.shiftEff, num: true, render: (r) => <CellInput type="number" value={r.entry.shiftHours?.toString() ?? ''} placeholder={String(settings.defaultShiftHours)} onCommit={(v) => edit(r.matchKey, { shiftHours: num(v) })} /> },
     { key: 'shifts', label: 'Duration shifts', value: (r) => r.entry.durationShifts ?? null, num: true, render: (r) => <CellInput type="number" value={r.entry.durationShifts?.toString() ?? ''} placeholder={r.basisEff === 'RATE' ? 'required' : 'n/a'} onCommit={(v) => edit(r.matchKey, { durationShifts: num(v) })} /> },
-    { key: 'std', label: 'Std h / instance', value: (r) => r.stdHoursIfRate, num: true, render: (r) => (r.basisEff === 'RATE' ? fmtHours(r.stdHoursIfRate) : <span className="text-slate-400" title="DUR basis: crew x shift hours x P6 original duration per activity">per P6 days</span>) },
+    { key: 'std', label: 'Std h / instance', value: (r) => r.stdHoursIfRate, num: true, render: (r) => (r.basisEff === 'RATE' ? fmtHours(r.stdHoursIfRate) : <span className="text-[var(--text-subtle)]" title="DUR basis: crew x shift hours x P6 original duration per activity">per P6 days</span>) },
     { key: 'budget', label: 'Budget h', value: (r) => r.budgetHours, num: true, render: (r) => fmtHours(r.budgetHours) },
     { key: 'notes', label: 'Notes', value: (r) => r.entry.notes ?? '', render: (r) => <CellInput value={r.entry.notes ?? ''} onCommit={(v) => edit(r.matchKey, { notes: v.trim() || undefined })} /> },
-    { key: 'act', label: '', value: () => '', render: (r) => <button className="text-[11px] text-slate-500 underline" title="Remove this key from pricing. Its activities will resolve through tier 2 (last parenthetical dropped) or show as REVIEW. It is never re-added by import." onClick={() => retire(r.matchKey, true)}>retire</button> },
+    { key: 'act', label: '', value: () => '', render: (r) => <button className="btn-link text-[11px] font-normal" title="Remove this key from pricing. Its activities will resolve through tier 2 (last parenthetical dropped) or show as REVIEW. It is never re-added by import." onClick={() => retire(r.matchKey, true)}>retire</button> },
   ];
 
   return (
-    <Page
+    <Page eyebrow="Budget"
       title="Activity Library"
       subtitle={`${model.summary.activityTypes} types. ${model.summary.typesOnDefaults} still on defaults, ${model.summary.typesNeedingShifts} RATE types missing a shift count. Sorted by total P6 days so the high impact types come first.`}
-      actions={
+      toolbar={
         <>
           <input className="input" placeholder="Filter by key or discipline" value={filter} onChange={(e) => setFilter(e.target.value)} />
           {flag && <a className="btn" href="#/library">Clear filter ({flag})</a>}
@@ -114,25 +114,25 @@ export function Library({ route }: { route: Route }) {
     >
       <div className="mb-3 grid gap-3 lg:grid-cols-2">
         <div className="card">
-          <h2 className="font-semibold">Add a key by hand</h2>
-          <p className="text-[12px] text-slate-500">Keys are normally discovered from the schedule. Add one by hand when you want a shorter, consolidated key for tier 2 matching to find.</p>
+          <h2 className="card-title">Add a key by hand</h2>
+          <p className="text-[12px] text-[var(--text-muted)]">Keys are normally discovered from the schedule. Add one by hand when you want a shorter, consolidated key for tier 2 matching to find.</p>
           <div className="mt-2 flex gap-2">
             <input className="input flex-1" placeholder="IXL Sim Mode Test (Adjacent Location)" value={newKey} onChange={(e) => setNewKey(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addKey(newKey)} />
             <button className="btn" onClick={() => addKey(newKey)}>Add</button>
           </div>
         </div>
         <div className="card">
-          <h2 className="font-semibold">Consolidate variant families</h2>
+          <h2 className="card-title">Consolidate variant families</h2>
           {families.length === 0 ? (
-            <p className="text-[12px] text-slate-500">No families found. A family is two or more keys that differ only by their last parenthetical group.</p>
+            <p className="text-[12px] text-[var(--text-muted)]">No families found. A family is two or more keys that differ only by their last parenthetical group.</p>
           ) : (
             <>
-              <p className="text-[12px] text-slate-500">These keys differ only by their last parenthetical. Consolidating prices them once.</p>
+              <p className="text-[12px] text-[var(--text-muted)]">These keys differ only by their last parenthetical. Consolidating prices them once.</p>
               <ul className="mt-1 max-h-32 overflow-auto text-[12px]">
                 {families.map((f) => (
                   <li key={f.stem} className="flex items-center justify-between gap-2 py-0.5">
                     <span className="truncate" title={f.variants.map((v) => v.matchKey).join('\n')}>
-                      <b>{f.stem}</b> <span className="text-slate-500">({f.variants.length} variants, {f.count} activities, {f.days} P6 days)</span>
+                      <b>{f.stem}</b> <span className="text-[var(--text-muted)]">({f.variants.length} variants, {f.count} activities, {f.days} P6 days)</span>
                     </span>
                     <button className="btn shrink-0 py-0.5 text-[11px]" onClick={() => consolidate(f.stem, f.variants)}>Consolidate</button>
                   </li>
@@ -144,16 +144,16 @@ export function Library({ route }: { route: Route }) {
       </div>
       <datalist id="disciplines">{disciplines.map((d) => <option key={d} value={d} />)}</datalist>
       <div className="mb-3 flex flex-wrap gap-3 text-[12px]">
-        <span><Badge tone="green">SET</Badge> priced</span>
-        <span><Badge tone="amber">DEFAULT</Badge> on Settings defaults ({settings.defaultBasis}, crew {settings.defaultCrew}, {settings.defaultShiftHours} h)</span>
-        <span><Badge tone="red">NEEDS SHIFTS</Badge> RATE with no shift count, budgets zero</span>
-        <span><Badge tone="slate">EXCLUDED</Badge> not in budget</span>
-        <span className="text-slate-500">RATE hours = crew x shift hours x duration shifts. DUR hours = crew x shift hours x P6 original duration. Complexity is applied per location.</span>
+        <span><Badge tone="good">SET</Badge> priced</span>
+        <span><Badge tone="warn">DEFAULT</Badge> on Settings defaults ({settings.defaultBasis}, crew {settings.defaultCrew}, {settings.defaultShiftHours} h)</span>
+        <span><Badge tone="bad">NEEDS SHIFTS</Badge> RATE with no shift count, budgets zero</span>
+        <span><Badge tone="muted">EXCLUDED</Badge> not in budget</span>
+        <span className="text-[var(--text-muted)]">RATE hours = crew x shift hours x duration shifts. DUR hours = crew x shift hours x P6 original duration. Complexity is applied per location.</span>
       </div>
-      <SortableTable rows={rows} columns={columns} rowKey={(r) => r.matchKey} defaultSort={{ key: 'days', dir: 'desc' }} rowClass={(r) => (r.rateStatus === 'DEFAULT' ? 'bg-amber-50' : r.rateStatus === 'NEEDS SHIFTS' ? 'bg-red-50' : r.rateStatus === 'EXCLUDED' ? 'text-slate-400' : '')} />
+      <SortableTable rows={rows} columns={columns} rowKey={(r) => r.matchKey} defaultSort={{ key: 'days', dir: 'desc' }} rowClass={(r) => (r.rateStatus === 'DEFAULT' ? 'row-warn' : r.rateStatus === 'NEEDS SHIFTS' ? 'row-bad' : r.rateStatus === 'EXCLUDED' ? 'row-muted' : '')} />
       {retired.length > 0 && (
         <div className="mt-4">
-          <button className="text-[12px] text-blue-700 underline" onClick={() => setShowRetired((v) => !v)}>
+          <button className="btn-link" onClick={() => setShowRetired((v) => !v)}>
             {showRetired ? 'Hide' : 'Show'} {retired.length} retired key{retired.length === 1 ? '' : 's'}
           </button>
           {showRetired && (
@@ -162,7 +162,7 @@ export function Library({ route }: { route: Route }) {
               <ul className="mt-2 text-[12px]">
                 {retired.map((e) => (
                   <li key={e.matchKey} className="py-0.5">
-                    {e.matchKey} <button className="ml-2 text-blue-700 underline" onClick={() => retire(e.matchKey, false)}>restore</button>
+                    {e.matchKey} <button className="btn-link ml-2" onClick={() => retire(e.matchKey, false)}>restore</button>
                   </li>
                 ))}
               </ul>
