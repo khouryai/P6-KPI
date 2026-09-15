@@ -41,6 +41,11 @@ function P() { return [System.IO.Path]::Combine([string[]]$args) }
 
 # --- Where is the application? ----------------------------------------------
 if ([string]::IsNullOrEmpty($AppDir)) { $AppDir = Split-Path -Parent $PSScriptRoot }
+# A caller that passes "C:\some path\" hands the parser a trailing \" , which it
+# reads as an escaped quote, and the quote arrives inside the value. Strip quotes
+# before GetFullPath rather than failing with "Illegal characters in path".
+$AppDir = $AppDir.Trim().Trim([char]34).TrimEnd('\')
+if ([string]::IsNullOrEmpty($AppDir)) { $AppDir = Split-Path -Parent $PSScriptRoot }
 $AppDir = [System.IO.Path]::GetFullPath($AppDir).TrimEnd('\')
 
 if (-not (Test-Path -LiteralPath (P $AppDir "dist" "index.html"))) {

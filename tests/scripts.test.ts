@@ -137,6 +137,32 @@ describe('the updater', () => {
     expect(after.every((l) => /^(echo|goto|pause|endlocal)\b/i.test(l)), `unreachable-after lines: ${after.join(' | ')}`).toBe(true);
   });
 
+  it('never hands a trailing-backslash path to a script as an argument', () => {
+    // %~dp0 ends in a backslash. "%~dp0" therefore ends in \" , which the Windows
+    // command-line parser reads as an escaped quote: the quote lands INSIDE the
+    // value and the script dies with "Illegal characters in path". A path used as
+    // an argument value must end in a real path segment, or a dot.
+    const offenders: string[] = [];
+    for (const file of cmdFiles) {
+      readFileSync(join(ROOT, file), 'utf8')
+        .split(/\r?\n/)
+        .forEach((line, i) => {
+          if (/^\s*rem\b/i.test(line)) return;
+          // -Switch "%~dp0"  or  -Switch "%~dp0subdir\"
+          if (/-\w+\s+"%~dp0[^"]*\\"/.test(line) || /-\w+\s+"%~dp0"/.test(line)) {
+            offenders.push(`${file}:${i + 1}  ${line.trim()}`);
+          }
+        });
+    }
+    expect(offenders, 'append a path segment or a dot: "%~dp0."').toEqual([]);
+  });
+
+  it('works out the app folder from the script, not from an argument', () => {
+    expect(code).toMatch(/Split-Path -Parent \$PSScriptRoot/);
+    // And survives a quote arriving inside the value anyway.
+    expect(code).toMatch(/Trim\(\[char\]34\)/);
+  });
+
   it('points at a real branch of a real repo', () => {
     const cfg = JSON.parse(readFileSync(resolve(ROOT, 'server/update.json'), 'utf8'));
     expect(cfg.repo).toMatch(/^[\w.-]+\/[\w.-]+$/);

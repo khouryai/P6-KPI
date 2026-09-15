@@ -40,8 +40,15 @@ rem  file by byte offset and would carry on at that offset inside the NEW file,
 rem  running whatever text happened to land there. Chaining pause and exit onto
 rem  the same line means the whole line is already in memory and cmd never goes
 rem  back to the file. Do not add anything after it.
+rem
+rem  It deliberately passes NO -AppDir. %~dp0 ends in a backslash, so "%~dp0"
+rem  hands Windows a trailing \" which the command-line parser reads as an
+rem  ESCAPED QUOTE: the script then receives a path with a literal " in it and
+rem  dies with "Illegal characters in path". update.ps1 works out the folder
+rem  from its own location, which is always right. Do not pass "%~dp0" as an
+rem  argument value here or in any other script.
 rem ---------------------------------------------------------------------------
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0server\update.ps1" -AppDir "%~dp0" & pause & exit /b
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0server\update.ps1" & pause & exit /b
 
 rem ---------------------------------------------------------------------------
 :NoApp
