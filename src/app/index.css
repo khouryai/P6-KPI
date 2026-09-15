@@ -684,6 +684,7 @@ select.cell-input { padding: 3px 22px 3px 6px; }
 .strip-warn { color: var(--warn); background: var(--warn-light); border-color: var(--warn-border); }
 .strip-error { color: var(--bad); background: var(--bad-light); border-color: var(--bad-border); }
 .strip-dirty { color: var(--hitachi-red-hover); background: var(--hitachi-red-light); border-color: rgba(230, 0, 18, 0.18); }
+.strip-new { color: var(--good); background: var(--good-light); border-color: var(--good-border); }
 
 .toast {
   position: fixed;

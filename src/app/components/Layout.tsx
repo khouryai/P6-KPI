@@ -2,6 +2,8 @@ import React from 'react';
 import { useApp } from '../state';
 import { href } from '../router';
 import { fmtDateTime } from '../format';
+import { BUILD_COMMIT, BUILD_TIME, buildLabel } from '../build';
+import { applyUpdate, useUpdateReady } from '../update';
 
 /** Nav grouped into mono-labelled sections, as in cx-portal's sidenav. */
 const NAV: { section: string; items: { id: string; label: string }[] }[] = [
@@ -37,6 +39,7 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
 export function Layout({ screen, children }: { screen: string; children: React.ReactNode }) {
   const { state, model, actions } = useApp();
   const dirty = state.dirty.size > 0;
+  const updateReady = useUpdateReady();
   const q = model.summary;
   const attention = q.review + q.typesOnDefaults + q.typesNeedingShifts + q.noDates + q.onNoCurve + state.conflicts.length;
 
@@ -74,6 +77,9 @@ export function Layout({ screen, children }: { screen: string; children: React.R
             {storageLine}
           </div>
           {state.lastSavedAt && <div className="mt-0.5 opacity-70">Saved {fmtDateTime(state.lastSavedAt)}</div>}
+          <div className="mt-1 truncate opacity-60" title={`Build ${BUILD_COMMIT}${BUILD_TIME ? ` built ${fmtDateTime(BUILD_TIME)}` : ''}`}>
+            {buildLabel()}
+          </div>
         </div>
       </aside>
 
@@ -92,6 +98,23 @@ export function Layout({ screen, children }: { screen: string; children: React.R
             {state.saving ? 'Saving…' : 'Save'}
           </button>
         </div>
+
+        {updateReady && (
+          <div className="strip strip-new flex items-center justify-between gap-3">
+            <div className="min-w-0 truncate">
+              <span className="font-semibold">A newer build is on disk.</span> The window is still running the old one. Reloading swaps it in; your data is in storage, not
+              in the application, so nothing is lost.
+            </div>
+            <button
+              className="btn btn-mini btn-primary shrink-0"
+              disabled={dirty}
+              title={dirty ? 'Save your changes first: reloading discards them' : 'Reload into the new build'}
+              onClick={applyUpdate}
+            >
+              {dirty ? 'Save first' : 'Reload now'}
+            </button>
+          </div>
+        )}
 
         {state.conflicts.length > 0 && (
           <div className="strip strip-error">

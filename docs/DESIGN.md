@@ -209,8 +209,9 @@ which is also how you move between machines. A restore replaces the edited files
 
 ## Rules for the Windows launcher scripts
 
-`start.cmd` and `Create Desktop App.cmd` are the only things here that run outside a
-browser, so a mistake in one reaches the user's disk. One did: a `del "%VAR%"` with an
+`start.cmd`, `Create Desktop App.cmd`, `Update.cmd` and the two `.ps1` files beside
+them are the only things here that run outside a browser, so a mistake in one reaches
+the user's disk. One did: a `del "%VAR%"` with an
 unset variable, which cmd resolved to the current directory and offered to empty. The
 variable was unset because an unescaped `)` inside an `echo` had closed the enclosing
 `if` block early, so lines meant to be skipped ran anyway.
@@ -225,10 +226,72 @@ Three rules, enforced by `tests/scripts.test.ts`:
    middle of a quoted string, silently changing control flow.
 3. **No temporary script files**, and no writing into `%TEMP%`.
 
-`Create Desktop App.cmd` additionally branches only with `goto :label` and
-`call :label`, never with `( )` blocks, which removes rule 2's failure mode entirely.
-`%ProgramFiles(x86)%` carries a bracket in its own name, so it is copied into a plain
-variable on one line and only that variable is used afterwards.
+`Create Desktop App.cmd` and `Update.cmd` additionally branch only with `goto :label`
+and `call :label`, never with `( )` blocks, which removes rule 2's failure mode
+entirely. `%ProgramFiles(x86)%` carries a bracket in its own name, so it is copied into
+a plain variable on one line and only that variable is used afterwards.
+
+`update.ps1` is the one script that must delete something — the folder it downloads
+into — so it is the one exception, and it is fenced in:
+
+- The single `Remove-Item` lives in one function, `Remove-Staging`, and six guards must
+  all agree before it runs: the path is non-empty, the temp base is non-empty, the path
+  starts with the temp base, it is at least 20 characters longer than the temp base, it
+  contains `tc-budget-update-`, and it exists. An unset variable cannot survive that.
+- Nothing under the application folder is ever removed, only copied over. A file the
+  new build no longer ships is left behind. Clutter is the cheaper mistake.
+
+## Updating in place
+
+Re-downloading a zip to see a code change is friction that makes a change not worth
+making, so `Update.cmd` fetches the current build itself. The infrastructure did not
+need to change for this: `dist/` and `standalone/` were already committed as the
+delivered product, so there was already something fetchable. What was missing was the
+fetch, and a way to tell which build you are looking at.
+
+**Two routes, chosen automatically.** A git clone with git on the PATH gets
+`git pull --ff-only`. Anything else — the normal case, a folder extracted from a zip —
+downloads `https://codeload.github.com/<repo>/zip/refs/heads/<branch>`, which needs no
+token and no API call. A folder that is a clone but has no git is refused rather than
+copied over, because that would silently modify tracked files. The repo and branch live
+in `server/update.json`, not in the script, so moving to another branch is a data change
+the updater can deliver to itself.
+
+**Verify, then copy.** The download is unpacked to a staging folder and checked for
+`dist/index.html`, `standalone/index.html`, `server/serve.ps1` and `start.cmd` before a
+single file is copied. A truncated download, a 404 or a wrong zip therefore leaves a
+working application exactly as it was. Copies retry five times with a growing wait, the
+same pattern the app uses for saves, because OneDrive and the running server both take
+brief locks.
+
+**`Update.cmd` replaces itself.** cmd reads a batch file by byte offset and would
+resume at that offset inside the new file, running whatever text happened to land
+there. So the line that invokes the updater is the last line cmd ever reads:
+`powershell … & pause & exit /b`. The whole line is already in memory, and `exit /b`
+ends the script without another read. `tests/scripts.test.ts` enforces that shape.
+PowerShell parses a script fully before executing it, so `update.ps1` overwriting
+itself mid-run is safe.
+
+**Knowing which build you have.** Vite `define` compiles the commit and build time into
+the bundle; they show at the foot of the nav and under Settings → Version. The same
+stamp is written to `dist/build.json`, because the updater cannot read a value out of a
+minified bundle and needs to report what it replaced.
+
+The commit in the stamp is the one the build was made *from*, so it names the parent of
+the commit that carries the build — `dist/` is rebuilt and committed together with the
+source it came from, and a commit cannot contain its own hash. The build time is the
+part that is unique per build, and it is what the updater compares.
+
+**Noticing a new build without a network call.** The app still makes no request to the
+internet at runtime; updating is always something the user starts. But a window left
+open all day would otherwise keep running the old code. On the served build the service
+worker now installs a new version and *waits* rather than calling `skipWaiting()`:
+taking over immediately would serve new assets to a page running old code. The page
+checks for a new `sw.js` when it regains focus, shows a green bar, and only calls
+`SKIP_WAITING` when the user clicks Reload — and the button is disabled while there are
+unsaved changes. `index.html` is never answered from cache, so a new build can always
+announce itself. The `file://` single-file build needs none of this: no worker, no
+cache, and every launch reads the file fresh.
 
 ## Delivery without Node
 

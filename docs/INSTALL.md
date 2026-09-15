@@ -48,6 +48,7 @@ Copy the **whole folder**. Copying only one `.cmd` file will not work.
 | --- | --- |
 | `Create Desktop App.cmd` | Way A. Makes the desktop and taskbar app. |
 | `start.cmd` | Way B. Starts the local server and opens the app. |
+| `Update.cmd` | Fetches the current code from GitHub, in place. |
 | `standalone\index.html` | The whole application in one file. |
 | `dist\` | The application as separate files, for the server. |
 | `server\serve.ps1` | The local server. |
@@ -158,9 +159,42 @@ and **Restore from a backup**.
 
 ## Updating to a new version
 
-Copy the new `dist\`, `standalone\` and `server\` folders over the old ones. Your data
-is in your storage folder, not in the application, so nothing is lost. The desktop
-shortcut keeps working: it points at a path, and the file at that path is now newer.
+**Double-click `Update.cmd`.** That is the whole routine. No re-downloading a zip, no
+copying folders about.
+
+It fetches the current code from GitHub and replaces the program files in place:
+`dist\`, `standalone\`, `server\`, `public\`, `docs\` and the `.cmd` files. Then:
+
+- **Way B (local server):** the open window notices within a few seconds of you
+  clicking back into it and shows a green **A newer build is on disk** bar. Click
+  **Reload**. If nothing is open, just start it as usual.
+- **Way A (taskbar app):** close the window and click the taskbar icon again. There is
+  no cache to clear; the single file is read fresh each time.
+
+The desktop shortcut keeps working either way: it points at a path, and the file at
+that path is simply newer.
+
+### What it does not touch
+
+**Your data.** It lives in your OneDrive storage folder or in the browser, never
+inside the application, so there is nothing in the update's path to lose. The updater
+also never deletes anything in the app folder — it copies over the top. A file the new
+version stopped shipping is left behind as clutter rather than removed, which is the
+safer of the two mistakes.
+
+### Which version am I on?
+
+The build stamp is at the bottom of the left-hand nav, and in full under
+**Settings → Version**. Quote that if something looks wrong.
+
+### If Update.cmd cannot run
+
+Same cause as `start.cmd`: PowerShell is restricted by Group Policy. Download the
+folder from GitHub and copy `dist`, `standalone` and `server` over the top by hand.
+Your data is untouched either way.
+
+If the download itself fails, nothing at all is changed — the updater checks that the
+download contains a real build before it copies a single file.
 
 ---
 
@@ -201,5 +235,10 @@ TC_WORKBOOK=path\to\TC_P6_Budget_SCurve.xlsx npm test   # parity against the rea
 ```
 
 `dist/` and `standalone/` are committed on purpose: they are the delivered product for
-a laptop that cannot build them. Re-run `npm run build:all` and commit the output
-whenever you change anything under `src/`.
+a laptop that cannot build them, and they are what `Update.cmd` fetches. **Re-run
+`npm run build:all` and commit the output whenever you change anything under `src/`**
+— a source-only commit changes nothing on the laptop.
+
+`Update.cmd` reads `server/update.json` for the repo and branch to pull from, so
+moving the app to a different branch is a one-line change that the updater itself
+delivers. In a git clone it runs `git pull --ff-only` instead of downloading.

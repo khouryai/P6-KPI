@@ -4,13 +4,16 @@ import { Page, Notice } from '../components/ui';
 import type { Settings as S } from '../../engine/types';
 import { buildWorkbook, workbookBytes, downloadBytes, stamp } from '../export';
 import type { Bundle } from '../state';
-import { num } from '../format';
+import { num, fmtDateTime } from '../format';
+import { BUILD_COMMIT, BUILD_TIME, IS_STANDALONE } from '../build';
+import { applyUpdate, canSelfUpdate, useUpdateReady } from '../update';
 
 export function Settings() {
   const { state, model, actions } = useApp();
   const s = state.data.settings;
   const set = (patch: Partial<S>) => actions.update('settings', (prev) => ({ ...prev, ...patch }));
   const [busy, setBusy] = useState(false);
+  const updateReady = useUpdateReady();
 
   const exportXlsx = async () => {
     setBusy(true);
@@ -123,6 +126,41 @@ export function Settings() {
           <h2 className="card-title">Export</h2>
           <p className="text-[12px] text-[var(--text-muted)]">Writes an .xlsx with the same sheet names and column layouts as the original workbook (values, no formulas) into the folder's <code>exports</code> sub-folder, so project controls can still be handed a spreadsheet. Curve CSV and chart PNG are on the Dashboard.</p>
           <button className="btn btn-primary" disabled={busy} onClick={() => void exportXlsx()}>{busy ? 'Building…' : 'Export workbook (.xlsx)'}</button>
+        </div>
+        <div className="card space-y-3">
+          <h2 className="card-title">Version</h2>
+          <div className="flex flex-wrap gap-2">
+            <div className="factlet">
+              <div className="mono text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Built from</div>
+              <div className="mono text-[12px]" title="The commit this build was compiled from">{BUILD_COMMIT}</div>
+            </div>
+            <div className="factlet">
+              <div className="mono text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Built</div>
+              <div className="text-[12px]">{BUILD_TIME ? fmtDateTime(BUILD_TIME) : 'unknown'}</div>
+            </div>
+            <div className="factlet">
+              <div className="mono text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Running as</div>
+              <div className="text-[12px]">{IS_STANDALONE ? 'Single file' : 'Served from dist'}</div>
+            </div>
+          </div>
+          <p className="text-[12px] text-[var(--text-muted)]">
+            To pick up newer application code, run <code>Update.cmd</code> in the app folder. It replaces the program files and leaves your data alone: your data lives in
+            your storage folder or this browser, never inside the application. The app itself makes no call to the internet; updating is always something you start.
+          </p>
+          {canSelfUpdate() ? (
+            updateReady ? (
+              <div className="flex items-center gap-2">
+                <button className="btn btn-primary" disabled={state.dirty.size > 0} onClick={applyUpdate}>
+                  Reload into the new build
+                </button>
+                {state.dirty.size > 0 && <span className="text-[12px] text-[var(--text-muted)]">Save your changes first.</span>}
+              </div>
+            ) : (
+              <Notice tone="info">This window checks the local server for a newer build when you come back to it. You are on the newest one it has seen.</Notice>
+            )
+          ) : (
+            <Notice tone="info">This is the single-file version. Close the window and open it again after running <code>Update.cmd</code> and you are on the new build.</Notice>
+          )}
         </div>
         <div className="card lg:col-span-2">
           <h2 className="card-title">Known limitations, by design</h2>

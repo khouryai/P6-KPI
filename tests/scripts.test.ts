@@ -70,3 +70,77 @@ describe('Windows launcher scripts', () => {
     expect(ps).toMatch(/ReadAllBytes/);
   });
 });
+
+describe('the updater', () => {
+  const ps = readFileSync(resolve(ROOT, 'server/update.ps1'), 'utf8');
+  const cmd = readFileSync(resolve(ROOT, 'Update.cmd'), 'utf8');
+  // Strip the <# #> header and every # comment: the rules are spelled out in
+  // prose up there, and naming a command is not using it.
+  const code = ps
+    .replace(/<#[\s\S]*?#>/g, '')
+    .split(/\r?\n/)
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n');
+
+  it('deletes only the download staging folder', () => {
+    const removals = code.split(/\r?\n/).filter((l) => /Remove-Item/i.test(l));
+    expect(removals.length, 'exactly one deletion, and it is the staging folder').toBe(1);
+    expect(removals[0]).toMatch(/-LiteralPath \$staging\b/);
+  });
+
+  it('guards that deletion on the path really being the staging folder', () => {
+    const fn = /function Remove-Staging \{([\s\S]*?)\n\}/.exec(code);
+    expect(fn, 'Remove-Staging must exist and be the only place that deletes').not.toBeNull();
+    const body = fn![1];
+    // Every one of these must hold before a single byte is removed. The rule
+    // exists because an unset variable once resolved to the current directory.
+    expect(body).toMatch(/IsNullOrWhiteSpace\(\$staging\)/);
+    expect(body).toMatch(/IsNullOrWhiteSpace\(\$tempBase\)/);
+    expect(body).toMatch(/\$staging\.StartsWith\(\$tempBase/);
+    expect(body).toMatch(/\$staging\.Length -le/);
+    expect(body).toMatch(/tc-budget-update-/);
+    expect(body).toMatch(/Test-Path -LiteralPath \$staging/);
+  });
+
+  it('never removes anything under the application folder', () => {
+    // Copy over the top, never clear out first. A file the new build no longer
+    // ships is clutter; a wrong delete is someone's work.
+    expect(/Remove-Item[^\n]*\$AppDir/i.test(code)).toBe(false);
+    expect(/Clear-Content|Remove-ItemProperty/i.test(code)).toBe(false);
+  });
+
+  it('verifies the download before copying anything out of it', () => {
+    const verifyAt = code.indexOf('$missing');
+    const copyAt = code.indexOf('Copy-WithRetry');
+    expect(verifyAt).toBeGreaterThan(-1);
+    expect(copyAt).toBeGreaterThan(verifyAt);
+  });
+
+  it('refuses to copy over a git clone it cannot pull', () => {
+    expect(code).toMatch(/hasGitDir -and -not \$gitExe/);
+  });
+
+  it('runs the updater on the last line Update.cmd can safely read', () => {
+    const lines = cmd
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !/^rem\b/i.test(l) && !/^:/.test(l));
+    const run = lines.filter((l) => /^powershell\b/i.test(l) && /update\.ps1/i.test(l));
+    expect(run.length, 'exactly one line invokes update.ps1').toBe(1);
+    // update.ps1 may replace Update.cmd while it runs, and cmd reads a batch file
+    // by byte offset. Chaining pause and exit onto the same line means cmd never
+    // returns to the file to find different bytes there.
+    expect(run[0]).toMatch(/&\s*pause\s*&\s*exit \/b\s*$/);
+    expect(lines.indexOf(run[0])).toBeLessThan(lines.length);
+    const after = lines.slice(lines.indexOf(run[0]) + 1);
+    // Anything after it is only reachable by a goto taken before the swap.
+    expect(after.every((l) => /^(echo|goto|pause|endlocal)\b/i.test(l)), `unreachable-after lines: ${after.join(' | ')}`).toBe(true);
+  });
+
+  it('points at a real branch of a real repo', () => {
+    const cfg = JSON.parse(readFileSync(resolve(ROOT, 'server/update.json'), 'utf8'));
+    expect(cfg.repo).toMatch(/^[\w.-]+\/[\w.-]+$/);
+    expect(typeof cfg.branch).toBe('string');
+    expect(cfg.branch.length).toBeGreaterThan(0);
+  });
+});

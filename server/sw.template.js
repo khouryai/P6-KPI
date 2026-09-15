@@ -3,8 +3,17 @@ const VERSION = '__VERSION__';
 const CACHE = `tc-budget-${VERSION}`;
 const PRECACHE = __PRECACHE__;
 
+/*
+ * A new worker installs but does NOT take over on its own. Taking over mid-session
+ * would serve the new build's assets to a page still running the old build's code.
+ * It waits until the page says go, which the page does after asking the user.
+ */
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)));
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -20,6 +29,12 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   // Navigations always resolve to the shell so the app opens even when the server is down.
   if (req.mode === 'navigate') {
+    event.respondWith(fetch(req).catch(() => caches.match('/index.html')));
+    return;
+  }
+  // index.html and sw.js must never be answered from the cache: they are how a new
+  // build announces itself. Everything else under assets/ is content-hashed.
+  if (url.pathname === '/' || url.pathname === '/index.html') {
     event.respondWith(fetch(req).catch(() => caches.match('/index.html')));
     return;
   }
