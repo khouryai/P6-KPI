@@ -19,15 +19,18 @@ The engine reproduces the source workbook's figures exactly for the same inputs
 
 ## Running it
 
-Double-click **`start.cmd`**. That is the whole procedure.
+Two ways, both needing nothing installed. Pick one:
 
-It serves the prebuilt application from `127.0.0.1` using PowerShell, which ships with
-Windows, and opens it in Edge. If PowerShell is blocked it falls back to Python, and if
-that is missing too it opens `standalone\index.html`, which is the entire application in
-one self-contained file.
+- **`Create Desktop App.cmd`** — run once. Makes a desktop icon you can pin to the
+  taskbar, which opens the app in its own window. No server, no background process,
+  no PowerShell scripts. Use this if PowerShell is restricted on your machine.
+- **`start.cmd`** — serves the app from `127.0.0.1` using the PowerShell that ships
+  with Windows, so Edge can install it as a proper PWA. Falls back to Python, then to
+  the single-file version, if it cannot start a server.
 
-See [docs/INSTALL.md](docs/INSTALL.md) for installing it as a pinned desktop app, keeping
-the server running at logon, choosing where the data lives, and troubleshooting.
+See [docs/INSTALL.md](docs/INSTALL.md) for the trade-off between the two, pinning to the
+taskbar, keeping the server running at logon, where the data lives, and what to do about
+the "Do you want to run this script" prompt.
 
 ## Everything is done in the app
 

@@ -57,4 +57,30 @@ function make(size) {
 }
 writeFileSync('public/icon-192.png', make(192));
 writeFileSync('public/icon-512.png', make(512));
-console.log('icons written');
+
+// A Windows .ico for the desktop/taskbar shortcut. Since Vista an ICO may hold
+// PNG payloads directly, so the same generator serves both.
+function ico(sizes) {
+  const images = sizes.map((s) => ({ size: s, png: make(s) }));
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0); // reserved
+  header.writeUInt16LE(1, 2); // 1 = icon
+  header.writeUInt16LE(images.length, 4);
+  const entries = Buffer.alloc(16 * images.length);
+  let offset = header.length + entries.length;
+  images.forEach((img, i) => {
+    const o = i * 16;
+    entries[o] = img.size >= 256 ? 0 : img.size; // 0 means 256
+    entries[o + 1] = img.size >= 256 ? 0 : img.size;
+    entries[o + 2] = 0; // palette
+    entries[o + 3] = 0; // reserved
+    entries.writeUInt16LE(1, o + 4); // colour planes
+    entries.writeUInt16LE(32, o + 6); // bits per pixel
+    entries.writeUInt32LE(img.png.length, o + 8);
+    entries.writeUInt32LE(offset, o + 12);
+    offset += img.png.length;
+  });
+  return Buffer.concat([header, entries, ...images.map((i) => i.png)]);
+}
+writeFileSync('public/icon.ico', ico([16, 32, 48, 256]));
+console.log('icons written, including public/icon.ico');

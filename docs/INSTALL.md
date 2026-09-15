@@ -1,158 +1,173 @@
 # Installing T&C Budget on a locked-down Windows laptop
 
 **Nothing needs installing.** No Node.js, no npm, no downloads, no admin rights, no
-installer for IT to approve. The application is already built and committed to this
-repository; Windows itself provides everything needed to run it.
+installer for IT to approve.
+
+There are two ways to run it. They are not better and worse, they are different
+trade-offs, and on a laptop where PowerShell is restricted only one of them works.
+
+| | **A. Taskbar app** | **B. Local server** |
+| --- | --- | --- |
+| Set up with | `Create Desktop App.cmd`, once | `start.cmd` |
+| Needs PowerShell to run scripts | No | Yes |
+| Anything running in the background | No | Yes, a server window |
+| Own window and taskbar icon | Yes | Yes |
+| Listed under Edge's installed apps | No | Yes |
+| Works offline | Yes | Yes |
+
+**If PowerShell is locked down on your machine, use A.** You lose nothing that
+matters: the app is identical, it is just launched from a file instead of from
+`localhost`.
 
 ---
 
 ## What to copy
 
-Copy the **whole folder** to somewhere permanent on the laptop, for example
-`C:\Tools\tc-budget` or a folder in your OneDrive. These are the parts that matter:
+Copy the **whole folder** somewhere permanent, for example `C:\Tools\tc-budget`, or
+a folder in your OneDrive. Copying only one `.cmd` file will not work.
 
 | Path | What it is |
 | --- | --- |
-| `start.cmd` | Double-click this. It starts the app. |
-| `dist\` | The built application. |
-| `server\serve.ps1` | The local server, written in PowerShell. |
-| `standalone\index.html` | The whole app as one file, for when nothing else works. |
-
-Copying only `start.cmd` will not work; it needs `dist\` and `server\` beside it.
-
----
-
-## First run
-
-1. Double-click **`start.cmd`**.
-2. A small server window appears and stays open. Leave it alone; closing it stops the app.
-3. Edge opens the app at `http://localhost:47800/`.
-4. Choose where your data lives (see **Where your data lives** below). The usual answer is
-   **Choose the storage folder…** and then `OneDrive\TC-Budget`.
-5. In File Explorer, right-click that folder and pick **Always keep on this device**, so
-   OneDrive never turns a data file into a cloud-only placeholder.
-6. Go to **Import** and drop in the P6 export.
-
-There is no build step and no wait. `start.cmd` opens the app in about a second.
-
-### Why a server at all?
-
-The app asks the browser for permission to read and write one folder, and browsers only
-allow that from a real web address, not from a file on disk. `start.cmd` therefore runs a
-tiny server on `127.0.0.1` that nothing outside the laptop can reach. It serves five files
-from `dist\` and does nothing else. There is no network traffic of any kind.
+| `Create Desktop App.cmd` | Way A. Makes the desktop and taskbar app. |
+| `start.cmd` | Way B. Starts the local server and opens the app. |
+| `standalone\index.html` | The whole application in one file. |
+| `dist\` | The application as separate files, for the server. |
+| `server\serve.ps1` | The local server. |
 
 ---
 
-## Install it as a desktop app and pin it
+## Way A: a taskbar app, no server
 
-1. With the app open in a normal Edge tab at `http://localhost:47800/`, open the `…` menu
-   → **Apps** → **Install this site as an app**. (There is also an install icon in the
-   address bar.)
-2. Name it **T&C Budget** and confirm. Edge creates a Start menu entry and a desktop icon,
-   and reopens it in its own window with no browser chrome.
-3. Right-click it on the taskbar → **Pin to taskbar**.
+1. Double-click **`Create Desktop App.cmd`**. It finds Edge, writes a **TC Budget**
+   shortcut to your desktop, and opens the app so you can check it.
+2. Right-click the new desktop icon → **Show more options** → **Pin to taskbar**.
+3. Click the taskbar icon whenever you want the app. That is the whole routine.
 
-Edge offers the install because the app ships a web app manifest and a service worker. The
-service worker keeps a copy of the app in the browser so the window opens instantly.
+The shortcut runs Edge in app mode:
+
+```
+"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --app="file:///C:/Tools/tc-budget/standalone/index.html"
+```
+
+Edge opens that in its own window with no address bar and its own taskbar button, and
+reports itself to the page as a standalone app, exactly as an installed PWA does.
+
+If both automatic methods are blocked by policy, the script prints the exact command
+line and also writes it to `taskbar-shortcut-target.txt`. Make the shortcut by hand:
+right-click the desktop → **New** → **Shortcut**, paste that line, name it
+**TC Budget**, then Properties → **Change Icon** → browse to `public\icon.ico`, then
+pin it.
+
+**What you give up.** Edge will not offer "Install this site as an app" and it will
+not appear in `edge://apps`. That is a browser rule, not a limitation of this app: a
+real PWA install requires an `http://` or `https://` address, which means a server.
+The window, the icon and the behaviour are the same either way.
 
 ---
 
-## Keep the server running: a logon task
+## Way B: the local server, and a real PWA install
 
-The installed app needs the local server. Register `start.cmd` to run at logon:
+1. Double-click **`start.cmd`**. A server window opens and stays open.
+2. Edge opens the app at `http://localhost:47800/`.
+3. To install it properly: open `http://localhost:47800/` in a **normal Edge tab**,
+   then `…` → **Apps** → **Install this site as an app**. Name it **T&C Budget**.
+4. Right-click it on the taskbar → **Pin to taskbar**.
+
+### Do I have to run start.cmd every time?
+
+With Way B, yes: the app is served by that server, so something has to be running.
+But you never have to think about it if you make it start with Windows:
 
 1. **Task Scheduler** → **Create Basic Task…**
 2. Name `TC Budget server`, trigger **When I log on**.
-3. Action **Start a program**; Program: the full path to `start.cmd`; Start in: the folder
-   containing it.
-4. Finish. In the task's properties, tick **Hidden** so no console window appears.
+3. Action **Start a program**; Program: the full path to `start.cmd`; Start in: the
+   folder containing it.
+4. Finish, then open the task's properties and tick **Hidden**.
 
-None of this needs admin rights, because the task runs as you.
+None of that needs admin rights. `start.cmd` is safe to run repeatedly: if the server
+is already listening it just opens the window.
 
-Simpler alternative: press Win+R, type `shell:startup`, and put a shortcut to `start.cmd`
-in the folder that opens.
+With Way A there is nothing to run at all. Click the taskbar icon.
 
-`start.cmd` is safe to run repeatedly. If the server is already listening it just opens the
-window.
+---
+
+## "Do you want to run this script?" with [D] Do not run, [R] Run once
+
+This is Windows telling you `serve.ps1` is a script that came from somewhere else.
+Two separate things cause it:
+
+- **The mark of the web.** A file copied from OneDrive, a network share or a download
+  carries a hidden flag saying it came from outside this machine. `start.cmd` now
+  clears that flag automatically with `Unblock-File` before it starts the server.
+- **Group Policy.** If your IT department sets the PowerShell execution policy
+  through Group Policy, that **overrides** the `-ExecutionPolicy Bypass` switch in
+  `start.cmd`. Nothing in this folder can change that, by design.
+
+If you answer **R** and the app still does not appear, the server is probably running
+fine but the launcher gave up waiting before you answered. Run `start.cmd` again: it
+notices the running server and just opens the window.
+
+If the prompt comes back every time, stop fighting it and use **Way A**. It needs no
+scripts at all.
 
 ---
 
 ## Where your data lives
 
-You are asked once, and can change it later in **Settings**.
+You are asked once, and can change it in **Settings**.
 
 **A OneDrive folder (recommended).** Plain JSON files in a folder you pick, normally
-`OneDrive\TC-Budget`. OneDrive syncs it, backs it up, and keeps version history, so any
-file can be rolled back to an earlier point in time. This is approved corporate storage, so
-there is nothing for IT to sign off.
+`OneDrive\TC-Budget`. OneDrive syncs it, backs it up, and keeps version history.
+Right-click that folder in Explorer and choose **Always keep on this device** so
+OneDrive never leaves a cloud-only placeholder behind.
 
-**This browser.** If the folder cannot be used, the app stores everything inside the
-browser profile on this machine. It survives closing the app and restarting the laptop, but
-it is **not** in OneDrive, **not** backed up, and clearing browsing data erases it. If you
-use this, take a backup from **Settings → Download a backup** regularly.
+**This browser.** Everything stays inside the browser profile on this machine. It
+survives closing the app and restarting the laptop, but it is not backed up, and
+clearing browsing data erases it. Take a backup from **Settings → Download a backup**.
 
-Either way you can move everything between machines with **Settings → Download a backup**
+### If you might use both ways of launching
+
+**Use the OneDrive folder.** A browser keeps storage separately per address, and
+`file:///C:/...` and `http://localhost:47800` are different addresses to it. Data you
+key in *browser* storage under one will not appear under the other. The OneDrive
+folder is just files on disk, so it is the same data whichever way you launch, and
+you only have to re-pick the folder once on each.
+
+You can also move everything between machines with **Settings → Download a backup**
 and **Restore from a backup**.
-
----
-
-## If `start.cmd` cannot start a server
-
-Some corporate builds block PowerShell scripts. `start.cmd` tries PowerShell first, then
-Python if it happens to be installed, and if neither works it opens
-`standalone\index.html` instead.
-
-That standalone file is the entire application in a single HTML file. Double-click it and
-it runs. It is a genuine fallback, not a demo: import, budget, curves, snapshots and export
-all work. Two differences:
-
-- It saves into the browser rather than a folder, unless the browser lets it ask for the
-  folder (Edge usually does; click **Choose the storage folder…** and see whether a picker
-  appears). **Take backups from Settings.**
-- Edge will not offer "Install this site as an app", because that needs a real address. You
-  can still pin the file to the taskbar as a normal shortcut.
-
-You can also copy `standalone\index.html` into your OneDrive folder and open it from there
-on any machine.
 
 ---
 
 ## Updating to a new version
 
-Copy the new `dist\`, `standalone\` and `server\` folders over the old ones and restart
-`start.cmd`. Your data is in your storage folder, not in the application, so nothing is
-lost. The service worker versions itself per build and picks up the new files on the next
-open.
+Copy the new `dist\`, `standalone\` and `server\` folders over the old ones. Your data
+is in your storage folder, not in the application, so nothing is lost. The desktop
+shortcut keeps working: it points at a path, and the file at that path is now newer.
 
 ---
 
 ## Troubleshooting
 
-**"The built application is missing".** Only `start.cmd` was copied. Copy the whole folder.
+**"The built application is missing".** Only one `.cmd` file was copied. Copy the
+whole folder.
 
-**The server window flashes and disappears.** PowerShell is blocked by policy. The app will
-have opened `standalone\index.html` instead, which works. If you want the server, ask IT
-whether `powershell -ExecutionPolicy Bypass -File` is permitted; the script it runs is
-`server\serve.ps1`, which is plain readable text that serves five local files.
+**The app opens but everything is empty.** If you use a OneDrive folder, it may still
+be a cloud-only placeholder. Right-click it in Explorer → **Always keep on this
+device**, then **Settings → Reload**.
 
 **"Could not listen on port 47800".** Something else is using it. Edit `start.cmd` and
-change `set "PORT=47800"` to another number above 1024, for example `47801`.
+change `set "PORT=47800"` to another number above 1024.
 
-**Edge asks for folder permission every time.** Edge remembers the folder but re-asks for
-permission after a restart. One click on **Reconnect** restores it. Installing it as an app
-reduces the prompting.
+**Edge asks for folder permission every time.** Edge remembers the folder but re-asks
+for permission after a restart. One click on **Reconnect** restores it.
 
-**A save fails with a OneDrive message.** OneDrive briefly locks files while uploading. The
-app retries five times with a growing delay. If it still fails, wait a moment and press
+**A save fails with a OneDrive message.** OneDrive briefly locks files while
+uploading. The app retries five times with a growing delay. Wait a moment and press
 **Save** again; nothing is lost, your edits are still in the window.
 
-**A red "conflict copies" banner.** Two machines wrote to the folder at once and OneDrive
-kept both versions. The app never merges them. Open the folder, compare the files it names,
-keep one, delete the other, then **Settings → Reload**.
-
-**Everything is empty after opening.** The folder may still be a cloud-only placeholder.
-Right-click it in Explorer, choose **Always keep on this device**, and reload.
+**A red "conflict copies" banner.** Two machines wrote to the folder at once and
+OneDrive kept both versions. The app never merges them. Open the folder, compare the
+files it names, keep one, delete the other, then **Settings → Reload**.
 
 ---
 
@@ -160,20 +175,13 @@ Right-click it in Explorer, choose **Always keep on this device**, and reload.
 
 ```
 npm install
-npm test               # engine, storage and import-format suites
+npm test               # engine, storage, rollup and import-format suites
 npm run dev            # dev server with hot reload
 npm run build:all      # rebuilds both dist/ and standalone/ — commit the result
 npm run serve          # Node version of the local server
 TC_WORKBOOK=path\to\TC_P6_Budget_SCurve.xlsx npm test   # parity against the real workbook
 ```
 
-`dist/` and `standalone/` are committed on purpose: they are the delivered product for a
-laptop that cannot build them. Re-run `npm run build:all` and commit the output whenever
-you change anything under `src/`.
-
-## Stage 2 (optional, not built): Tauri
-
-Wrapping the same build in Tauri would produce a single .exe with no server process, but it
-needs a Rust toolchain to build and an unsigned .exe trips SmartScreen on a corporate
-machine. The PowerShell server reaches the same place with nothing to install, so this is
-only worth revisiting if someone asks.
+`dist/` and `standalone/` are committed on purpose: they are the delivered product for
+a laptop that cannot build them. Re-run `npm run build:all` and commit the output
+whenever you change anything under `src/`.
