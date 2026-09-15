@@ -345,7 +345,7 @@ export function Import() {
             <summary className="cursor-pointer">First 15 parsed rows</summary>
             <div className="mt-1 overflow-auto">
               <table className="tbl">
-                <thead><tr><th>Activity ID</th><th>Type</th><th>Name</th><th>OD</th><th>RD</th><th>Start</th><th>Finish</th><th>Location</th><th>Activity type</th></tr></thead>
+                <thead><tr><th>Activity ID</th><th>Type</th><th>Name</th><th className="num">OD</th><th className="num">RD</th><th>Start</th><th>Finish</th><th>Location</th><th>Activity type</th></tr></thead>
                 <tbody>
                   {preview.acts.slice(0, 15).map((a: P6Activity) => (
                     <tr key={a.sortOrder}>
@@ -371,7 +371,7 @@ export function Import() {
         <h2 className="card-title">Import history</h2>
         <p className="text-[12px] text-[var(--text-muted)]">Imports are append only. The most recent of each kind is in use. Restoring writes a new import with the old rows, so nothing is ever overwritten.</p>
         <table className="tbl mt-2">
-          <thead><tr><th>Imported</th><th>Kind</th><th>Source</th><th className="text-right">Rows</th><th>File</th><th></th></tr></thead>
+          <thead><tr><th>Imported</th><th>Kind</th><th>Source</th><th className="num">Rows</th><th>File</th><th></th></tr></thead>
           <tbody>
             {history.map((h) => {
               const inUse = (h.kind === 'current' ? state.data.current?.id : state.data.baseline?.id) === h.id;
@@ -404,7 +404,7 @@ export function Import() {
           </div>
           <div className="mt-2 max-h-96 overflow-auto">
             <table className="tbl">
-              <thead><tr><th>Raw ID</th><th>Name</th><th>OD</th><th>RD</th><th>Start</th><th>Finish</th></tr></thead>
+              <thead><tr><th>Raw ID</th><th>Name</th><th className="num">OD</th><th className="num">RD</th><th>Start</th><th>Finish</th></tr></thead>
               <tbody>
                 {viewing.imp.activities.map((a) => (
                   <tr key={a.sortOrder}>

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, Select, Badge, statusTone, Notice, type Column } from '../components/ui';
 import type { LibraryStat, LibraryEntry, Basis, CrewLine } from '../../engine/types';
-import { crewLines } from '../../engine/compute';
+import { assignSubsystem, crewLines, setCrewCount } from '../../engine/compute';
 import { dropLastParenthetical } from '../../engine/match';
 import { fmtHours, num } from '../format';
 import { normKey } from '../../engine/keys';
@@ -107,16 +107,16 @@ export function Library({ route }: { route: Route }) {
     { key: 'inc', label: 'Include', value: (r) => `${r.entry.includeOverride ?? ''}${r.include}`, render: (r) => <span className="flex items-center gap-1"><Select value={r.entry.includeOverride ?? ''} options={incOpts} onChange={(v) => edit(r.matchKey, { includeOverride: (v || undefined) as 'Y' | 'N' | undefined })} /><Badge tone={r.include === 'Y' ? 'good' : 'muted'}>{r.include}</Badge></span> },
     { key: 'basis', label: 'Basis', value: (r) => r.basisEff, render: (r) => <Select value={r.entry.basis ?? ''} options={basisOpts} onChange={(v) => edit(r.matchKey, { basis: (v || undefined) as Basis | undefined })} /> },
     {
-      key: 'crew',
-      label: 'Crew',
-      value: (r) => r.crewEff,
-      num: true,
-      width: '148px',
+      key: 'subsystem',
+      label: 'Subsystem',
+      hint: 'The resource group whose hours this activity type spends. Most types belong to one group: type it here. Only a type drawing on two or more groups needs a split.',
+      width: '150px',
+      value: (r) => (r.crewEffLines.length > 1 ? `${r.crewEffLines.length} groups` : (r.crewEffLines[0]?.subsystem ?? '')),
       render: (r) =>
-        r.crewEffLines.length ? (
+        r.crewEffLines.length > 1 ? (
           <button
             className="crew-chips"
-            title={`${r.crewEff} people across ${r.crewEffLines.length} subsystems. Click to change.`}
+            title={`${r.crewEff} people across ${r.crewEffLines.length} groups. Click to change.`}
             onClick={() => setCrewFor(r.matchKey)}
           >
             {r.crewEffLines.map((l) => (
@@ -127,18 +127,43 @@ export function Library({ route }: { route: Route }) {
             ))}
           </button>
         ) : (
-          <div className="flex items-center justify-end gap-1">
+          <CellInput
+            className="cell-input cell-wide"
+            value={r.crewEffLines[0]?.subsystem ?? ''}
+            list="subsystem-codes"
+            placeholder="Unassigned"
+            title="Type the subsystem this crew belongs to. Clearing it puts the hours back under Unassigned."
+            onCommit={(v) => edit(r.matchKey, assignSubsystem(r.entry, v, settings.defaultCrew))}
+          />
+        ),
+    },
+    {
+      key: 'crew',
+      label: 'Crew',
+      value: (r) => r.crewEff,
+      num: true,
+      width: '118px',
+      render: (r) => (
+        <div className="flex items-center justify-end gap-1">
+          {r.crewEffLines.length > 1 ? (
+            <span className="tabular-nums" title={`${r.crewEff} people across ${r.crewEffLines.length} groups`}>{r.crewEff}</span>
+          ) : (
             <CellInput
               type="number"
-              value={r.entry.crewSize?.toString() ?? ''}
+              value={r.crewEffLines.length ? String(r.crewEffLines[0].count) : (r.entry.crewSize?.toString() ?? '')}
               placeholder={String(settings.defaultCrew)}
-              onCommit={(v) => edit(r.matchKey, { crewSize: num(v) })}
+              onCommit={(v) => edit(r.matchKey, setCrewCount(r.entry, num(v), settings.defaultCrew))}
             />
-            <button className="btn-link shrink-0 text-[11px] font-normal" title="Say which subsystems make up this crew, so the hours can be counted per group" onClick={() => setCrewFor(r.matchKey)}>
-              split
-            </button>
-          </div>
-        ),
+          )}
+          <button
+            className="btn-link shrink-0 text-[11px] font-normal"
+            title="Two or more groups on this one activity type: say who, and how many of each"
+            onClick={() => setCrewFor(r.matchKey)}
+          >
+            split
+          </button>
+        </div>
+      ),
     },
     { key: 'shift', label: 'Shift h', value: (r) => r.shiftEff, num: true, render: (r) => <CellInput type="number" value={r.entry.shiftHours?.toString() ?? ''} placeholder={String(settings.defaultShiftHours)} onCommit={(v) => edit(r.matchKey, { shiftHours: num(v) })} /> },
     { key: 'shifts', label: 'Duration shifts', value: (r) => r.entry.durationShifts ?? null, num: true, render: (r) => <CellInput type="number" value={r.entry.durationShifts?.toString() ?? ''} placeholder={r.basisEff === 'RATE' ? 'required' : 'n/a'} onCommit={(v) => edit(r.matchKey, { durationShifts: num(v) })} /> },
@@ -206,7 +231,7 @@ export function Library({ route }: { route: Route }) {
         <span><Badge tone="warn">DEFAULT</Badge> on Settings defaults ({settings.defaultBasis}, crew {settings.defaultCrew}, {settings.defaultShiftHours} h)</span>
         <span><Badge tone="bad">NEEDS SHIFTS</Badge> RATE with no shift count, budgets zero</span>
         <span><Badge tone="muted">EXCLUDED</Badge> not in budget</span>
-        <span className="text-[var(--text-muted)]">RATE hours = crew x shift hours x duration shifts. DUR hours = crew x shift hours x P6 original duration. Complexity is applied per location.</span>
+        <span className="text-[var(--text-muted)]">RATE hours = crew x shift hours x duration shifts. DUR hours = crew x shift hours x P6 original duration. Complexity is applied per location. Type the subsystem straight into its column; use split only when one type draws on two or more groups.</span>
       </div>
       <SortableTable rows={rows} columns={columns} rowKey={(r) => r.matchKey} defaultSort={{ key: 'days', dir: 'desc' }} rowClass={(r) => (r.rateStatus === 'DEFAULT' ? 'row-warn' : r.rateStatus === 'NEEDS SHIFTS' ? 'row-bad' : r.rateStatus === 'EXCLUDED' ? 'row-muted' : '')} />
       {retired.length > 0 && (
@@ -270,7 +295,7 @@ function CrewEditor({
       </div>
       <p className="mt-1 text-[12px] text-[var(--text-muted)]">
         One line per resource group. An ATSCTP needing one ATS engineer and one IXL engineer is two lines of one, not a crew of two — same hours,
-        but now you can see which group carries them.
+        but now you can see which group carries them. A type that is one group's work needs nothing here: type the code in the Subsystem column instead.
       </p>
 
       <div className="mt-2 space-y-1">

@@ -18,6 +18,21 @@ function writeMode(v: string | null): void {
   try { if (v === null) localStorage.removeItem(MODE_KEY); else localStorage.setItem(MODE_KEY, v); } catch { /* private window */ }
 }
 
+/**
+ * Auto-save is on unless it was turned off, and the preference lives in the browser
+ * rather than in the store: it is about this machine, and writing it into a data file
+ * would make the setting itself something you had to save.
+ */
+const AUTOSAVE_KEY = 'tc-autosave';
+/** How long after the last edit the write goes out. Long enough to coalesce typing. */
+const AUTOSAVE_DELAY = 1200;
+function readAutoSave(): boolean {
+  try { return localStorage.getItem(AUTOSAVE_KEY) !== 'off'; } catch { return true; }
+}
+function writeAutoSave(on: boolean): void {
+  try { localStorage.setItem(AUTOSAVE_KEY, on ? 'on' : 'off'); } catch { /* private window */ }
+}
+
 /** Everything in the store as one file, for backup, restore and moving between machines. */
 export type Bundle = {
   kind: 'tc-budget-backup';
@@ -41,6 +56,8 @@ export type AppState = {
   folderName: string | null;
   saving: boolean;
   lastSavedAt: string | null;
+  /** Writing changes out on its own, shortly after each edit. */
+  autoSave: boolean;
   toast: { kind: 'ok' | 'error' | 'info'; text: string } | null;
 };
 
@@ -55,7 +72,8 @@ export type AppActions = {
   useMemoryOnly(): void;
   forgetFolder(): Promise<void>;
   reload(): Promise<void>;
-  save(): Promise<void>;
+  save(opts?: { silent?: boolean }): Promise<void>;
+  setAutoSave(on: boolean): void;
   update: DataUpdater;
   commitImport(kind: ImportKind, activities: P6Activity[], sourceFilename: string): Promise<void>;
   restoreImport(entry: ImportIndexEntry): Promise<void>;
@@ -90,6 +108,7 @@ const initial: AppState = {
   folderName: null,
   saving: false,
   lastSavedAt: null,
+  autoSave: readAutoSave(),
   toast: null,
 };
 
@@ -100,6 +119,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const storeRef = useRef<Store | null>(null);
   const idbRef = useRef<IndexedDbAdapter | null>(null);
   const handleRef = useRef<FileSystemDirectoryHandle | null>(null);
+  /** Set when a save fails, so auto-save waits for the next edit rather than looping. */
+  const autoSaveFailedRef = useRef(false);
   const identity = useMemo(() => ownerIdentity(), []);
 
   const idb = useCallback(() => {
@@ -268,6 +289,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const update: DataUpdater = useCallback(
     (key, fn) => {
+      // A fresh edit is a fresh chance for auto-save, even if the last write failed.
+      autoSaveFailedRef.current = false;
       setState((s) => {
         const dirty = new Set(s.dirty);
         dirty.add(key);
@@ -277,9 +300,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (opts?: { silent?: boolean }) => {
     const store = storeRef.current;
     if (!store) return;
+    autoSaveFailedRef.current = false;
     patch({ saving: true });
     const failed: string[] = [];
     const snapshot: StoreData = stateRef.current.data;
@@ -298,9 +322,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     }
     patch({ saving: false, lastSavedAt: failed.length ? null : new Date().toISOString() });
-    if (failed.length) notify('error', `Save failed. ${failed.join(' ')}`);
-    else if (dirtyKeys.length) notify('ok', `Saved ${dirtyKeys.length} file${dirtyKeys.length === 1 ? '' : 's'} to ${store.adapter.describe()}.`);
+    if (failed.length) {
+      // Stop auto-save retrying a write that just failed, or a folder that has gone
+      // offline turns into an error toast every second until it comes back. The next
+      // edit clears the flag and the attempt is made again.
+      autoSaveFailedRef.current = true;
+      notify('error', `Save failed. ${failed.join(' ')}`);
+    } else if (dirtyKeys.length && !opts?.silent) {
+      notify('ok', `Saved ${dirtyKeys.length} file${dirtyKeys.length === 1 ? '' : 's'} to ${store.adapter.describe()}.`);
+    }
   }, [mirror, notify, patch]);
+
+  const setAutoSave = useCallback((on: boolean) => {
+    writeAutoSave(on);
+    autoSaveFailedRef.current = false;
+    patch({ autoSave: on });
+  }, [patch]);
+
+  // Auto-save: write out shortly after the edits stop. Memory-only storage has nowhere
+  // to write, and a folder another machine holds is left to the person to resolve.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    if (!state.autoSave || state.status !== 'ready' || state.saving) return;
+    if (state.dirty.size === 0 || autoSaveFailedRef.current) return;
+    if (state.adapterKind === null || state.adapterKind === 'memory') return;
+    const t = window.setTimeout(() => void saveRef.current({ silent: true }), AUTOSAVE_DELAY);
+    return () => window.clearTimeout(t);
+  }, [state.autoSave, state.status, state.saving, state.dirty, state.adapterKind]);
 
   const commitImport = useCallback(
     async (kind: ImportKind, activities: P6Activity[], sourceFilename: string) => {
@@ -433,8 +482,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const readFolderBinary = useCallback(async (path: string) => storeRef.current?.adapter.readBinary(path) ?? null, []);
 
   const actions = useMemo<AppActions>(
-    () => ({ chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, update, commitImport, restoreImport, readImport, takeSnapshot, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify }),
-    [chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, update, commitImport, restoreImport, readImport, takeSnapshot, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify],
+    () => ({ chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, takeSnapshot, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify }),
+    [chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, takeSnapshot, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify],
   );
 
   return <AppContext.Provider value={{ state, model, actions }}>{children}</AppContext.Provider>;

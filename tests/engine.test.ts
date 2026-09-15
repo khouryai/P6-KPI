@@ -4,7 +4,7 @@ import { parseTable, parseTsv, parseCsv, activityTypeOf, locationOf, seqCodeOf }
 import { discoverLibrary, discoverLocations } from '../src/engine/discover';
 import { indexLibrary, resolveMatchKey, dropLastParenthetical } from '../src/engine/match';
 import { accruedFraction } from '../src/engine/curves';
-import { computeModel, buildSnapshot, effectiveInclude } from '../src/engine/compute';
+import { computeModel, buildSnapshot, effectiveInclude, buildCurve, rowTotals, assignSubsystem, setCrewCount, effectiveCrew, crewWeights, isOnDefaults } from '../src/engine/compute';
 import { DEFAULT_SETTINGS, type LibraryEntry } from '../src/engine/types';
 import { fixtureModelInput, loadExpected, loadFixtureWorkbook, makeActivity, FIXTURE_DIR } from './helpers';
 import { readFileSync } from 'node:fs';
@@ -311,5 +311,116 @@ describe('edge rules', () => {
     expect(m.summary.totalBudgetHours).toBe(80);
     expect(m.summary.onNoCurve).toBe(1);
     expect(m.curve.every((c) => c.planned === 0 && c.forecast === 0)).toBe(true);
+  });
+});
+
+describe('a curve for one phase', () => {
+  const lib: LibraryEntry[] = [{ matchKey: 'Test Type', basis: 'RATE', crewSize: 1, shiftHours: 10, durationShifts: 1 }];
+  const acts = [
+    makeActivity({ activityId: '0-P2-TC-X10-FA-0010', startDate: '2026-07-01', finishDate: '2026-07-31', actualStart: true, actualFinish: true, originalDuration: 10, remainingDuration: 0 }),
+    makeActivity({ activityId: '0-P3-TC-X10-FA-0020', startDate: '2026-08-01', finishDate: '2026-08-31', originalDuration: 10, remainingDuration: 10 }),
+  ];
+  const m = computeModel({ settings: S, locations: [], library: lib, overrides: [], testProgress: [], current: acts, baseline: null, snapshots: [] });
+
+  it('splits the programme curve into phases that add back to it', () => {
+    const p2 = buildCurve(m.rows.filter((r) => r.phase === 'P2'), [], S.dataDate).curve;
+    const p3 = buildCurve(m.rows.filter((r) => r.phase === 'P3'), [], S.dataDate).curve;
+    const at = (c: typeof p2, iso: string) => c.find((x) => x.periodEnd === iso);
+    expect(at(p2, '2026-07-31')!.forecast).toBe(10);
+    // A phase's curve spans that phase's own dates: P3 has nothing to say about July.
+    expect(at(p3, '2026-07-31')).toBeUndefined();
+    expect(at(p2, '2026-08-31')!.forecast + at(p3, '2026-08-31')!.forecast).toBe(at(m.curve, '2026-08-31')!.forecast);
+  });
+
+  it('shows a phase as a share of its own budget, not of the programme', () => {
+    const p2 = buildCurve(m.rows.filter((r) => r.phase === 'P2'), [], S.dataDate).curve;
+    expect(p2[p2.length - 1].plannedPct).toBe(1);
+    expect(m.curve[m.curve.length - 1].plannedPct).toBe(1);
+    const t = rowTotals(m.rows.filter((r) => r.phase === 'P2'));
+    expect(t.budgetHours).toBe(10);
+    expect(t.earnedHours).toBe(10);
+    expect(t.pctComplete).toBe(1);
+    expect(t.inBudget).toBe(1);
+    expect(t.finished).toBe(1);
+  });
+
+  it('counts only the snapshot lines belonging to the rows on the curve', () => {
+    const snaps = [{
+      statusDate: '2026-07-31',
+      takenAt: '2026-08-01T00:00:00Z',
+      lines: [
+        { activityId: '0-P2-TC-X10-FA-0010', pctComplete: 1, budgetHours: 10, earnedHours: 10 },
+        { activityId: '0-P3-TC-X10-FA-0020', pctComplete: 0, budgetHours: 10, earnedHours: 0 },
+      ],
+    }];
+    const whole = buildCurve(m.rows, snaps, S.dataDate).curve;
+    const p2 = buildCurve(m.rows.filter((r) => r.phase === 'P2'), snaps, S.dataDate).curve;
+    expect(whole.find((c) => c.periodEnd === '2026-07-31')!.snapshot).toBe(10);
+    expect(p2.find((c) => c.periodEnd === '2026-07-31')!.snapshot).toBe(10);
+    const p3 = buildCurve(m.rows.filter((r) => r.phase === 'P3'), snaps, S.dataDate).curve;
+    expect(p3.find((c) => c.periodEnd === '2026-07-31')!.snapshot).toBe(0);
+  });
+
+  it('totals the whole programme to the same hours as the summary', () => {
+    const t = rowTotals(m.rows);
+    expect(t.budgetHours).toBe(m.summary.totalBudgetHours);
+    expect(t.earnedHours).toBeCloseTo(m.summary.earnedHours);
+    expect(t.inBudget).toBe(m.summary.inBudget);
+    expect(t.pctFromP6).toBe(m.summary.pctFromP6);
+  });
+
+  it('counts activities the way the phase tiles do, over budgeted rows only', () => {
+    const excluded = makeActivity({ activityId: '0-P2-TC-X10-FA-0030', activityName: '[T&C] X10 (Ph2) - Skip Me' });
+    const withExcluded = computeModel({
+      settings: S, locations: [], overrides: [], testProgress: [], baseline: null, snapshots: [],
+      library: [...lib, { matchKey: 'Skip Me', includeOverride: 'N' }],
+      current: [...acts, excluded],
+    });
+    const t = rowTotals(withExcluded.rows.filter((r) => r.phase === 'P2'));
+    const tile = withExcluded.groups.phase.find((g) => g.key === 'P2')!;
+    expect(t.inBudget).toBe(tile.inBudget);
+    expect(t.notStarted).toBe(tile.notStarted);
+    expect(t.finished).toBe(tile.finished);
+    expect(t.budgetHours).toBe(tile.budgetHours);
+  });
+});
+
+describe('naming the subsystem from the library table', () => {
+  it('names a group without moving the budget', () => {
+    const entry: LibraryEntry = { matchKey: 'Test Type', basis: 'DUR', crewSize: 3, shiftHours: 8 };
+    const patch = assignSubsystem(entry, ' ATS ', 2);
+    expect(patch.crew).toEqual([{ subsystem: 'ATS', count: 3 }]);
+    expect(patch.crewSize).toBeUndefined();
+    const after = { ...entry, ...patch };
+    expect(effectiveCrew(after, S)).toBe(effectiveCrew(entry, S));
+    expect(crewWeights(after, S)).toEqual([{ key: 'ATS', weight: 24 }]);
+  });
+
+  it('takes the default crew when the entry never said one, and does not pin it on the way back', () => {
+    const entry: LibraryEntry = { matchKey: 'Test Type' };
+    const named = { ...entry, ...assignSubsystem(entry, 'IXL', 2) };
+    expect(named.crew).toEqual([{ subsystem: 'IXL', count: 2 }]);
+    const cleared = { ...named, ...assignSubsystem(named, '', 2) };
+    expect(cleared.crew).toBeUndefined();
+    expect(cleared.crewSize).toBeUndefined();
+    expect(isOnDefaults({ matchKey: 'Test Type', crew: undefined, crewSize: undefined })).toBe(true);
+  });
+
+  it('keeps a headcount that was set by hand when the group is cleared', () => {
+    const entry: LibraryEntry = { matchKey: 'Test Type', crew: [{ subsystem: 'ATS', count: 5 }] };
+    expect(assignSubsystem(entry, '', 2)).toEqual({ crew: undefined, crewSize: 5 });
+  });
+
+  it('edits the headcount of a named group in place', () => {
+    const entry: LibraryEntry = { matchKey: 'Test Type', crew: [{ subsystem: 'ATS', count: 2, shiftHours: 12 }] };
+    expect(setCrewCount(entry, 4, 2).crew).toEqual([{ subsystem: 'ATS', count: 4, shiftHours: 12 }]);
+    // Clearing the number keeps the group: a line with no number is not a line.
+    expect(setCrewCount(entry, undefined, 2).crew).toEqual([{ subsystem: 'ATS', count: 2, shiftHours: 12 }]);
+    expect(setCrewCount({ matchKey: 'Test Type' }, 3, 2)).toEqual({ crewSize: 3 });
+  });
+
+  it('leaves a real split alone', () => {
+    const entry: LibraryEntry = { matchKey: 'Test Type', crew: [{ subsystem: 'ATS', count: 1 }, { subsystem: 'IXL', count: 1 }] };
+    expect(setCrewCount(entry, 4, 2)).toEqual({ crewSize: 4 });
   });
 });

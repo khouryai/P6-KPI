@@ -1,11 +1,15 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useApp } from '../state';
 import { Page, Stat, Notice, Panel, type HeroStat } from '../components/ui';
 import { CurveChart } from '../components/CurveChart';
 import { fmtHours, fmtPct, fmtDate } from '../format';
 import type { GroupStat } from '../../engine/types';
+import { buildCurve, rowTotals } from '../../engine/compute';
 import { href } from '../router';
 import { svgToPng, curveCsv, downloadBytes, stamp } from '../export';
+
+/** Filenames have to survive a Windows folder, so anything but letters and digits goes. */
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 export function Dashboard() {
   const { state, model, actions } = useApp();
@@ -14,13 +18,35 @@ export function Dashboard() {
   const [busy, setBusy] = useState(false);
   const dataDate = state.data.settings.dataDate || null;
 
+  const phaseGroups: GroupStat[] = model.groups.phase.filter((g) => g.inBudget > 0);
+
+  /**
+   * Which phase the screen is showing. The whole programme is the default, because the
+   * first question is always "where is the job", not "where is Phase 2". A phase that
+   * disappears on the next import falls back to the programme rather than showing an
+   * empty chart.
+   */
+  const [phase, setPhase] = useState<string | null>(null);
+  const selected = phase !== null && phaseGroups.some((g) => g.key === phase) ? phase : null;
+  const selectedLabel = selected === null ? null : (phaseGroups.find((g) => g.key === selected)?.label ?? selected);
+
+  const rows = useMemo(() => (selected === null ? model.rows : model.rows.filter((r) => r.phase === selected)), [model.rows, selected]);
+  const totals = useMemo(() => rowTotals(rows), [rows]);
+  const curve = useMemo(
+    () => (selected === null ? model.curve : buildCurve(rows, state.data.snapshots, dataDate).curve),
+    [selected, model.curve, rows, state.data.snapshots, dataDate],
+  );
+
   const exportPng = async () => {
-    const svg = chartRef.current?.querySelector('svg');
-    if (!svg) return;
+    const chart = chartRef.current;
+    if (!chart) return;
     setBusy(true);
     try {
-      const bytes = await svgToPng(svg);
-      const name = `s-curve-${stamp()}.png`;
+      const bytes = await svgToPng(chart, {
+        title: selectedLabel ? `Planned, forecast and earned man hours — ${selectedLabel}` : 'Planned, forecast and earned man hours',
+        subtitle: `${fmtHours(totals.budgetHours)} h budget, ${fmtHours(totals.earnedHours)} h earned (${fmtPct(totals.pctComplete, 1)}).${dataDate ? ` Data date ${fmtDate(dataDate)}.` : ''}`,
+      });
+      const name = `s-curve-${selected === null ? 'programme' : slug(selectedLabel!)}-${stamp()}.png`;
       if (state.adapterKind === 'filesystem') actions.notify('ok', `Chart written to ${await actions.writeExport(name, bytes)}`);
       else downloadBytes(name, bytes, 'image/png');
     } catch (err) {
@@ -31,8 +57,8 @@ export function Dashboard() {
   };
 
   const exportCsv = async () => {
-    const bytes = new TextEncoder().encode(curveCsv(model));
-    const name = `s-curve-${stamp()}.csv`;
+    const bytes = new TextEncoder().encode(curveCsv(curve));
+    const name = `s-curve-${selected === null ? 'programme' : slug(selectedLabel!)}-${stamp()}.csv`;
     try {
       if (state.adapterKind === 'filesystem') actions.notify('ok', `Curve data written to ${await actions.writeExport(name, bytes)}`);
       else downloadBytes(name, bytes, 'text/csv');
@@ -115,10 +141,8 @@ export function Dashboard() {
   ];
   const outstanding = steps.filter((x) => !x.done);
 
-  const phaseGroups: GroupStat[] = model.groups.phase.filter((g) => g.inBudget > 0);
-
   const heroStats: HeroStat[] = [
-    { label: 'Activities', value: s.inBudget, tone: 'muted' },
+    { label: 'Activities', value: totals.inBudget, tone: 'muted' },
     { label: 'Locations', value: s.locations, tone: 'muted' },
     { label: 'Needs attention', value: attention, tone: attention > 0 ? 'amber' : 'good' },
   ];
@@ -153,13 +177,38 @@ export function Dashboard() {
       stats={heroStats}
       actions={
         <>
-          <button className="btn btn-mini" onClick={() => void exportCsv()} disabled={!model.curve.length}>
+          <button className="btn btn-mini" onClick={() => void exportCsv()} disabled={!curve.length}>
             Export curve CSV
           </button>
-          <button className="btn btn-mini" onClick={() => void exportPng()} disabled={busy || !model.curve.length}>
+          <button className="btn btn-mini" onClick={() => void exportPng()} disabled={busy || !curve.length}>
             Export chart PNG
           </button>
         </>
+      }
+      toolbar={
+        phaseGroups.length > 1 || selected !== null ? (
+          <>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Show</span>
+            <button className={`btn btn-mini${selected === null ? ' btn-primary' : ''}`} onClick={() => setPhase(null)}>
+              Whole programme
+            </button>
+            {phaseGroups.map((g) => (
+              <button
+                key={g.key}
+                className={`btn btn-mini${selected === g.key ? ' btn-primary' : ''}`}
+                title={`${fmtHours(g.budgetHours)} h budget across ${g.inBudget} activities`}
+                onClick={() => setPhase(g.key)}
+              >
+                {g.label}
+              </button>
+            ))}
+            {selected !== null && (
+              <span className="text-[11.5px] text-[var(--text-muted)]">
+                The cards and the curve below cover {selectedLabel} only. Data quality and the summary still count the whole programme.
+              </span>
+            )}
+          </>
+        ) : undefined
       }
     >
       {outstanding.length > 0 && (
@@ -184,19 +233,21 @@ export function Dashboard() {
       )}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Total budget" value={`${fmtHours(s.totalBudgetHours)} h`} sub={`${s.inBudget} activities in budget`} primary />
-        <Stat label="Earned" value={`${fmtHours(s.earnedHours)} h`} tone="good" sub={`${s.pctFromTests} from tests, ${s.pctFromP6} from P6 duration`} />
-        <Stat label="Remaining" value={`${fmtHours(s.remainingHours)} h`} sub={`${s.notStarted} activities not started`} />
-        <Stat label="Percent complete" value={fmtPct(s.pctComplete)} sub={`${s.inProgress} in progress, ${s.p6Actual + s.testWindow} finished`} />
+        <Stat label={selected === null ? 'Total budget' : `${selectedLabel} budget`} value={`${fmtHours(totals.budgetHours)} h`} sub={`${totals.inBudget} activities in budget`} primary />
+        <Stat label="Earned" value={`${fmtHours(totals.earnedHours)} h`} tone="good" sub={`${totals.pctFromTests} from tests, ${totals.pctFromP6} from P6 duration`} />
+        <Stat label="Remaining" value={`${fmtHours(totals.remainingHours)} h`} sub={`${totals.notStarted} activities not started`} />
+        <Stat label="Percent complete" value={fmtPct(totals.pctComplete)} sub={`${totals.inProgress} in progress, ${totals.finished} finished`} />
       </div>
 
       <div className="mt-4">
         <Panel
-          title="Planned, forecast and earned man hours"
-          meta="Calendar-linear spread, ignores the P6 work calendar. Earned stops at the data date. Diamonds are snapshots."
+          title={selected === null ? 'Planned, forecast and earned man hours' : `Planned, forecast and earned man hours — ${selectedLabel}`}
+          meta={`Calendar-linear spread, ignores the P6 work calendar. Earned stops at the data date. Diamonds are snapshots.${
+            selected === null ? '' : ` Percentages are of ${selectedLabel}'s own budget.`
+          }`}
         >
-          {model.curve.length ? (
-            <CurveChart ref={chartRef} curve={model.curve} dataDate={dataDate} />
+          {curve.length ? (
+            <CurveChart ref={chartRef} curve={curve} dataDate={dataDate} />
           ) : (
             <div className="py-14 text-center text-[var(--text-subtle)]">No dated activities to plot.</div>
           )}
@@ -207,11 +258,22 @@ export function Dashboard() {
         <div className="mt-4">
           <Panel
             title="Progress by phase"
-            meta={<a className="btn-link" href={href('rollup')}>By phase and location →</a>}
+            meta={
+              <span className="flex items-baseline gap-3">
+                <span>Click a phase to show it on its own.</span>
+                <a className="btn-link" href={href('rollup')}>By phase and location →</a>
+              </span>
+            }
           >
             <div className="grid gap-x-8 gap-y-3 md:grid-cols-2 xl:grid-cols-3">
               {phaseGroups.map((g) => (
-                <a key={g.key} href={href('rollup')} className="block">
+                <button
+                  key={g.key}
+                  type="button"
+                  className={`block w-full cursor-pointer text-left${selected === g.key ? ' phase-picked' : ''}`}
+                  title={selected === g.key ? 'Showing this phase. Click again for the whole programme.' : `Show the curve and the cards for ${g.label} only`}
+                  onClick={() => setPhase(selected === g.key ? null : g.key)}
+                >
                   <div className="flex items-baseline justify-between gap-3">
                     <span className="text-[12.5px] font-semibold">{g.label}</span>
                     <span className="text-[11.5px] text-[var(--text-muted)] tabular-nums">
@@ -230,7 +292,7 @@ export function Dashboard() {
                   <div className="mt-1 text-[11px] text-[var(--text-subtle)]">
                     {g.inBudget} activities · {g.finished} finished · {g.inProgress} running · {g.notStarted} not started
                   </div>
-                </a>
+                </button>
               ))}
             </div>
           </Panel>

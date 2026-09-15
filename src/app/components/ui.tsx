@@ -214,7 +214,7 @@ export function SortableTable<T>({
             {columns.map((c) => (
               <th
                 key={c.key}
-                className={`cursor-pointer select-none ${c.num ? 'text-right' : ''}`}
+                className={`cursor-pointer select-none${c.num ? ' num' : ''}`}
                 style={c.width ? { width: c.width } : undefined}
                 onClick={() => toggle(c.key)}
               >

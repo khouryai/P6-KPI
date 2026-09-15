@@ -90,14 +90,17 @@ export function Layout({ screen, children }: { screen: string; children: React.R
           <div className="min-w-0 truncate">
             {dirty ? (
               <>
-                <span className="font-semibold">Unsaved changes</span> in {[...state.dirty].join(', ')}. Nothing is written until you save.
+                <span className="font-semibold">{state.saving ? 'Saving' : state.autoSave ? 'Saving shortly' : 'Unsaved changes'}</span> in {[...state.dirty].join(', ')}.
+                {state.autoSave ? ' Written on its own a moment after you stop editing.' : ' Nothing is written until you save.'}
               </>
+            ) : state.autoSave ? (
+              'All changes saved automatically.'
             ) : (
               'All changes saved.'
             )}
           </div>
-          <button className={`btn btn-mini ${dirty ? 'btn-primary' : ''}`} disabled={!dirty || state.saving} onClick={() => void actions.save()}>
-            {state.saving ? 'Saving…' : 'Save'}
+          <button className={`btn btn-mini ${dirty && !state.autoSave ? 'btn-primary' : ''}`} disabled={!dirty || state.saving} onClick={() => void actions.save()}>
+            {state.saving ? 'Saving…' : 'Save now'}
           </button>
         </div>
 

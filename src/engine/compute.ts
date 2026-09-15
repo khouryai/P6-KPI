@@ -123,6 +123,38 @@ export function crewWeights(entry: LibraryEntry, settings: Settings): { key: str
   return [...byCode].map(([key, weight]) => ({ key, weight }));
 }
 
+/**
+ * Put an entry's crew under one subsystem, the way the Activity Library's table does.
+ *
+ * Nearly every activity type is one group's work, so naming that group has to be as
+ * cheap as typing it. The headcount is carried across unchanged, which is what keeps
+ * the budget still: a crew of two under "ATS" prices exactly as a crew of two did.
+ * An empty code puts the entry back to a plain headcount.
+ */
+export function assignSubsystem(entry: LibraryEntry, raw: string, defaultCrew: number): Partial<LibraryEntry> {
+  const code = raw.trim();
+  const line = crewLines(entry)[0];
+  if (!code) {
+    // The number is kept only when it was said out loud, so clearing the group does
+    // not quietly pin the Settings default onto the entry and make it read as priced.
+    const pinned = line ? (entry.crewSize ?? (line.count === defaultCrew ? undefined : line.count)) : entry.crewSize;
+    return { crew: undefined, crewSize: pinned };
+  }
+  const count = line?.count ?? entry.crewSize ?? defaultCrew;
+  return { crew: [{ ...(line ?? {}), subsystem: code, count }], crewSize: undefined };
+}
+
+/**
+ * Edit the headcount in place, whether the entry is a plain crew size or a single crew
+ * line. Clearing the number on a named group falls back to the default rather than
+ * dropping the group, since a line with no number is not a line.
+ */
+export function setCrewCount(entry: LibraryEntry, n: number | undefined, defaultCrew: number): Partial<LibraryEntry> {
+  const lines = crewLines(entry);
+  if (lines.length !== 1) return { crewSize: n };
+  return { crew: [{ ...lines[0], count: n !== undefined && n > 0 ? n : defaultCrew }] };
+}
+
 /** Standard hours for one instance of an activity under a library entry. */
 export function stdHoursFor(entry: LibraryEntry, settings: Settings, originalDuration: number | null): number {
   const units =
@@ -392,50 +424,13 @@ export function computeModel(input: ModelInput): Model {
   });
 
   // Curves.
-  const dates: string[] = [];
-  for (const r of rows) {
-    for (const d of [r.baselineStart, r.baselineFinish, r.currentStart, r.currentFinish, r.earnStart, r.earnEnd]) {
-      if (d) dates.push(d);
-    }
-  }
-  if (dataDate) dates.push(dataDate);
-  for (const s of snapshots) if (isValidISO(s.statusDate)) dates.push(s.statusDate);
   const totalBudget = rows.reduce((s, r) => s + r.budgetHours, 0);
   const snapshotMarkers: SnapshotMarker[] = snapshots.map((s) => ({
     statusDate: s.statusDate,
     earnedHours: s.lines.reduce((x, l) => x + l.earnedHours, 0),
     budgetHours: s.lines.reduce((x, l) => x + l.budgetHours, 0),
   }));
-  const snapByDate = new Map<string, number>();
-  for (const m of snapshotMarkers) snapByDate.set(m.statusDate, (snapByDate.get(m.statusDate) ?? 0) + m.earnedHours);
-
-  let curve: CurvePoint[] = [];
-  let periods: string[] = [];
-  if (dates.length) {
-    dates.sort();
-    periods = monthEndsBetween(dates[0], dates[dates.length - 1]);
-    curve = periods.map((p) => {
-      let planned = 0;
-      let forecast = 0;
-      let earned = 0;
-      for (const r of rows) {
-        if (r.budgetHours === 0 && r.earnedHours === 0) continue;
-        planned += r.budgetHours * accruedFraction(p, r.baselineStart, r.baselineFinish);
-        forecast += r.budgetHours * accruedFraction(p, r.currentStart, r.currentFinish);
-        earned += r.earnedHours * accruedFraction(p, r.earnStart, r.earnEnd);
-      }
-      const earnedOrNull = dataDate && p > dataDate ? null : earned;
-      return {
-        periodEnd: p,
-        planned,
-        forecast,
-        earned: earnedOrNull,
-        plannedPct: totalBudget ? planned / totalBudget : 0,
-        earnedPct: earnedOrNull === null ? null : totalBudget ? earnedOrNull / totalBudget : 0,
-        snapshot: snapByDate.get(p) ?? null,
-      };
-    });
-  }
+  const { curve, periods } = buildCurve(rows, snapshots, dataDate);
 
   // Summary.
   const acts = current.filter((a) => a.rowType === 'ACTIVITY');
@@ -518,6 +513,108 @@ export function computeModel(input: ModelInput): Model {
     summary,
     testProgressChecks,
     notes,
+  };
+}
+
+/**
+ * The planned, forecast and earned curves for a set of rows.
+ *
+ * Taking rows as an argument rather than reading the whole model is what lets the
+ * dashboard draw one phase on its own: the same arithmetic runs over the subset, so
+ * a phase curve can never disagree with the programme curve it is part of. The
+ * percentages are of the subset's own budget, because a phase at 40 per cent of its
+ * own scope is the number anyone asking for a phase curve wants.
+ */
+export function buildCurve(
+  rows: BudgetRow[],
+  snapshots: Snapshot[],
+  dataDate: string | null,
+): { curve: CurvePoint[]; periods: string[] } {
+  const dates: string[] = [];
+  for (const r of rows) {
+    for (const d of [r.baselineStart, r.baselineFinish, r.currentStart, r.currentFinish, r.earnStart, r.earnEnd]) {
+      if (d) dates.push(d);
+    }
+  }
+  if (dataDate) dates.push(dataDate);
+  for (const s of snapshots) if (isValidISO(s.statusDate)) dates.push(s.statusDate);
+  if (!dates.length) return { curve: [], periods: [] };
+
+  // A snapshot records every activity that was in budget when it was taken. Cutting it
+  // down to the rows on this curve keeps the diamonds comparable with the line they sit
+  // against, instead of marking the whole programme on a single phase's chart.
+  const ids = new Set(rows.map((r) => normKey(r.activityId)));
+  const snapByDate = new Map<string, number>();
+  for (const s of snapshots) {
+    const earned = s.lines.reduce((x, l) => x + (ids.has(normKey(l.activityId)) ? l.earnedHours : 0), 0);
+    if (earned === 0 && !s.lines.some((l) => ids.has(normKey(l.activityId)))) continue;
+    snapByDate.set(s.statusDate, (snapByDate.get(s.statusDate) ?? 0) + earned);
+  }
+
+  const totalBudget = rows.reduce((s, r) => s + r.budgetHours, 0);
+  dates.sort();
+  const periods = monthEndsBetween(dates[0], dates[dates.length - 1]);
+  const curve = periods.map((p) => {
+    let planned = 0;
+    let forecast = 0;
+    let earned = 0;
+    for (const r of rows) {
+      if (r.budgetHours === 0 && r.earnedHours === 0) continue;
+      planned += r.budgetHours * accruedFraction(p, r.baselineStart, r.baselineFinish);
+      forecast += r.budgetHours * accruedFraction(p, r.currentStart, r.currentFinish);
+      earned += r.earnedHours * accruedFraction(p, r.earnStart, r.earnEnd);
+    }
+    const earnedOrNull = dataDate && p > dataDate ? null : earned;
+    return {
+      periodEnd: p,
+      planned,
+      forecast,
+      earned: earnedOrNull,
+      plannedPct: totalBudget ? planned / totalBudget : 0,
+      earnedPct: earnedOrNull === null ? null : totalBudget ? earnedOrNull / totalBudget : 0,
+      snapshot: snapByDate.get(p) ?? null,
+    };
+  });
+  return { curve, periods };
+}
+
+/**
+ * The headline figures for a set of rows: the same ones the Summary carries for the
+ * whole programme, so the dashboard's cards can follow a filter without the screen
+ * re-deriving arithmetic the engine already owns.
+ */
+export type RowTotals = {
+  inBudget: number;
+  budgetHours: number;
+  earnedHours: number;
+  remainingHours: number;
+  pctComplete: number;
+  notStarted: number;
+  inProgress: number;
+  finished: number;
+  pctFromTests: number;
+  pctFromP6: number;
+};
+
+export function rowTotals(rows: BudgetRow[]): RowTotals {
+  const budgetHours = rows.reduce((s, r) => s + r.budgetHours, 0);
+  const earnedHours = rows.reduce((s, r) => s + r.earnedHours, 0);
+  // Counted over the budgeted rows only, as the phase rollup does. An excluded row is
+  // "not started" in P6's sense and carries no hours, so counting it would put a bigger
+  // number beside the budget than the phase tiles underneath show.
+  const inBudgetRows = rows.filter((r) => r.status === 'IN BUDGET');
+  const n = (pred: (r: BudgetRow) => boolean) => inBudgetRows.filter(pred).length;
+  return {
+    inBudget: inBudgetRows.length,
+    budgetHours,
+    earnedHours,
+    remainingHours: budgetHours - earnedHours,
+    pctComplete: budgetHours ? earnedHours / budgetHours : 0,
+    notStarted: n((r) => r.earnWindowSource === 'NOT STARTED'),
+    inProgress: n((r) => r.earnWindowSource === 'IN PROGRESS'),
+    finished: n((r) => r.earnWindowSource === 'P6 ACTUAL' || r.earnWindowSource === 'TEST WINDOW'),
+    pctFromTests: n((r) => r.pctSource === 'TESTS' || r.pctSource === 'OVERRIDE'),
+    pctFromP6: n((r) => r.pctSource === 'P6'),
   };
 }
 
