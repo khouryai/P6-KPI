@@ -152,6 +152,19 @@ describe.skipIf(!available)('real workbook parity', () => {
     expect(compared).toBe(model.rows.length);
   });
 
+  it('rolls the real schedule up by phase without losing or double counting hours', () => {
+    const byPhase = model.groups.phase;
+    expect(byPhase.reduce((n, g) => n + g.activities, 0)).toBe(model.rows.length);
+    expect(byPhase.reduce((n, g) => n + g.budgetHours, 0)).toBeCloseTo(model.summary.totalBudgetHours, 6);
+    // The live schedule runs two phases plus one systemwide activity.
+    expect(byPhase.map((g) => g.key).sort()).toEqual(['P2', 'P3', 'SW']);
+    const byLoc = model.groups.location;
+    expect(byLoc.reduce((n, g) => n + g.budgetHours, 0)).toBeCloseTo(model.summary.totalBudgetHours, 6);
+    expect(byLoc.length).toBe(model.summary.locations);
+    console.log('Phase rollup:', JSON.stringify(byPhase.map((g) => ({ phase: g.label, activities: g.activities, budget: g.budgetHours, pct: Math.round(g.pctComplete * 100) }))));
+    console.log('Top locations:', JSON.stringify(byLoc.slice(0, 5).map((g) => ({ loc: g.label, budget: g.budgetHours, pct: Math.round(g.pctComplete * 100) }))));
+  });
+
   it('matches the S_Curve sheet using the workbook spread, and only differs by the same-day rule', () => {
     const sc = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets['S_Curve'], { defval: null, raw: true });
     const byPeriod = new Map(model.curve.map((c) => [c.periodEnd, c]));

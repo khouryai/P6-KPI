@@ -23,6 +23,7 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
   {
     section: 'Progress',
     items: [
+      { id: 'rollup', label: 'By Phase & Location' },
       { id: 'progress', label: 'Test Progress' },
       { id: 'snapshots', label: 'Snapshots' },
     ],

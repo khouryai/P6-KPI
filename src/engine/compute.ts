@@ -16,6 +16,8 @@ import type {
   PctSource,
   RateStatus,
   Settings,
+  GroupDim,
+  GroupStat,
   Snapshot,
   SnapshotMarker,
   Summary,
@@ -24,6 +26,7 @@ import type {
 } from './types';
 import { normKey, containsCI } from './keys';
 import { indexLibrary, resolveMatchKey } from './match';
+import { phaseOf, workTypeOf, phaseLabel } from './parse';
 import { accruedFraction } from './curves';
 import { maxISO, monthEndsBetween, isValidISO } from './dates';
 
@@ -189,6 +192,11 @@ export function computeModel(input: ModelInput): Model {
       activity: a,
       activityId: a.activityId,
       location: a.location,
+      // Derived from the Activity ID rather than stored, so imports written by an
+      // earlier version of the app group correctly without a migration.
+      phase: phaseOf(a.activityId),
+      phaseName: phaseLabel(phaseOf(a.activityId)),
+      workType: workTypeOf(a.activityId),
       seqCode: a.seqCode,
       activityType: a.activityType,
       matchKey: match.matchKey,
@@ -210,6 +218,9 @@ export function computeModel(input: ModelInput): Model {
       currentFinish: a.finishDate,
       pctComplete,
       pctSource,
+      testsTotal: tp?.testsTotal ?? null,
+      testsComplete: tp?.testsComplete ?? null,
+      hasTestCounts: !!tp && tp.testsTotal !== undefined && tp.testsTotal !== null && tp.testsTotal > 0,
       earnedHours,
       remainingHours: budgetHours - earnedHours,
       earnStart,
@@ -364,7 +375,73 @@ export function computeModel(input: ModelInput): Model {
     notes.push(`${summary.onNoCurve} in-budget activities have hours but no usable dates. They count in the total but appear on no curve.`);
   }
 
-  return { rows, library: libraryStats, locations: locationStats, curve, snapshotMarkers, summary, testProgressChecks, notes };
+  const groups: Record<GroupDim, GroupStat[]> = {
+    phase: groupRows(rows, 'phase'),
+    location: groupRows(rows, 'location'),
+    discipline: groupRows(rows, 'discipline'),
+    workType: groupRows(rows, 'workType'),
+  };
+
+  return { rows, groups, library: libraryStats, locations: locationStats, curve, snapshotMarkers, summary, testProgressChecks, notes };
+}
+
+const DIM_VALUE: Record<GroupDim, (r: BudgetRow) => string> = {
+  phase: (r) => r.phase,
+  location: (r) => r.location,
+  discipline: (r) => r.discipline,
+  workType: (r) => r.workType,
+};
+
+const DIM_LABEL: Record<GroupDim, (key: string) => string> = {
+  phase: (k) => (k === '' ? 'No phase in the ID' : phaseLabel(k)),
+  location: (k) => (k === '' ? 'No location in the ID' : k),
+  discipline: (k) => (k === '' ? 'No discipline set' : k),
+  workType: (k) => (k === '' ? 'No work type in the ID' : k),
+};
+
+/**
+ * Roll the budget up by one dimension. Every activity lands in exactly one group,
+ * including the ones whose Activity ID does not carry the segment, so the group
+ * totals always add back to the whole.
+ */
+export function groupRows(rows: BudgetRow[], dim: GroupDim): GroupStat[] {
+  const value = DIM_VALUE[dim];
+  const buckets = new Map<string, BudgetRow[]>();
+  for (const r of rows) {
+    const k = value(r);
+    const list = buckets.get(k);
+    if (list) list.push(r);
+    else buckets.set(k, [r]);
+  }
+  const out: GroupStat[] = [];
+  for (const [key, list] of buckets) {
+    const inBudgetRows = list.filter((r) => r.status === 'IN BUDGET');
+    const budgetHours = list.reduce((s, r) => s + r.budgetHours, 0);
+    const earnedHours = list.reduce((s, r) => s + r.earnedHours, 0);
+    const dates = (pick: (r: BudgetRow) => string | null) => list.map(pick).filter((d): d is string => !!d).sort();
+    const starts = dates((r) => r.currentStart ?? r.baselineStart);
+    const finishes = dates((r) => r.currentFinish ?? r.baselineFinish);
+    out.push({
+      key,
+      label: DIM_LABEL[dim](key),
+      activities: list.length,
+      inBudget: inBudgetRows.length,
+      budgetHours,
+      earnedHours,
+      remainingHours: budgetHours - earnedHours,
+      pctComplete: budgetHours ? earnedHours / budgetHours : 0,
+      notStarted: inBudgetRows.filter((r) => r.earnWindowSource === 'NOT STARTED').length,
+      inProgress: inBudgetRows.filter((r) => r.earnWindowSource === 'IN PROGRESS').length,
+      finished: inBudgetRows.filter((r) => r.earnWindowSource === 'P6 ACTUAL' || r.earnWindowSource === 'TEST WINDOW').length,
+      withCounts: inBudgetRows.filter((r) => r.hasTestCounts).length,
+      testsTotal: list.reduce((s, r) => s + (r.testsTotal ?? 0), 0),
+      testsComplete: list.reduce((s, r) => s + (r.testsComplete ?? 0), 0),
+      earliestStart: starts[0] ?? null,
+      latestFinish: finishes[finishes.length - 1] ?? null,
+    });
+  }
+  // Biggest budget first: that is the order someone reviewing progress wants.
+  return out.sort((a, b) => b.budgetHours - a.budgetHours || a.label.localeCompare(b.label));
 }
 
 /** Build the snapshot that a "take snapshot" action would write, without writing it. */

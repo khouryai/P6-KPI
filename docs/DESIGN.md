@@ -55,6 +55,42 @@ would be re-added by the next import and tier 1 would catch it again. A library 
 with `retired: true` is therefore excluded from matching and from the type count, and is
 never re-added by discovery. Retire and restore are on the Activity Library screen.
 
+## Grouping: phase, location, work type
+
+Three of the six Activity ID segments carry structure worth rolling up by, and all
+three are **derived, never keyed and never stored**:
+
+| Segment | Meaning | Example |
+| --- | --- | --- |
+| 2 | Phase | `P2` → Phase 2. The live schedule also has one `SW`. |
+| 3 | Work type | `TC` for Testing and Commissioning, `AC` for ATC. |
+| 4 | Location | `W40`, already used for the complexity factor. |
+
+`phaseLabel` formats `P<n>` as `Phase n` and leaves anything else exactly as it
+appears, so a segment that is not a phase code is never mislabelled as one. Because
+these are computed from the Activity ID at model time rather than written into
+`ScheduleImport`, an import saved by an earlier version of the app groups correctly
+with no migration.
+
+`groupRows(rows, dim)` rolls the budget up by any of those, or by the discipline set
+on the library key. Every activity lands in exactly one group, including activities
+whose ID does not carry the segment (they group under a named "no location in the ID"
+bucket), so group totals always add back to the whole. That invariant is asserted on
+every dimension in `tests/rollup.test.ts` and against the real workbook in the parity
+suite.
+
+## Test progress is schedule-driven
+
+The Test Progress screen lists **every budgeted activity**, always. There is no list
+to build and no way for the worksheet to drift out of step with the schedule: the rows
+*are* `model.rows` filtered to `IN BUDGET`, joined to whatever has been keyed.
+
+`test-progress.json` still stores only the activities someone actually keyed something
+against. One upsert path creates an entry when the first field is filled and deletes it
+again when the last field is cleared, so the file never accumulates empty rows. Stored
+entries whose Activity ID is no longer budgeted are shown separately as orphans and can
+be removed in bulk, rather than silently inflating a count.
+
 ## Import paths
 
 Three formats reach the same `P6Activity[]`, so everything downstream is identical.

@@ -8,6 +8,7 @@ import { Library } from './screens/Library';
 import { Locations } from './screens/Locations';
 import { BudgetMaster } from './screens/BudgetMaster';
 import { TestProgress } from './screens/TestProgress';
+import { Rollup } from './screens/Rollup';
 import { Snapshots } from './screens/Snapshots';
 import { Settings } from './screens/Settings';
 
@@ -31,6 +32,9 @@ function Shell() {
       break;
     case 'progress':
       screen = <TestProgress route={route} />;
+      break;
+    case 'rollup':
+      screen = <Rollup />;
       break;
     case 'snapshots':
       screen = <Snapshots />;

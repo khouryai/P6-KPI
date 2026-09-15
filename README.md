@@ -39,7 +39,8 @@ The workbook never has to be opened again, and neither does Excel:
 | Price activity types | **Activity Library**: inline editing, plus adding and consolidating keys. |
 | Per-location complexity | **Locations** |
 | Override one activity's hours | **Budget Master** |
-| Test case counts | **Test Progress**: drop a spreadsheet or paste a block. |
+| Test case counts | **Test Progress**: every budgeted activity is already listed. Key counts inline, bulk-fill across a filter, or drop a spreadsheet. |
+| Progress per phase or location | **By Phase & Location**: rollups by phase, location, discipline or work type, with drill-through into a filtered Budget Master. |
 | Status snapshots | **Snapshots** |
 | Defaults, dates, storage, backups | **Settings** |
 | Hand a spreadsheet to project controls | **Settings → Export workbook**, plus curve CSV and chart PNG on the Dashboard. |

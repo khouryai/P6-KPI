@@ -3,6 +3,7 @@ import { useApp } from '../state';
 import { Page, Stat, Notice, Panel, type HeroStat } from '../components/ui';
 import { CurveChart } from '../components/CurveChart';
 import { fmtHours, fmtPct, fmtDate } from '../format';
+import type { GroupStat } from '../../engine/types';
 import { href } from '../router';
 import { svgToPng, curveCsv, downloadBytes, stamp } from '../export';
 
@@ -54,6 +55,68 @@ export function Dashboard() {
   ];
   const attention = quality.reduce((n, q) => n + (q.count > 0 ? 1 : 0), 0);
 
+  // What to do next, in the order it has to happen. Each step links to the screen
+  // that resolves it, so the app tells you where to go rather than leaving you to
+  // guess the order.
+  const budgeted = model.rows.filter((r) => r.status === 'IN BUDGET');
+  const covered = budgeted.filter((r) => r.hasTestCounts || r.pctSource === 'OVERRIDE').length;
+  const steps: { title: string; note: string; done: boolean; optional?: boolean; to: string }[] = [
+    {
+      title: 'Import the current P6 schedule',
+      note: state.data.current ? `${state.data.current.rowCount} rows from ${state.data.current.sourceFilename}` : 'Everything else derives from it',
+      done: !!state.data.current,
+      to: href('import'),
+    },
+    {
+      title: 'Import the baseline schedule',
+      note: state.data.baseline ? `${state.data.baseline.rowCount} rows` : 'Without it the planned curve just mirrors the forecast',
+      done: !!state.data.baseline,
+      to: href('import'),
+    },
+    {
+      title: 'Set the data date',
+      note: state.data.settings.dataDate ? fmtDate(state.data.settings.dataDate) : 'In-progress work cannot earn until this is set',
+      done: !!state.data.settings.dataDate,
+      to: href('settings'),
+    },
+    {
+      title: 'Price the activity library',
+      note:
+        s.activityTypes === 0
+          ? 'The types appear here once a schedule is imported'
+          : s.typesNeedingShifts > 0
+            ? `${s.typesNeedingShifts} RATE types budget zero hours until you set a shift count`
+            : s.typesOnDefaults > 0
+              ? `${s.typesOnDefaults} of ${s.activityTypes} types are still on Settings defaults`
+              : `All ${s.activityTypes} types priced`,
+      // An empty library is not a priced library.
+      done: s.activityTypes > 0 && s.typesOnDefaults === 0 && s.typesNeedingShifts === 0,
+      to: href('library', { flag: s.typesNeedingShifts > 0 ? 'shifts' : 'default' }),
+    },
+    {
+      title: 'Key the test case counts',
+      note:
+        budgeted.length === 0
+          ? 'Nothing budgeted yet'
+          : covered === budgeted.length
+            ? `All ${budgeted.length} budgeted activities covered`
+            : `${covered} of ${budgeted.length} covered. The rest fall back to P6 duration`,
+      done: budgeted.length > 0 && covered === budgeted.length,
+      optional: true,
+      to: href('progress', { flag: 'missing' }),
+    },
+    {
+      title: 'Take a snapshot',
+      note: s.latestStatusDate ? `Last taken for ${fmtDate(s.latestStatusDate)}` : 'Records percent complete for the audit trail',
+      done: !!s.latestStatusDate,
+      optional: true,
+      to: href('snapshots'),
+    },
+  ];
+  const outstanding = steps.filter((x) => !x.done);
+
+  const phaseGroups: GroupStat[] = model.groups.phase.filter((g) => g.inBudget > 0);
+
   const heroStats: HeroStat[] = [
     { label: 'Activities', value: s.inBudget, tone: 'muted' },
     { label: 'Locations', value: s.locations, tone: 'muted' },
@@ -99,11 +162,24 @@ export function Dashboard() {
         </>
       }
     >
-      {!state.data.current && (
-        <div className="mb-5">
-          <Notice tone="info">
-            Start by importing the current P6 schedule on the <a href={href('import')}>Import</a> screen. The budget, library and locations all derive from it.
-          </Notice>
+      {outstanding.length > 0 && (
+        <div className="mb-4">
+          <Panel
+            title="Next steps"
+            meta={`${steps.length - outstanding.length} of ${steps.length} done`}
+          >
+            <div className="grid gap-x-8 md:grid-cols-2">
+              {steps.map((x) => (
+                <a key={x.title} href={x.to} className={`step ${x.done ? 'step-done' : x.optional ? 'step-opt' : 'step-todo'}`}>
+                  <span className="step-mark">{x.done ? '✓' : x.optional ? '·' : '!'}</span>
+                  <span className="min-w-0">
+                    <span className="step-title">{x.title}</span>
+                    <span className="step-note block">{x.note}</span>
+                  </span>
+                </a>
+              ))}
+            </div>
+          </Panel>
         </div>
       )}
 
@@ -126,6 +202,40 @@ export function Dashboard() {
           )}
         </Panel>
       </div>
+
+      {phaseGroups.length > 0 && (
+        <div className="mt-4">
+          <Panel
+            title="Progress by phase"
+            meta={<a className="btn-link" href={href('rollup')}>By phase and location →</a>}
+          >
+            <div className="grid gap-x-8 gap-y-3 md:grid-cols-2 xl:grid-cols-3">
+              {phaseGroups.map((g) => (
+                <a key={g.key} href={href('rollup')} className="block">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-[12.5px] font-semibold">{g.label}</span>
+                    <span className="text-[11.5px] text-[var(--text-muted)] tabular-nums">
+                      {fmtHours(g.earnedHours)} / {fmtHours(g.budgetHours)} h
+                    </span>
+                    <span className="w-10 text-right text-[13px] font-bold tabular-nums">{fmtPct(g.pctComplete, 0)}</span>
+                  </div>
+                  <div className="bar bar-lg mt-1.5">
+                    <span
+                      style={{
+                        width: `${Math.min(100, Math.round(g.pctComplete * 100))}%`,
+                        background: g.pctComplete >= 0.995 ? 'var(--good)' : g.pctComplete >= 0.5 ? 'var(--warn-dot)' : 'var(--gray-400)',
+                      }}
+                    />
+                  </div>
+                  <div className="mt-1 text-[11px] text-[var(--text-subtle)]">
+                    {g.inBudget} activities · {g.finished} finished · {g.inProgress} running · {g.notStarted} not started
+                  </div>
+                </a>
+              ))}
+            </div>
+          </Panel>
+        </div>
+      )}
 
       {model.notes.length > 0 && (
         <div className="mt-4 space-y-2">

@@ -184,7 +184,7 @@ export function Import() {
           <p className="mt-1 text-[12px] text-[var(--text-muted)]">
             Drag the file here, or pick it. Accepts <b>.xer</b> (P6's own export, no Excel involved), <b>.xlsx</b> and <b>.csv</b>. Nothing is imported until you confirm the preview.
           </p>
-          <input className="mt-3 block text-[12px]" type="file" accept=".xer,.xlsx,.xlsm,.xls,.csv,.tsv,.txt" onChange={(e) => e.target.files?.[0] && void loadFile(e.target.files[0])} />
+          <input className="mt-3 block text-[12px]" type="file" accept=".xer,.xlsx,.xlsm,.xls,.csv,.tsv,.txt" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void loadFile(f); }} />
         </div>
         <div className="card">
           <h2 className="card-title">2. Paste rows</h2>

@@ -49,6 +49,29 @@ export function locationOf(activityId: string): string {
   return parts.length >= 5 ? parts[3].trim() : '';
 }
 
+/**
+ * Phase is the 2nd dash-delimited segment of the Activity ID: "0-P2-TC-W40-FA-0100"
+ * is Phase 2. Most programs use P<n>, but the segment also carries non-phase codes
+ * (the live schedule has one SW for the Training Facility), so the raw segment is
+ * kept and only formatted for display.
+ */
+export function phaseOf(activityId: string): string {
+  const parts = activityId.trim().split('-');
+  return parts.length >= 2 ? parts[1].trim() : '';
+}
+
+/** Work type is the 3rd segment: TC for Testing and Commissioning, AC for ATC. */
+export function workTypeOf(activityId: string): string {
+  const parts = activityId.trim().split('-');
+  return parts.length >= 3 ? parts[2].trim() : '';
+}
+
+/** "P2" reads as "Phase 2"; anything else is shown as it appears in the ID. */
+export function phaseLabel(code: string): string {
+  const m = /^P(\d+)$/i.exec(code.trim());
+  return m ? `Phase ${m[1]}` : code.trim();
+}
+
 /** Seq code is segments 5 and 6 joined with a dash. Informational only. */
 export function seqCodeOf(activityId: string): string {
   const parts = activityId.trim().split('-');

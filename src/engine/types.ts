@@ -112,6 +112,12 @@ export type BudgetRow = {
   activity: P6Activity;
   activityId: string;
   location: string;
+  /** Raw 2nd segment of the Activity ID, e.g. "P2". Derived, never stored. */
+  phase: string;
+  /** "P2" shown as "Phase 2". */
+  phaseName: string;
+  /** Raw 3rd segment, e.g. "TC" or "AC". */
+  workType: string;
   seqCode: string;
   activityType: string;
   matchKey: string; // resolved key, library spelling when matched
@@ -133,6 +139,10 @@ export type BudgetRow = {
   currentFinish: string | null;
   pctComplete: number;
   pctSource: PctSource;
+  /** Test case counts as keyed on the Test Progress screen, when present. */
+  testsTotal: number | null;
+  testsComplete: number | null;
+  hasTestCounts: boolean;
   earnedHours: number;
   remainingHours: number;
   earnStart: string | null;
@@ -162,6 +172,29 @@ export type LocationStat = {
   effectiveFactor: number;
   budgetHours: number;
   location: Location;
+};
+
+/** A dimension the budget can be rolled up by. */
+export type GroupDim = 'phase' | 'location' | 'discipline' | 'workType';
+
+export type GroupStat = {
+  key: string;
+  label: string;
+  activities: number;
+  inBudget: number;
+  budgetHours: number;
+  earnedHours: number;
+  remainingHours: number;
+  pctComplete: number;
+  notStarted: number;
+  inProgress: number;
+  finished: number;
+  /** In-budget activities that have test case counts keyed. */
+  withCounts: number;
+  testsTotal: number;
+  testsComplete: number;
+  earliestStart: string | null;
+  latestFinish: string | null;
 };
 
 export type CurvePoint = {
@@ -222,6 +255,8 @@ export type TestProgressCheck = {
 
 export type Model = {
   rows: BudgetRow[];
+  /** Rollups by every dimension, so screens never group by hand. */
+  groups: Record<GroupDim, GroupStat[]>;
   library: LibraryStat[];
   locations: LocationStat[];
   curve: CurvePoint[];

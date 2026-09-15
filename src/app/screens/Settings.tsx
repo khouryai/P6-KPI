@@ -115,7 +115,7 @@ export function Settings() {
             <button className="btn" onClick={() => void backup()}>Download a backup</button>
             <label className="btn cursor-pointer">
               Restore from a backup…
-              <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && void restore(e.target.files[0])} />
+              <input type="file" accept=".json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void restore(f); }} />
             </label>
           </div>
         </div>
