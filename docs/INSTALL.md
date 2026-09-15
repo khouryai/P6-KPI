@@ -15,16 +15,34 @@ trade-offs, and on a laptop where PowerShell is restricted only one of them work
 | Listed under Edge's installed apps | No | Yes |
 | Works offline | Yes | Yes |
 
-**If PowerShell is locked down on your machine, use A.** You lose nothing that
-matters: the app is identical, it is just launched from a file instead of from
-`localhost`.
+**Try B first.** It gives a genuine installed app and an address that does not
+depend on where the folder lives. **Fall back to A if PowerShell is blocked**; you
+lose nothing that matters, the app is identical, it is just launched from a file.
 
 ---
 
+## Before you key any real data: put the folder somewhere permanent
+
+Copy the whole folder out of `Downloads` first, to a fixed path such as
+`C:\Tools\tc-budget`. This matters more than it looks.
+
+A browser keeps storage per address. For Way A the address contains the **full path
+to the file**, so `...\Downloads\P6-KPI-... (4)\standalone\index.html` and
+`C:\Tools\tc-budget\standalone\index.html` are two different addresses with two
+different stores. Every fresh download adds another `(n)` to the folder name, so
+anything you keyed under the old path would be invisible under the new one.
+
+Two ways to make this a non-issue, and you can do both:
+
+- **Keep your data in the OneDrive folder**, not in the browser. Those are plain
+  files on disk, so they are the same data no matter how the app is launched or
+  where the app folder lives.
+- **Use Way B.** The address is then always `http://localhost:47800`, whatever the
+  folder is called.
+
 ## What to copy
 
-Copy the **whole folder** somewhere permanent, for example `C:\Tools\tc-budget`, or
-a folder in your OneDrive. Copying only one `.cmd` file will not work.
+Copy the **whole folder**. Copying only one `.cmd` file will not work.
 
 | Path | What it is |
 | --- | --- |

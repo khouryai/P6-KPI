@@ -207,6 +207,29 @@ schedules and every snapshot) downloads as one JSON file and restores into any o
 which is also how you move between machines. A restore replaces the edited files but
 *appends* the schedules and snapshots, so the append-only history is never rewritten.
 
+## Rules for the Windows launcher scripts
+
+`start.cmd` and `Create Desktop App.cmd` are the only things here that run outside a
+browser, so a mistake in one reaches the user's disk. One did: a `del "%VAR%"` with an
+unset variable, which cmd resolved to the current directory and offered to empty. The
+variable was unset because an unescaped `)` inside an `echo` had closed the enclosing
+`if` block early, so lines meant to be skipped ran anyway.
+
+Three rules, enforced by `tests/scripts.test.ts`:
+
+1. **Nothing is ever deleted.** No `del`, `erase`, `rd`, `rmdir` or `format` in any
+   `.cmd`, and `serve.ps1` may not call `Remove-Item`. If a script needs a scratch
+   file, redesign it so it does not.
+2. **Every `(` and `)` inside an `echo` is written `^(` and `^)`.** Inside a
+   parenthesised block an unescaped bracket closes the block early, even in the
+   middle of a quoted string, silently changing control flow.
+3. **No temporary script files**, and no writing into `%TEMP%`.
+
+`Create Desktop App.cmd` additionally branches only with `goto :label` and
+`call :label`, never with `( )` blocks, which removes rule 2's failure mode entirely.
+`%ProgramFiles(x86)%` carries a bracket in its own name, so it is copied into a plain
+variable on one line and only that variable is used afterwards.
+
 ## Delivery without Node
 
 The laptop this runs on has no Node.js and cannot install one, so `dist/` and
