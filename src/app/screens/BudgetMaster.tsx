@@ -194,6 +194,7 @@ export function BudgetMaster({ route }: { route: Route }) {
     {
       key: 'id',
       label: 'Activity ID',
+      locked: true,
       value: (r) => r.activityId,
       hint: 'The P6 code. Never editable: it is the key everything joins on, and the only thing that carries your edits across an import.',
       render: (r) => (
@@ -446,8 +447,9 @@ export function BudgetMaster({ route }: { route: Route }) {
       <SortableTable
         rows={rows}
         columns={columns}
+        tableId="budget-master"
         rowKey={(r) => `${r.activityId}#${r.activity.sortOrder}`}
-        maxHeight="calc(100vh - 200px)"
+        maxHeight="calc(100vh - 240px)"
         rowClass={(r) => (r.status === 'REVIEW' ? 'row-bad' : r.baselineSource === 'NONE' ? 'row-bad' : r.status !== 'IN BUDGET' ? 'row-muted' : '')}
       />
     </Page>

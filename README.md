@@ -45,9 +45,25 @@ The workbook never has to be opened again, and neither does Excel:
 | Get rid of REVIEW rows you will never price | **Budget Master**: filter to *Needing REVIEW*, then **Hide**. Hidden activities leave every total, curve and export, nothing is deleted, and the Hidden view brings them back. |
 | Test case counts | **Test Progress**: every budgeted activity is already listed. Key counts inline, bulk-fill across a filter, or drop a spreadsheet. Keyed rows that earn nothing are listed with the name, the type and a sentence on why — and on whether deleting one costs you anything. |
 | Progress per phase or location | **By Phase & Location**: rollups by phase, location, discipline or work type, with drill-through into a filtered Budget Master. |
+| A fortnightly review | **Two-Week Log**: what the baseline planned for the period, what was actually achieved, and every activity behind it — completed, started, continued, missed or never started. Steps period by period, and copies as text for a report. |
 | Status snapshots | **Snapshots**: take one, take it off the S-curve while keeping the record, or delete one that should never have been written. |
 | Defaults, dates, storage, backups | **Settings** |
 | Hand a spreadsheet to project controls | **Settings → Export workbook**, plus curve CSV and chart PNG on the Dashboard. |
+
+## Percentages, not just hours
+
+Hours answer "how big"; a percentage answers "how big next to everything else", and
+most tables now carry both. Rollups, Locations and the Activity Library each show a
+**Share** of the budget; Earned vs Built shows percent complete per month and an
+**Overrun** as a share of each group's own budget; the Dashboard cards say what
+fraction of the budget is earned and what fraction is left.
+
+## Choosing your columns
+
+Most tables have a **Columns** button: tick what you want to see, move what matters
+to the front. Some detail columns start switched off. The choice is remembered per
+table, in this browser on this machine only — it is not written to the shared folder,
+so it never becomes something a colleague inherits.
 
 ## Development
 

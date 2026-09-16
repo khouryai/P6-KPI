@@ -171,16 +171,191 @@ export type Column<T> = {
    * Pass an empty string to say deliberately that there is nothing to explain.
    */
   hint?: string;
+  /** Off until the person turns it on. For detail most people do not want by default. */
+  optional?: boolean;
+  /** Never hideable or movable: the column that says which row this is. */
+  locked?: boolean;
 };
+
+/**
+ * Which columns a table shows, and in what order, remembered per table per browser.
+ *
+ * This is about this person on this machine — which columns they care to look at —
+ * so it belongs in localStorage and emphatically not in the OneDrive store, where
+ * it would become something every colleague inherits and something you have to
+ * "save". Only the keys are kept: a layout referring to a column that no longer
+ * exists is filtered out on read, and a column added by a later version appears in
+ * its natural place rather than vanishing because an old layout never mentioned it.
+ */
+export type TableLayout = {
+  /** Left-to-right order, by column key. Keys the table no longer has are ignored. */
+  order: string[];
+  /** Columns switched OFF by hand, optional or not. */
+  off: string[];
+  /**
+   * Optional columns switched ON by hand.
+   *
+   * This has to be its own list rather than "anything not in `off`". An optional
+   * column is off until asked for, so absence cannot mean on — and the order list
+   * cannot stand in for "columns this layout knows about" either, since reordering
+   * or hiding one column writes every key into it and would switch every optional
+   * column on at once. That was a real bug: hide Phase, and five columns nobody
+   * asked for appeared.
+   */
+  on: string[];
+};
+
+const LAYOUT_PREFIX = 'tc-cols-';
+
+function readLayout(tableId: string): TableLayout | null {
+  try {
+    const raw = localStorage.getItem(LAYOUT_PREFIX + tableId);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<TableLayout>;
+    const arr = (x: unknown) => (Array.isArray(x) ? (x as string[]) : []);
+    return { order: arr(v.order), off: arr(v.off), on: arr(v.on) };
+  } catch {
+    return null;
+  }
+}
+
+/** Is this column on screen, given the layout? The one place that decides. */
+export function isVisible<T>(c: Column<T>, layout: TableLayout | null): boolean {
+  if (c.locked) return true;
+  if (layout?.off.includes(c.key)) return false;
+  return c.optional ? !!layout?.on.includes(c.key) : true;
+}
+
+function isEmptyLayout(l: TableLayout): boolean {
+  return l.order.length === 0 && l.off.length === 0 && l.on.length === 0;
+}
+
+function writeLayout(tableId: string, layout: TableLayout | null): void {
+  try {
+    if (layout === null) localStorage.removeItem(LAYOUT_PREFIX + tableId);
+    else localStorage.setItem(LAYOUT_PREFIX + tableId, JSON.stringify(layout));
+  } catch {
+    /* private window: the table still works, it just will not remember */
+  }
+}
+
+/**
+ * Apply a stored layout to the columns a screen declared, tolerating drift both ways.
+ *
+ * Two kinds of drift, and they pull in opposite directions. A column the layout
+ * mentions but the screen no longer declares simply never matches, which is why the
+ * order is stored as keys rather than indices. A column the screen declares but the
+ * layout has never heard of is NEW since the layout was saved: it keeps its declared
+ * position, and if it is optional it stays off, so shipping a new optional column
+ * cannot rearrange a table somebody had already set up the way they wanted.
+ */
+export function applyLayout<T>(columns: Column<T>[], layout: TableLayout | null): Column<T>[] {
+  const visible = columns.filter((c) => isVisible(c, layout));
+  if (!layout?.order.length) return visible;
+  const rank = new Map(layout.order.map((k, i) => [k, i]));
+  return [...visible].sort((a, b) => (rank.get(a.key) ?? columns.indexOf(a)) - (rank.get(b.key) ?? columns.indexOf(b)));
+}
+
+/** The Columns popover: tick what to show, move what matters to the front. */
+function ColumnPicker<T>({
+  columns,
+  layout,
+  onChange,
+  onClose,
+}: {
+  columns: Column<T>[];
+  layout: TableLayout;
+  onChange: (next: TableLayout) => void;
+  onClose: () => void;
+}) {
+  const rank = new Map(layout.order.map((k, i) => [k, i]));
+  const order = [...columns].sort((a, b) => (rank.get(a.key) ?? columns.indexOf(a)) - (rank.get(b.key) ?? columns.indexOf(b)));
+  const keys = order.map((c) => c.key);
+
+  const byKey = new Map(order.map((c) => [c.key, c]));
+
+  /**
+   * Where this column lands if moved one step. Hidden columns are stepped over:
+   * swapping a visible column with one that is not on screen moves nothing the
+   * person can see, which reads as a broken button.
+   */
+  const target = (key: string, by: number): number => {
+    const i = keys.indexOf(key);
+    if (i < 0) return -1;
+    const mover = byKey.get(key);
+    let j = i + by;
+    if (mover && isVisible(mover, layout)) {
+      while (j >= 0 && j < keys.length && !isVisible(byKey.get(keys[j])!, layout)) j += by;
+    }
+    return j >= 0 && j < keys.length ? j : -1;
+  };
+
+  const move = (key: string, by: number) => {
+    const i = keys.indexOf(key);
+    const j = target(key, by);
+    if (i < 0 || j < 0) return;
+    // Lift and re-insert rather than swap, so the columns stepped over keep their
+    // relative order instead of one of them being flung to the other end.
+    const next = [...keys];
+    next.splice(i, 1);
+    next.splice(j, 0, key);
+    onChange({ ...layout, order: next });
+  };
+
+  const toggle = (c: Column<T>) => {
+    const showing = isVisible(c, layout);
+    const off = new Set(layout.off);
+    const on = new Set(layout.on);
+    if (showing) {
+      off.add(c.key);
+      on.delete(c.key);
+    } else {
+      off.delete(c.key);
+      if (c.optional) on.add(c.key);
+    }
+    // Reordering is the only thing that needs the order list, so it is only written
+    // when it already carries a choice — a visibility toggle must not silently pin
+    // today's column order into storage.
+    onChange({ order: layout.order, off: [...off], on: [...on] });
+  };
+
+  return (
+    <>
+      <div className="col-scrim" onClick={onClose} />
+      <div className="col-pop" role="dialog" aria-label="Choose columns">
+        <div className="col-pop-head">
+          <span>Columns</span>
+          <button className="btn-link" onClick={() => onChange({ order: [], off: [], on: [] })}>reset</button>
+        </div>
+        <div className="col-pop-list">
+          {order.map((c) => (
+            <div key={c.key} className="col-row">
+              <label className="col-row-label">
+                <input type="checkbox" checked={isVisible(c, layout)} disabled={c.locked} onChange={() => toggle(c)} />
+                <span className={isVisible(c, layout) ? '' : 'opacity-50'}>{c.label || <i>(actions)</i>}</span>
+              </label>
+              <span className="col-row-moves">
+                <button className="col-move" disabled={target(c.key, -1) < 0} title="Move left" onClick={() => move(c.key, -1)}>↑</button>
+                <button className="col-move" disabled={target(c.key, 1) < 0} title="Move right" onClick={() => move(c.key, 1)}>↓</button>
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="col-pop-foot">Kept on this machine only. Order here is left-to-right in the table.</div>
+      </div>
+    </>
+  );
+}
 
 /** A sortable table. Sorting is by the column's raw value. */
 export function SortableTable<T>({
   rows,
-  columns,
+  columns: declared,
   rowKey,
   defaultSort,
   maxHeight = 'calc(100vh - 290px)',
   rowClass,
+  tableId,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -188,7 +363,22 @@ export function SortableTable<T>({
   defaultSort?: { key: string; dir: 'asc' | 'desc' };
   maxHeight?: string;
   rowClass?: (row: T) => string;
+  /**
+   * Give the table a stable id and it gains a Columns button: what to show and in
+   * what order, remembered per browser. Without one it behaves exactly as before.
+   */
+  tableId?: string;
 }) {
+  const [layout, setLayout] = useState<TableLayout | null>(() => (tableId ? readLayout(tableId) : null));
+  const [picking, setPicking] = useState(false);
+  const columns = useMemo(() => (tableId ? applyLayout(declared, layout) : declared), [declared, layout, tableId]);
+  const changeLayout = (next: TableLayout) => {
+    const stored = isEmptyLayout(next) ? null : next;
+    setLayout(stored);
+    if (tableId) writeLayout(tableId, stored);
+  };
+  const hiddenCount = tableId ? declared.length - columns.length : 0;
+
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(defaultSort ?? null);
   const sorted = useMemo(() => {
     if (!sort) return rows;
@@ -207,6 +397,22 @@ export function SortableTable<T>({
   }, [rows, columns, sort]);
   const toggle = (key: string) => setSort((s) => (s && s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
   return (
+    <div className="table-shell">
+      {tableId && (
+        <div className="table-tools">
+          <button className={`btn btn-mini${hiddenCount > 0 ? ' is-on' : ''}`} onClick={() => setPicking((v) => !v)} title="Choose which columns to show, and their order">
+            Columns{hiddenCount > 0 ? ` (${columns.length}/${declared.length})` : ''}
+          </button>
+          {picking && (
+            <ColumnPicker
+              columns={declared}
+              layout={layout ?? { order: [], off: [], on: [] }}
+              onChange={changeLayout}
+              onClose={() => setPicking(false)}
+            />
+          )}
+        </div>
+      )}
     <div className="table-wrap" style={{ maxHeight }}>
       <table className="tbl">
         <thead>
@@ -250,6 +456,7 @@ export function SortableTable<T>({
           )}
         </tbody>
       </table>
+    </div>
     </div>
   );
 }

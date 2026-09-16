@@ -28,6 +28,7 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
     items: [
       { id: 'rollup', label: 'By Phase & Location' },
       { id: 'progress', label: 'Test Progress' },
+      { id: 'period', label: 'Two-Week Log' },
       { id: 'team', label: 'Earned vs Built' },
       { id: 'snapshots', label: 'Snapshots' },
     ],

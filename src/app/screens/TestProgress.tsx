@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, Badge, statusTone, Notice, Panel, type Column, type HeroStat } from '../components/ui';
 import type { TestProgress as TP, BudgetRow, TestProgressCheck } from '../../engine/types';
-import { fmtPct, fmtHours, num } from '../format';
+import { fmtPct, fmtHours, fmtDate, num } from '../format';
 import { normKey } from '../../engine/keys';
 import { parseDelimitedText } from '../../engine/parse';
 import { readWorkbook, pickSheet, workbookGrid } from '../../engine/workbook';
@@ -278,6 +278,7 @@ export function TestProgress({ route }: { route: Route }) {
     {
       key: 'id',
       label: 'Activity',
+      locked: true,
       value: (r) => r.activityId,
       render: (r) => (
         <div className="min-w-0">
@@ -291,6 +292,41 @@ export function TestProgress({ route }: { route: Route }) {
     { key: 'phase', label: 'Phase', value: (r) => r.phaseName },
     { key: 'loc', label: 'Loc', value: (r) => r.location },
     { key: 'budget', label: 'Budget h', value: (r) => r.budgetHours, num: true, render: (r) => fmtHours(r.budgetHours) },
+    /*
+     * The P6 dates, read-only, so the window you are keying against is on the same
+     * row as the keying. An "A" is P6 saying that date is actual rather than
+     * planned, and it is what decides whether the activity earns to its own finish
+     * or only as far as the data date.
+     */
+    {
+      key: 'p6s',
+      label: 'P6 start',
+      value: (r) => r.currentStart,
+      hint: 'Start from the current P6 schedule. "A" means P6 records it as an actual start, not a plan. Read-only: it changes on the next import.',
+      render: (r) => <P6Date iso={r.currentStart} raw={r.activity.startRaw} actual={r.activity.actualStart} />,
+    },
+    {
+      key: 'p6f',
+      label: 'P6 finish',
+      value: (r) => r.currentFinish,
+      hint: 'Finish from the current P6 schedule. "A" means P6 records it as an actual finish, which is what closes the earn window.',
+      render: (r) => <P6Date iso={r.currentFinish} raw={r.activity.finishRaw} actual={r.activity.actualFinish} />,
+    },
+    {
+      key: 'bls',
+      label: 'BL start',
+      value: (r) => r.baselineStart,
+      optional: true,
+      render: (r) => <span className="text-[var(--text-muted)]">{fmtDate(r.baselineStart)}</span>,
+    },
+    {
+      key: 'blf',
+      label: 'BL finish',
+      value: (r) => r.baselineFinish,
+      optional: true,
+      render: (r) => <span className="text-[var(--text-muted)]">{fmtDate(r.baselineFinish)}</span>,
+    },
+    { key: 'od', label: 'OD', value: (r) => r.activity.originalDuration, num: true, optional: true },
     {
       key: 'total',
       label: 'Tests total',
@@ -376,6 +412,8 @@ export function TestProgress({ route }: { route: Route }) {
         <CellInput type="date" value={r.entry?.testEndOverride ?? ''} onCommit={(v) => setField(r.activityId, { testEndOverride: isValidISO(v) ? v : undefined })} />
       ),
     },
+    { key: 'es', label: 'Earn start', value: (r) => r.earnStart, optional: true, render: (r) => fmtDate(r.earnStart) },
+    { key: 'ee', label: 'Earn end', value: (r) => r.earnEnd, optional: true, render: (r) => fmtDate(r.earnEnd) },
     { key: 'win', label: 'Window', value: (r) => r.earnWindowSource, render: (r) => <Badge tone={statusTone(r.earnWindowSource)}>{r.earnWindowSource}</Badge> },
     {
       key: 'act',
@@ -602,6 +640,7 @@ export function TestProgress({ route }: { route: Route }) {
       )}
 
       <SortableTable
+        tableId="test-progress"
         rows={rows}
         columns={columns}
         rowKey={(r) => r.activityId}
@@ -609,6 +648,22 @@ export function TestProgress({ route }: { route: Route }) {
         rowClass={(r) => (r.pctComplete >= 1 ? '' : r.entry ? '' : 'row-muted')}
       />
     </Page>
+  );
+}
+
+/**
+ * A P6 date as the schedule states it: the date, an "A" when P6 marks it actual,
+ * and the raw cell in red when it could not be parsed at all — because a date the
+ * app silently dropped is the kind of thing that makes a curve wrong quietly.
+ */
+function P6Date({ iso, raw, actual }: { iso: string | null; raw: string; actual: boolean }) {
+  if (!iso && raw) return <span className="text-[var(--bad)]" title="P6 sent a date this app could not read">{raw}</span>;
+  if (!iso) return <span className="text-[var(--text-subtle)]">—</span>;
+  return (
+    <span className="tabular-nums">
+      {fmtDate(iso)}
+      {actual && <b className="ml-1 text-[var(--good)]" title="P6 records this as an actual date">A</b>}
+    </span>
   );
 }
 

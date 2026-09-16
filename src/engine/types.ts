@@ -276,6 +276,8 @@ export type LibraryStat = {
   rateStatus: RateStatus;
   stdHoursIfRate: number | null;
   budgetHours: number; // sum across activities resolved to this key
+  /** This key as a share of the whole budget, so the big ones are obvious. */
+  shareOfBudget: number;
   entry: LibraryEntry;
 };
 
@@ -284,6 +286,10 @@ export type LocationStat = {
   count: number;
   effectiveFactor: number;
   budgetHours: number;
+  /** This location as a share of the whole budget. */
+  shareOfBudget: number;
+  earnedHours: number;
+  pctComplete: number;
   location: Location;
 };
 
@@ -404,6 +410,8 @@ export type GroupStat = {
   earnedHours: number;
   remainingHours: number;
   pctComplete: number;
+  /** This group as a share of the whole budget: how much of the job it is. */
+  shareOfBudget: number;
   notStarted: number;
   inProgress: number;
   finished: number;

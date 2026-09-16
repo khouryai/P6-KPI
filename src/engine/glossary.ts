@@ -48,10 +48,13 @@ export const GLOSSARY: Record<string, string> = {
   Factor: 'Earned ÷ built. Above 1.00 the team is ahead of the budget; below 1.00 every hour spent earns less than an hour.',
   'To complete': 'Remaining budget ÷ factor. What finishing the job costs if the team keeps converting hours at the rate it has so far.',
   Forecast: 'Built so far plus the hours still to come at the current rate. The estimate of what the whole job will cost.',
+  Overrun: 'Variance at completion as a share of that group\u2019s own budget. A 500 hour hole means something very different to a small group than to a large one.',
   'At completion': 'Budget minus forecast. Negative is the size of the overrun if nothing changes.',
-  Share: 'This subsystem as a percentage of the whole budget.',
 
   // --- what the user decided about one activity ----------------------------
+  'P6 start': 'The start date in the current P6 schedule. An "A" beside it means P6 records it as an actual start rather than a plan.',
+  'P6 finish': 'The finish date in the current P6 schedule. An "A" means P6 records it as actual, which is what closes the activity\u2019s earn window.',
+  Share: 'How much of the budget shown sits in this row. Hours say how big it is; this says how big next to everything else.',
   Show: 'Whether this activity takes part at all. Your decision about this one activity, which beats what the Activity Library says about its type.',
   Auto: 'Leave it to the Activity Library and the P6 name to decide whether this activity is in the budget. The setting every activity starts on.',
   'Force in': 'Budget this activity even though the library excludes its type, or P6 marked the name (Deleted) or (Cancelled). It still needs a priced type to earn hours.',
@@ -60,6 +63,17 @@ export const GLOSSARY: Record<string, string> = {
   'What it is': 'What the schedule says this keyed Activity ID actually is: a real activity in some state, a WBS summary header, or an ID no schedule has.',
   Keyed: 'What has been recorded against this activity: test case counts, a percent override, and test window dates. This is what deleting the row would lose.',
   Note: 'Your own words on why this activity was renamed, hidden, excluded or re-priced. It rides along into the export.',
+
+  // --- the two-week log ----------------------------------------------------
+  'Planned h': 'Budget hours the baseline said would accrue inside this period, spread evenly across each activity by calendar day.',
+  Achieved: 'Budget hours actually earned inside this period. Measured exactly as the S-curve measures them, so every period adds back to the same total.',
+  'Achieved h': 'Budget hours this activity actually earned inside the period.',
+  'Of plan': 'Achieved divided by planned for this period. Above 100% means more was earned than the baseline asked for.',
+  Project: 'How complete the whole job is at the end of this period, not just the part of it that falls inside the period.',
+  Outcome: 'What became of this activity inside the period, judged against the baseline dates: completed, started, continued, missed or not started.',
+  'Actual start': 'When the activity really began: your test window start, or P6\u2019s actual start date.',
+  'Actual finish': 'When the activity really finished. Blank until it reaches 100%.',
+  'Days late': 'Actual finish minus baseline finish, in calendar days. Negative is early, blank until it finishes.',
 
   // --- progress ------------------------------------------------------------
   '%': 'Percent complete. Taken from your override first, then test case counts, then P6 duration.',
@@ -76,7 +90,7 @@ export const GLOSSARY: Record<string, string> = {
   Finish: 'Activity finish date from the current schedule.',
 
   // --- curves and dates ----------------------------------------------------
-  Planned: 'Cumulative budget hours spread evenly between each activity’s baseline start and finish.',
+  Planned: 'Budget hours from the baseline, spread evenly between each activity’s baseline start and finish. Cumulative on the curve; inside the window on the two-week log.',
   'Data date': 'The date progress is reported up to. The earned curve stops here, because past it nothing has been reported yet.',
   'Status date': 'The date a snapshot is stamped with.',
   Snapshot: 'A frozen copy of every activity’s percent complete and earned hours on a given date. Never recalculated afterwards.',

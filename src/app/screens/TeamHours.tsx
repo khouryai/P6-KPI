@@ -175,6 +175,16 @@ export function TeamHours() {
     },
     { key: 'factor', label: 'Factor', value: (r) => r.factor ?? null, num: true, render: (r) => (r.factor === null ? <span className="text-[var(--text-subtle)]">—</span> : r.factor.toFixed(2)) },
     { key: 'cumEarned', label: 'Cum earned', value: (r) => r.cumEarned, num: true, render: (r) => fmtHours(r.cumEarned) },
+    {
+      key: 'cumPct',
+      label: '% complete',
+      value: (r) => (project.budgetHours ? r.cumEarned / project.budgetHours : 0),
+      num: true,
+      hint: 'Cumulative earned hours as a share of the whole budget: how complete the job was at the end of that month.',
+      render: (r) => (
+        <span className="tabular-nums font-semibold">{fmtPct(project.budgetHours ? r.cumEarned / project.budgetHours : 0, 1)}</span>
+      ),
+    },
     { key: 'cumBuilt', label: 'Cum built', value: (r) => r.cumBuilt, num: true, render: (r) => fmtHours(r.cumBuilt) },
     {
       key: 'cumVariance',
@@ -209,6 +219,28 @@ export function TeamHours() {
     { key: 'factor', label: 'Factor', value: (r) => r.factor ?? null, num: true, render: (r) => (r.factor === null ? <span className="text-[var(--text-subtle)]">—</span> : <span className={r.factor >= 1 ? 'tone-good font-semibold' : 'tone-bad font-semibold'}>{r.factor.toFixed(2)}</span>) },
     { key: 'toGo', label: 'To complete', value: (r) => r.hoursToComplete ?? null, num: true, render: (r) => (r.hoursToComplete === null ? <span className="text-[var(--text-subtle)]">—</span> : fmtHours(r.hoursToComplete)) },
     { key: 'forecast', label: 'Forecast', value: (r) => r.forecastTotalHours ?? null, num: true, render: (r) => (r.forecastTotalHours === null ? <span className="text-[var(--text-subtle)]">—</span> : fmtHours(r.forecastTotalHours)) },
+    {
+      key: 'pct',
+      label: '% complete',
+      value: (r) => (r.budgetHours ? r.cumEarned / r.budgetHours : 0),
+      num: true,
+      render: (r) => <span className="tabular-nums">{fmtPct(r.budgetHours ? r.cumEarned / r.budgetHours : 0, 0)}</span>,
+    },
+    {
+      key: 'vacPct',
+      label: 'Overrun',
+      value: (r) => (r.budgetHours && r.varianceAtCompletion !== null ? r.varianceAtCompletion / r.budgetHours : null),
+      num: true,
+      hint: 'Variance at completion as a share of that group\u2019s own budget. A 500 hour hole means something different to a group with 2,000 hours than to one with 40,000.',
+      render: (r) =>
+        r.varianceAtCompletion === null || !r.budgetHours ? (
+          <span className="text-[var(--text-subtle)]">—</span>
+        ) : (
+          <span className={`tone-${varianceTone(r.varianceAtCompletion)} font-semibold`}>
+            {r.varianceAtCompletion >= 0 ? '+' : ''}{fmtPct(r.varianceAtCompletion / r.budgetHours, 1)}
+          </span>
+        ),
+    },
     {
       key: 'vac',
       label: 'At completion',
@@ -377,7 +409,7 @@ export function TeamHours() {
           }
           className="mb-3"
         >
-          <SortableTable rows={shownMonths} columns={monthColumns} rowKey={(r) => r.month} defaultSort={{ key: 'month', dir: 'asc' }} maxHeight="340px" />
+          <SortableTable tableId="burn-months" rows={shownMonths} columns={monthColumns} rowKey={(r) => r.month} defaultSort={{ key: 'month', dir: 'asc' }} maxHeight="340px" />
         </Panel>
       )}
 
@@ -401,7 +433,7 @@ export function TeamHours() {
 
       {burn.totalBuilt > 0 && (
         <Panel title="Forecast by subsystem" meta="Each group at its own rate, so the one in trouble is not hidden by the ones that are fine." className="mb-3">
-          <SortableTable rows={burn.bySubsystem} columns={forecastColumns} rowKey={(r) => r.code || '(unassigned)'} defaultSort={{ key: 'budget', dir: 'desc' }} maxHeight="320px" />
+          <SortableTable tableId="burn-forecast" rows={burn.bySubsystem} columns={forecastColumns} rowKey={(r) => r.code || '(unassigned)'} defaultSort={{ key: 'budget', dir: 'desc' }} maxHeight="320px" />
         </Panel>
       )}
 
