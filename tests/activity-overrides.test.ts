@@ -108,6 +108,77 @@ describe('forcing an activity in or out', () => {
     expect(r.status).toBe('REVIEW');
     expect(r.budgetHours).toBe(0);
   });
+
+  /*
+   * The reported bug: force in an activity and it appears in neither the Activity
+   * Library nor Test Progress.
+   *
+   * Both screens list priced things. A P6 "(Deleted)" activity's type is skipped by
+   * import on purpose, so it has no library key, and forcing it in moved it from
+   * DELETED to REVIEW and stopped — no rate could reach it, it carried no hours, and
+   * it showed up nowhere. Budget Master now creates the key in the same action; these
+   * hold both halves of that.
+   */
+  it('a forced-in activity whose type has no key is still unpriceable, which is what made it invisible', () => {
+    const deleted = scenario().current.map((a) =>
+      a.activityId === 'A-P2-TC-X10-FA-0010' ? { ...a, activityType: 'Legacy Switch Test (Deleted)', excludeReason: 'DELETED' as const } : a,
+    );
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'INCLUDED' }], [], { current: deleted }));
+    const r = m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!;
+    expect(r.status).toBe('REVIEW');
+    // Neither screen can show it: Test Progress lists IN BUDGET rows, the Library lists keys.
+    expect(m.rows.filter((x) => x.status === 'IN BUDGET').map((x) => x.activityId)).not.toContain('A-P2-TC-X10-FA-0010');
+    expect(m.library.some((l) => l.matchKey === 'Legacy Switch Test (Deleted)')).toBe(false);
+  });
+
+  it('with the key created, it is in the budget, in the library and in Test Progress', () => {
+    const deleted = scenario().current.map((a) =>
+      a.activityId === 'A-P2-TC-X10-FA-0010' ? { ...a, activityType: 'Legacy Switch Test (Deleted)', excludeReason: 'DELETED' as const } : a,
+    );
+    // Exactly what Budget Master now writes alongside the override.
+    const library: LibraryEntry[] = [...scenario().library, { matchKey: 'Legacy Switch Test (Deleted)' }];
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'INCLUDED' }], [], { current: deleted, library }));
+    const r = m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!;
+
+    expect(r.status).toBe('IN BUDGET');
+    expect(r.budgetHours).toBeGreaterThan(0);
+    expect(m.rows.filter((x) => x.status === 'IN BUDGET').map((x) => x.activityId)).toContain('A-P2-TC-X10-FA-0010');
+    expect(m.library.some((l) => l.matchKey === 'Legacy Switch Test (Deleted)')).toBe(true);
+  });
+
+  it('does not drag the other activities of that type in with it', () => {
+    const deleted = scenario().current.map((a) =>
+      a.activityId === 'A-P2-TC-X10-FA-0010' || a.activityId === 'A-P2-TC-X10-FA-0020'
+        ? { ...a, activityType: 'Legacy Switch Test (Deleted)', excludeReason: 'DELETED' as const }
+        : a,
+    );
+    const library: LibraryEntry[] = [...scenario().library, { matchKey: 'Legacy Switch Test (Deleted)' }];
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'INCLUDED' }], [], { current: deleted, library }));
+
+    expect(m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!.status).toBe('IN BUDGET');
+    // Same type, same (Deleted) marker, not forced: P6's marker still keeps it out.
+    const sibling = m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0020')!;
+    expect(sibling.status).toBe('DELETED');
+    expect(sibling.budgetHours).toBe(0);
+  });
+
+  it('reports the rate it actually has, not EXCLUDED, once it is in the budget', () => {
+    // The key contains "(Deleted)", which effectiveInclude reads as exclude. Saying
+    // EXCLUDED on a row that IS in the budget answers a question nobody asked; what
+    // the reader needs is whether the rate behind those hours is any good.
+    const deleted = scenario().current.map((a) =>
+      a.activityId === 'A-P2-TC-X10-FA-0010' ? { ...a, activityType: 'Legacy Switch Test (Deleted)', excludeReason: 'DELETED' as const } : a,
+    );
+    const library: LibraryEntry[] = [...scenario().library, { matchKey: 'Legacy Switch Test (Deleted)' }];
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'INCLUDED' }], [], { current: deleted, library }));
+    expect(m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!.rateStatus).toBe('DEFAULT');
+  });
+
+  it('a retired key still prices nothing, and the row says so by staying REVIEW', () => {
+    const library: LibraryEntry[] = [{ ...scenario().library[0], retired: true }];
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'INCLUDED' }], [], { library }));
+    expect(m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!.status).toBe('REVIEW');
+  });
 });
 
 describe('renaming an activity', () => {

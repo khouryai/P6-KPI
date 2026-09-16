@@ -101,8 +101,17 @@ export function isOnDefaults(entry: LibraryEntry): boolean {
   );
 }
 
-export function libraryRateStatus(entry: LibraryEntry, settings: Settings): RateStatus {
-  if (effectiveInclude(entry) === 'N') return 'EXCLUDED';
+/**
+ * How well priced a library entry is.
+ *
+ * `forcedIn` is for a row the user pulled into the budget against the library's
+ * advice. Reporting EXCLUDED there would be answering a question nobody asked: the
+ * row IS in the budget, and what its reader needs to know is whether the rate
+ * behind it is any good. So the include flag is skipped and the rate is judged on
+ * its own.
+ */
+export function libraryRateStatus(entry: LibraryEntry, settings: Settings, forcedIn = false): RateStatus {
+  if (!forcedIn && effectiveInclude(entry) === 'N') return 'EXCLUDED';
   if (isOnDefaults(entry)) return 'DEFAULT';
   if (effectiveBasis(entry, settings) === 'RATE' && entry.durationShifts === undefined) return 'NEEDS SHIFTS';
   return 'SET';
@@ -321,9 +330,10 @@ export function computeModel(input: ModelInput): Model {
     if (a.rowType !== 'ACTIVITY') continue;
     const match = resolveMatchKey(a.activityType, libIdx);
     const entry = match.entry;
-    const rateStatus: RateStatus = entry ? libraryRateStatus(entry, settings) : 'NO MATCH';
     const ovEarly = ovIdx.get(normKey(a.activityId));
     const visibility: ActivityVisibility | null = ovEarly?.visibility ?? null;
+    const forcedIn = visibility === 'INCLUDED';
+    const rateStatus: RateStatus = entry ? libraryRateStatus(entry, settings, forcedIn) : 'NO MATCH';
 
     /*
      * The user's decision about this one activity beats the library's decision about
@@ -337,7 +347,7 @@ export function computeModel(input: ModelInput): Model {
      */
     let status: ActivityStatus;
     if (visibility === 'EXCLUDED') status = 'EXCLUDED';
-    else if (visibility === 'INCLUDED') status = entry ? 'IN BUDGET' : 'REVIEW';
+    else if (forcedIn) status = entry ? 'IN BUDGET' : 'REVIEW';
     else if (a.excludeReason) status = a.excludeReason;
     else if (!entry) status = 'REVIEW';
     else if (effectiveInclude(entry) !== 'Y') status = 'EXCLUDED';

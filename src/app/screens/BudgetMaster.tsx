@@ -94,6 +94,56 @@ export function BudgetMaster({ route }: { route: Route }) {
 
   const ovOf = (id: string) => state.data.overrides.find((o) => normKey(o.activityId) === normKey(id));
 
+  /**
+   * Forcing an activity into the budget is a promise the Activity Library has to be
+   * able to keep, so this makes sure it can.
+   *
+   * An activity is priced through its type, and two kinds of type have no library
+   * key at all: one P6 marked "(Deleted)" or "(Cancelled)" — import skips those on
+   * purpose, since nobody wants a library full of dead work — and one whose key was
+   * retired by hand. Forcing such an activity in used to move it from DELETED to
+   * REVIEW and stop there: no rate could ever reach it, it carried no hours, and
+   * because both the Activity Library and Test Progress are lists of priced things,
+   * it appeared in neither. It had been "included" into nowhere.
+   *
+   * So the key is created, or un-retired, in the same action. It arrives on the
+   * Settings defaults exactly as a discovered type would, which is a real number of
+   * hours rather than a zero, and the type is then visible and editable like any
+   * other. Other activities of that same type are NOT dragged in with it: P6's
+   * (Deleted) marker still excludes them on its own, and only the ones forced in
+   * individually cross over.
+   */
+  const ensurePriceable = (types: string[]) => {
+    const lib = state.data.library;
+    const wanted = [...new Map(types.map((t) => t.trim()).filter(Boolean).map((t) => [normKey(t), t])).values()];
+    const has = (t: string) => lib.find((e) => normKey(e.matchKey) === normKey(t));
+    const added = wanted.filter((t) => !has(t));
+    const restored = wanted.filter((t) => has(t)?.retired);
+    if (added.length === 0 && restored.length === 0) return { added, restored };
+    // The updater stays pure: what changed is worked out from the current state
+    // above, never inside the reducer, which React is free to call more than once.
+    actions.update('library', (prev) => [
+      ...prev.map((e) => (restored.some((t) => normKey(t) === normKey(e.matchKey)) ? { ...e, retired: undefined } : e)),
+      ...added.map((t) => ({ matchKey: t })),
+    ]);
+    return { added, restored };
+  };
+
+  /** Say what forcing in had to do to the library, so it is never a silent side effect. */
+  const reportPriceable = (r: { added: string[]; restored: string[] }, count: number) => {
+    const acts = `${count} ${count === 1 ? 'activity' : 'activities'}`;
+    const bits: string[] = [];
+    if (r.added.length) bits.push(`${r.added.length} activity ${r.added.length === 1 ? 'type was' : 'types were'} added to the Activity Library on default rates (${r.added.join(', ')})`);
+    if (r.restored.length) bits.push(`${r.restored.length} retired ${r.restored.length === 1 ? 'key was' : 'keys were'} restored (${r.restored.join(', ')})`);
+    actions.notify('ok', bits.length ? `Forced ${acts} into the budget. ${bits.join('; ')}. Price them in the Activity Library, then Save.` : `Forced ${acts} into the budget. Save to write.`);
+  };
+
+  /** The Show column. Forcing in also makes the type priceable; the rest is a plain edit. */
+  const setVisibility = (row: BudgetRow, v: ActivityVisibility | undefined) => {
+    setOv(row.activityId, { visibility: v });
+    if (v === 'INCLUDED') reportPriceable(ensurePriceable([row.activityType]), 1);
+  };
+
   /** Set the same visibility on everything currently filtered into view. */
   const setVisibilityOnShown = (v: ActivityVisibility | undefined) => {
     const ids = rows.map((r) => r.activityId);
@@ -120,7 +170,8 @@ export function BudgetMaster({ route }: { route: Route }) {
       }
       return next;
     });
-    actions.notify('ok', `${verb.toLowerCase()}: ${ids.length} ${ids.length === 1 ? 'activity' : 'activities'}. Save to write.`);
+    if (v === 'INCLUDED') reportPriceable(ensurePriceable(rows.map((r) => r.activityType)), ids.length);
+    else actions.notify('ok', `${verb.toLowerCase()}: ${ids.length} ${ids.length === 1 ? 'activity' : 'activities'}. Save to write.`);
   };
 
   const dropStale = () => {
@@ -182,7 +233,7 @@ export function BudgetMaster({ route }: { route: Route }) {
         <Select
           value={r.visibility ?? ''}
           options={VISIBILITY_OPTIONS}
-          onChange={(v) => setOv(r.activityId, { visibility: (v || undefined) as ActivityVisibility | undefined })}
+          onChange={(v) => setVisibility(r, (v || undefined) as ActivityVisibility | undefined)}
         />
       ),
     },
@@ -273,6 +324,15 @@ export function BudgetMaster({ route }: { route: Route }) {
     { key: 'rem', label: 'Remaining h', value: (r) => r.remainingHours, num: true, render: (r) => fmtHours(r.remainingHours, 1) },
   ];
 
+  /*
+   * Forced in, but still unpriceable. Forcing in creates the library key, so the
+   * only way to land here is to retire that key again afterwards. It is worth
+   * saying out loud rather than leaving the row sitting in REVIEW looking ignored,
+   * because "I forced it in and it went nowhere" is exactly the confusion the key
+   * creation exists to prevent.
+   */
+  const forcedButUnpriced = useMemo(() => model.rows.filter((r) => r.visibility === 'INCLUDED' && r.status === 'REVIEW'), [model.rows]);
+
   const hiddenCount = model.summary.hidden;
   const subtitle =
     view === 'hidden'
@@ -331,6 +391,19 @@ export function BudgetMaster({ route }: { route: Route }) {
             Nothing is hidden. Hiding is for schedule rows that are noise rather than work — placeholders, duplicates, activities that belong to another contractor. Set a
             row's <b>Show</b> column to Hide, or filter the active list and use the Hide button. Nothing is deleted: the P6 import keeps every row exactly as exported, and
             anything hidden comes back from here.
+          </Notice>
+        </div>
+      )}
+
+      {view === 'active' && forcedButUnpriced.length > 0 && (
+        <div className="mb-3">
+          <Notice tone="warn">
+            <b>{forcedButUnpriced.length} {forcedButUnpriced.length === 1 ? 'activity is' : 'activities are'} forced into the budget but cannot be priced.</b> Their activity
+            type has no live key in the <a href={href('library')}>Activity Library</a> — it was most likely retired after they were forced in. Until a key matches the type
+            exactly they carry no hours and stay out of Test Progress.{' '}
+            {[...new Set(forcedButUnpriced.map((r) => r.activityType))].slice(0, 4).map((t) => (
+              <code key={t} className="mono mr-2">{t}</code>
+            ))}
           </Notice>
         </div>
       )}

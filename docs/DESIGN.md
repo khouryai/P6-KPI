@@ -94,6 +94,33 @@ A rename is display-only on purpose. The activity type — and so the library ke
 price — is derived from the **P6** name, which is kept alongside. Renaming an activity
 can never re-price it, and both names go into the export.
 
+### Forcing an activity in has to create a rate for it
+
+`INCLUDED` used to be a half-promise. An activity is priced through its *type*, and
+two kinds of type have no library key at all: one P6 marked `(Deleted)` or
+`(Cancelled)`, which `discoverLibrary` skips on purpose so the library is not full of
+dead work, and one whose key was retired by hand. Forcing such an activity in moved it
+from DELETED to REVIEW and stopped there — no rate could reach it, it carried no hours,
+and since both the Activity Library and Test Progress are lists of *priced* things, it
+appeared in neither. It had been included into nowhere.
+
+So Budget Master creates the key, or un-retires it, in the same action, on the Settings
+defaults exactly as a discovered type would arrive. The type is then visible and
+editable like any other, and the activity reaches Test Progress carrying real hours.
+Other activities of that type are not dragged in with it: P6's marker still excludes
+them on its own, and only the ones forced in individually cross over. The toast names
+every key it had to add, because a per-activity action that edits the library is a side
+effect that must not be silent.
+
+The engine keeps the guard rather than trusting the screen: `INCLUDED` with no entry is
+still REVIEW, never a silent zero. The only way to reach it now is to retire the key
+again afterwards, and Budget Master calls that out in a notice.
+
+`libraryRateStatus` takes a `forcedIn` flag for the same reason. A key containing
+`(Deleted)` reads as exclude, so a forced-in row would otherwise report its rate as
+EXCLUDED while sitting in the budget — answering a question nobody asked. Forced in, the
+include flag is skipped and the rate is judged on its own.
+
 ### `visibility`
 
 - **HIDDEN** — the row is dropped from `Model.rows` immediately after it is built, so
