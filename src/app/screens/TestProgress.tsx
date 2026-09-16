@@ -89,7 +89,7 @@ export function TestProgress({ route }: { route: Route }) {
    * S-curve and into an Earned-vs-Built month. An activity at 100% that P6 has
    * never actually started, and that carries no test window, earns its hours into
    * the project total and into no month at all. That is not a rounding difference,
-   * it is the gap the Earned vs Built screen reports as unphased.
+   * it is the gap the Earned vs Actual screen reports as unphased.
    */
   const noWindow = useMemo(() => budgeted.filter((r) => r.pctComplete > 0 && !r.earnStart), [budgeted]);
 
@@ -507,7 +507,7 @@ export function TestProgress({ route }: { route: Route }) {
             <p className="mt-1">
               A current-schedule import rewrites P6's dates and durations, and nothing else. An activity that read IN PROGRESS against the data date last month, and comes
               back carrying a real actual finish, becomes P6 ACTUAL — so its window ends on the day it really finished and its hours <b>re-spread across the months
-              retrospectively</b>. The S-curve and the Earned vs Built rows for earlier months can therefore move on an import. Anything you keyed here — counts, %
+              retrospectively</b>. The S-curve and the Earned vs Actual rows for earlier months can therefore move on an import. Anything you keyed here — counts, %
               override, test window — is untouched and keeps overriding P6.
             </p>
             <p className="mt-1">
@@ -519,7 +519,7 @@ export function TestProgress({ route }: { route: Route }) {
             <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text)]">Reading a month, e.g. August</div>
             <p className="mt-1">
               <b>Finished in August</b> is Earn end in August; <b>started in August</b> is Earn start in August; <b>worked on during August</b> is any window that overlaps
-              it, which is what the August row on Earned vs Built adds up. All three columns — Earn start, Earn end and Window — are on <a href={href('budget')}>Budget
+              it, which is what the August row on Earned vs Actual adds up. All three columns — Earn start, Earn end and Window — are on <a href={href('budget')}>Budget
               Master</a>, where they can be sorted and filtered. If P6 is the only thing dating an activity, then August is only right once the August import has landed
               with the actual dates in it; where you know better than P6, key the Test start and Test end here and they win permanently.
             </p>
@@ -532,7 +532,7 @@ export function TestProgress({ route }: { route: Route }) {
           <Notice tone="warn">
             <b>{noWindow.length} {noWindow.length === 1 ? 'activity has' : 'activities have'} progress but no date to hang it on.</b> They have a percent complete, so their
             hours count in the project total, but P6 has never actually started them and no test window is keyed — so those hours land in no month, appear on no point of
-            the S-curve, and are what Earned vs Built reports as unphased. Give each one a <b>Test start</b> and <b>Test end</b>, or wait for the P6 import that carries its
+            the S-curve, and are what Earned vs Actual reports as unphased. Give each one a <b>Test start</b> and <b>Test end</b>, or wait for the P6 import that carries its
             actual dates.{' '}
             <button className="btn-link" onClick={() => setStateFilter('nowindow')}>show them</button>
           </Notice>

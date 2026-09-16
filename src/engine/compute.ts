@@ -500,7 +500,7 @@ export function computeModel(input: ModelInput): Model {
 
   // Location stats.
   const budgetAllRows = rows.reduce((s, r) => s + r.budgetHours, 0);
-  const locationStats: LocationStat[] = input.locations.map((loc) => {
+  const allLocationStats: LocationStat[] = input.locations.map((loc) => {
     const k = normKey(loc.code);
     const mine = rows.filter((r) => normKey(r.location) === k);
     const budgetHours = mine.reduce((s, r) => s + r.budgetHours, 0);
@@ -516,6 +516,20 @@ export function computeModel(input: ModelInput): Model {
       location: loc,
     };
   });
+
+  /*
+   * A location with no activities is noise.
+   *
+   * Import discovers a location the moment one Activity ID mentions it, and never
+   * removes it — the code may come back in a later schedule revision, and a
+   * complexity factor typed against it should survive that. But a code carrying no
+   * activities has nothing to price, nothing to roll up and nothing to say, and a
+   * list padded with them makes the real ones harder to find. So they are dropped
+   * here, once, and every screen and count below is computed without them. They are
+   * kept on `unusedLocations` so the Locations screen can still admit they exist.
+   */
+  const locationStats = allLocationStats.filter((l) => l.count > 0);
+  const unusedLocations = allLocationStats.filter((l) => l.count === 0);
 
   // Test progress checks.
   const curIdx = firstByKey<P6Activity>(current, (a) => a.activityId);
@@ -583,7 +597,7 @@ export function computeModel(input: ModelInput): Model {
     extractRows: current.length - hiddenRows.length,
     wbsRows: current.filter((a) => a.rowType === 'WBS').length,
     activities: acts.length,
-    locations: input.locations.length,
+    locations: locationStats.length,
     activityTypes: input.library.filter((e) => !e.retired).length,
     typesOnDefaults: libraryStats.filter((l) => l.rateStatus === 'DEFAULT').length,
     typesNeedingShifts: libraryStats.filter((l) => l.rateStatus === 'NEEDS SHIFTS').length,
@@ -659,6 +673,7 @@ export function computeModel(input: ModelInput): Model {
   return {
     rows,
     hiddenRows,
+    unusedLocations,
     staleOverrides,
     subsystems,
     burn,

@@ -436,3 +436,48 @@ describe('a forced-in activity has to end up with hours', () => {
     expect(m.rows[0].budgetHours).toBeGreaterThan(0);
   });
 });
+
+describe('a location with no activities is not a location anybody needs to see', () => {
+  /*
+   * Import discovers a location the moment one Activity ID mentions it and never
+   * removes it, so a code can outlive every activity that used it. Keeping it in
+   * the file is right; listing it is not.
+   */
+  const withLocations = (locations: { code: string }[]) =>
+    computeModel(scenario([], [], { locations }));
+
+  it('leaves an unused code out of the list and out of the count', () => {
+    const m = withLocations([{ code: 'X10' }, { code: 'GHOST' }]);
+    expect(m.locations.map((l) => l.code)).toEqual(['X10']);
+    expect(m.summary.locations).toBe(1);
+  });
+
+  it('still says it exists, rather than appearing to have lost it', () => {
+    const m = withLocations([{ code: 'X10' }, { code: 'GHOST' }]);
+    expect(m.unusedLocations.map((l) => l.code)).toEqual(['GHOST']);
+    expect(m.unusedLocations[0].count).toBe(0);
+  });
+
+  it('drops a code whose only activities were hidden', () => {
+    const hidden = computeModel(
+      scenario(
+        [
+          { activityId: 'A-P2-TC-X10-FA-0010', visibility: 'HIDDEN' },
+          { activityId: 'A-P2-TC-X10-FA-0020', visibility: 'HIDDEN' },
+          { activityId: 'A-P2-TC-X10-FA-0030', visibility: 'HIDDEN' },
+        ],
+        [],
+        { locations: [{ code: 'X10' }] },
+      ),
+    );
+    expect(hidden.locations).toEqual([]);
+    expect(hidden.unusedLocations.map((l) => l.code)).toEqual(['X10']);
+    expect(hidden.summary.locations).toBe(0);
+  });
+
+  it('keeps a used one whatever else is in the file', () => {
+    const m = withLocations([{ code: 'GHOST' }, { code: 'X10' }, { code: 'ALSO-GONE' }]);
+    expect(m.locations).toHaveLength(1);
+    expect(m.locations[0].count).toBeGreaterThan(0);
+  });
+});

@@ -59,9 +59,9 @@ setting shared by both screens, remembered per machine.
 
 ## Fiscal years
 
-**Earned vs Built** rolls the months up by fiscal year, with earned, built,
+**Earned vs Actual** rolls the months up by fiscal year, with earned, actual,
 variance, factor and how complete the job was at each year end. Click a year to
-narrow the monthly table to it. The year is named for the calendar year it ends in,
+narrow the monthly table to it and to break that year down by resource. The year is named for the calendar year it ends in,
 so with a July start Jul-26 to Jun-27 reads as FY27; set the start month in
 **Settings**.
 
@@ -69,7 +69,7 @@ so with a July start Jul-26 to Jun-27 reads as FY27; set the start month in
 
 Hours answer "how big"; a percentage answers "how big next to everything else", and
 most tables now carry both. Rollups, Locations and the Activity Library each show a
-**Share** of the budget; Earned vs Built shows percent complete per month and an
+**Share** of the budget; Earned vs Actual shows percent complete per month and an
 **Overrun** as a share of each group's own budget; the Dashboard cards say what
 fraction of the budget is earned and what fraction is left.
 

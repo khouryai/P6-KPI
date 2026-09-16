@@ -42,9 +42,30 @@ export function Locations() {
       ),
     },
   ];
+  const unused = model.unusedLocations;
   return (
-    <Page eyebrow="Budget" title="Locations" subtitle={`Discovered from the 4th segment of every Activity ID. ${model.locations.length} locations. Leave the factor blank to use the default of ${def.toFixed(2)}. The factor multiplies RATE and DUR hours; an activity override bypasses it.`}>
+    <Page
+      eyebrow="Budget"
+      title="Locations"
+      subtitle={`Discovered from the 4th segment of every Activity ID. ${model.locations.length} locations carrying activities. Leave the factor blank to use the default of ${def.toFixed(2)}. The factor multiplies RATE and DUR hours; an activity override bypasses it.`}
+    >
       <SortableTable tableId="locations" rows={model.locations} columns={columns} rowKey={(r) => r.code} />
+      {unused.length > 0 && (
+        <details className="mt-3 text-[12px] text-[var(--text-muted)]">
+          <summary className="cursor-pointer">
+            {unused.length} location {unused.length === 1 ? 'code carries' : 'codes carry'} no activities and {unused.length === 1 ? 'is' : 'are'} hidden everywhere
+          </summary>
+          <p className="mt-1">
+            Import never deletes a location, because the code can come back in a later schedule revision and a complexity factor typed against it should survive that.
+            But a code with nothing under it has nothing to price and nothing to roll up, so it is kept in the file and left out of every list, filter and count.
+          </p>
+          <p className="mt-1">
+            {unused.map((l) => (
+              <code key={l.code} className="mono mr-2">{l.code}</code>
+            ))}
+          </p>
+        </details>
+      )}
     </Page>
   );
 }

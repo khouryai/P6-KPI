@@ -201,7 +201,7 @@ Keying a percent says *how much*; it says nothing about *when*, and only the ear
 puts hours into a month or onto a curve point. Marking a row **done** sets the count and
 stamps no date — `updatedAt` is an audit field no curve reads. An activity at 100% that
 P6 has never actually started and that carries no test window earns its hours into the
-project total and into no month at all; that is what Earned vs Built reports as
+project total and into no month at all; that is what Earned vs Actual reports as
 unphased. Test Progress names those rows in a warning and can filter to them, and the
 collapsible explainer at the top of the screen sets out the window precedence (TEST
 WINDOW → P6 ACTUAL → IN PROGRESS → NOT STARTED) and what the monthly import changes.
@@ -316,7 +316,7 @@ reason `accruedFraction` is reused rather than reimplemented, and it is pinned b
 test that sums every consecutive fortnight across eight years and expects the
 project total back. Planned comes back exact; earned comes back to `phasedEarned`,
 short by exactly `unphasedEarned` — the activities with progress but no usable dates,
-which belong to no window at all and which Earned vs Built already reports.
+which belong to no window at all and which Earned vs Actual already reports.
 
 An activity is listed if it did something in the window **or was supposed to**. That
 is what makes NOT STARTED and MISSED mean anything: they are the activities the plan
@@ -392,6 +392,45 @@ a fiscal year a calendar year and the labels say so. The start month is a Settin
 In-year figures are summed from the months; the cumulative figures are taken from
 the **last month** of the year rather than summed, because they are already running
 totals and adding them would produce a number meaning nothing at all.
+
+## A control that removed itself
+
+The "hide the quiet months" checkbox on Earned vs Actual vanished the moment it was
+unticked, leaving no way to switch it back on. The cause was one line:
+
+```js
+const quiet = burn.months.length - shownMonths.length;   // 0 whenever hideQuiet is false
+... quiet > 0 || hideQuiet ? <label/> : undefined
+```
+
+`quiet` was derived as *rows before minus rows after*, which is zero when the filter
+is off — so unticking made the control fail its own render condition. The count is
+now taken from the data (`months.filter(m => m.earned === 0 && m.built === 0)`)
+rather than from the effect of the toggle, which is what it always meant. A control
+whose visibility depends on its own state is worth a second look wherever it appears.
+
+## A fiscal year is not a forecast
+
+Selecting a year on Earned vs Actual now also breaks that year down by resource:
+what each earned, what it actually spent, the variance and the ratio.
+
+It deliberately does **not** show to-complete or at-completion. Those divide the
+whole remaining budget by a rate, and a remaining budget is not something one
+fiscal year has — quoting one per year would be inventing a number. The
+whole-project forecast stays in its own panel underneath, labelled as such.
+
+## Locations nobody uses
+
+Import discovers a location the moment one Activity ID mentions it and never removes
+it: the code may return in a later schedule revision, and a complexity factor typed
+against it should survive that. But a code carrying no activities has nothing to
+price and nothing to roll up, and a list padded with them makes the real ones harder
+to find.
+
+They are dropped once in `computeModel`, so every screen, filter and count below is
+computed without them, and kept on `Model.unusedLocations` so the Locations screen
+can admit they exist rather than appearing to have lost them. Hiding every activity
+in a location empties it the same way, which is the consistent reading.
 
 ## Choosing columns
 
