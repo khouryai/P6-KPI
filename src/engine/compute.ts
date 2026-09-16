@@ -297,7 +297,15 @@ function firstByKey<T>(items: T[], key: (t: T) => string): Map<string, T> {
 }
 
 export function computeModel(input: ModelInput): Model {
-  const { settings, overrides, testProgress, current, snapshots } = input;
+  const { settings, overrides, testProgress, current } = input;
+  /*
+   * A snapshot the user has taken off the curve is dropped here, once, before
+   * anything reads it. That keeps it out of the markers, out of the curve's
+   * `snapshot` column and out of the date range the curve spans — a hidden snapshot
+   * must not be able to stretch the chart to a month nothing else reaches. The
+   * record itself is untouched on disk.
+   */
+  const snapshots = input.snapshots.filter((s) => !s.hidden);
   const notes: string[] = [];
   const libIdx = indexLibrary(input.library);
   const locIdx = firstByKey<Location>(input.locations, (l) => l.code);
@@ -645,7 +653,7 @@ export function computeModel(input: ModelInput): Model {
  *
  * Taking rows as an argument rather than reading the whole model is what lets the
  * dashboard draw one phase on its own: the same arithmetic runs over the subset, so
- * a phase curve can never disagree with the programme curve it is part of. The
+ * a phase curve can never disagree with the project curve it is part of. The
  * percentages are of the subset's own budget, because a phase at 40 per cent of its
  * own scope is the number anyone asking for a phase curve wants.
  */
@@ -666,7 +674,7 @@ export function buildCurve(
 
   // A snapshot records every activity that was in budget when it was taken. Cutting it
   // down to the rows on this curve keeps the diamonds comparable with the line they sit
-  // against, instead of marking the whole programme on a single phase's chart.
+  // against, instead of marking the whole project on a single phase's chart.
   const ids = new Set(rows.map((r) => normKey(r.activityId)));
   const snapByDate = new Map<string, number>();
   for (const s of snapshots) {
@@ -704,7 +712,7 @@ export function buildCurve(
 
 /**
  * The headline figures for a set of rows: the same ones the Summary carries for the
- * whole programme, so the dashboard's cards can follow a filter without the screen
+ * whole project, so the dashboard's cards can follow a filter without the screen
  * re-deriving arithmetic the engine already owns.
  */
 export type RowTotals = {
@@ -962,7 +970,7 @@ export function burnSummary(
 
   /*
    * Trim the empty months off each end. The curve runs to the last date in the
-   * schedule, which on a five year programme is dozens of months in which nothing
+   * schedule, which on a five year project is dozens of months in which nothing
    * has been earned and nothing has been built; a cumulative figure repeated down
    * forty identical rows reads as data and is not. A gap in the MIDDLE is kept,
    * because a month where the team built nothing is worth seeing.

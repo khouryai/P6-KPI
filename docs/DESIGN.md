@@ -244,6 +244,20 @@ Chart colors stay literal hex rather than `var(--…)`, matching cx-portal's own
 exception for Chart.js palettes. Here the reason is the PNG export: it
 rasterises through a detached SVG where custom properties do not resolve.
 
+## Hiding a snapshot
+
+`computeModel` drops hidden snapshots once, at the top, before anything reads them.
+That keeps them out of the markers, out of the curve's `snapshot` column, and out of
+the date range the curve spans — a snapshot dated three years past the end of the work
+must not be able to stretch the chart once it has been hidden. The record itself is
+unchanged, and the exported `Status_History` sheet still carries every snapshot with an
+`On_Curve` column, because a history that quietly dropped rows would not be a history.
+
+Hide is the right move far more often than delete: a marker sitting well off the earned
+curve usually means the rates, dates or test counts changed after it was taken, which
+is worth explaining rather than erasing. Delete is for a snapshot that should never
+have existed — a wrong status date, a duplicate.
+
 ## Table headings sit over their own data
 
 `.tbl th` sets `text-align: left` and scores (0,1,1); `.num` sets `text-align: right`
@@ -254,6 +268,12 @@ enough to win. `.num` on its own is not sufficient inside `.tbl th`, and the sam
 applies to any Tailwind utility used against `.tbl th` or `.tbl td` (`whitespace-normal`
 loses to `.tbl td`'s `nowrap` for exactly the same reason, which is why the one cell
 that has to wrap says so inline).
+
+The same ordering trap bites buttons. `.btn-mini` mutes its text colour and is declared
+*after* `.btn-primary` at equal specificity, so a small primary button — the selected
+phase chip on the Dashboard — rendered muted grey on the red fill at a contrast ratio of
+1.02:1, which is to say invisible. `.btn-mini.btn-primary` and `.btn-mini.btn-danger`
+now restore the white, measured at 4.8:1.
 
 The sort caret is rendered in a fixed-width slot whether or not the column is the
 sorted one, and on a numeric column it goes *before* the label, so sorting a table can
@@ -275,7 +295,13 @@ figures. `tests/table-alignment.test.ts` guards both facts at source level.
   cannot produce an error every second. Save now stays on the bar, and turning auto-save
   off restores write-only-on-Save. Imports and snapshots are written when confirmed,
   as before.
-- Imports and snapshots are append only.
+- Imports are append only.
+- Snapshots are never *edited*: a correction is a new snapshot, not a rewrite. The two
+  exceptions are deliberate and explicit, and both act on a named file rather than on a
+  status date (two snapshots can share one). **Hiding** sets `hidden` and rewrites that
+  one file; the lines, the status date and the taken-at are untouched. **Deleting**
+  removes the file, and there is no other copy. Both go through `isSnapshotFile()`, so a
+  path outside `snapshots/` is refused rather than obeyed.
 
 ## Where the data can live
 

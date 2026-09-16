@@ -242,7 +242,7 @@ export function TeamHours() {
   const openedMonth = open === null ? null : (burn.months.find((m) => m.month === open) ?? null);
 
   /*
-   * A long programme has stretches where nothing was earned and nothing was built.
+   * A long project has stretches where nothing was earned and nothing was built.
    * Those months are real and the engine reports them, but forty rows of zeros
    * carrying the same cumulative figure bury the months that matter. They are
    * hidden by default and counted, never dropped.

@@ -148,7 +148,7 @@ export function Rollup() {
             ))}
           </div>
           <select className="input ml-2" value={withinPhase} onChange={(e) => setWithinPhase(e.target.value)}>
-            <option value="">Whole programme</option>
+            <option value="">Whole project</option>
             {phases.map((p) => (
               <option key={p.key} value={p.key}>
                 Within {p.label}

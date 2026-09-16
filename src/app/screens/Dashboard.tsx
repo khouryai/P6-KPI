@@ -21,9 +21,9 @@ export function Dashboard() {
   const phaseGroups: GroupStat[] = model.groups.phase.filter((g) => g.inBudget > 0);
 
   /**
-   * Which phase the screen is showing. The whole programme is the default, because the
+   * Which phase the screen is showing. The whole project is the default, because the
    * first question is always "where is the job", not "where is Phase 2". A phase that
-   * disappears on the next import falls back to the programme rather than showing an
+   * disappears on the next import falls back to the project rather than showing an
    * empty chart.
    */
   const [phase, setPhase] = useState<string | null>(null);
@@ -46,7 +46,7 @@ export function Dashboard() {
         title: selectedLabel ? `Planned, forecast and earned man hours — ${selectedLabel}` : 'Planned, forecast and earned man hours',
         subtitle: `${fmtHours(totals.budgetHours)} h budget, ${fmtHours(totals.earnedHours)} h earned (${fmtPct(totals.pctComplete, 1)}).${dataDate ? ` Data date ${fmtDate(dataDate)}.` : ''}`,
       });
-      const name = `s-curve-${selected === null ? 'programme' : slug(selectedLabel!)}-${stamp()}.png`;
+      const name = `s-curve-${selected === null ? 'project' : slug(selectedLabel!)}-${stamp()}.png`;
       if (state.adapterKind === 'filesystem') actions.notify('ok', `Chart written to ${await actions.writeExport(name, bytes)}`);
       else downloadBytes(name, bytes, 'image/png');
     } catch (err) {
@@ -58,7 +58,7 @@ export function Dashboard() {
 
   const exportCsv = async () => {
     const bytes = new TextEncoder().encode(curveCsv(curve));
-    const name = `s-curve-${selected === null ? 'programme' : slug(selectedLabel!)}-${stamp()}.csv`;
+    const name = `s-curve-${selected === null ? 'project' : slug(selectedLabel!)}-${stamp()}.csv`;
     try {
       if (state.adapterKind === 'filesystem') actions.notify('ok', `Curve data written to ${await actions.writeExport(name, bytes)}`);
       else downloadBytes(name, bytes, 'text/csv');
@@ -194,7 +194,7 @@ export function Dashboard() {
           <>
             <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Show</span>
             <button className={`btn btn-mini${selected === null ? ' btn-primary' : ''}`} onClick={() => setPhase(null)}>
-              Whole programme
+              Whole project
             </button>
             {phaseGroups.map((g) => (
               <button
@@ -208,7 +208,7 @@ export function Dashboard() {
             ))}
             {selected !== null && (
               <span className="text-[11.5px] text-[var(--text-muted)]">
-                The cards and the curve below cover {selectedLabel} only. Data quality and the summary still count the whole programme.
+                The cards and the curve below cover {selectedLabel} only. Data quality and the summary still count the whole project.
               </span>
             )}
           </>
@@ -275,7 +275,7 @@ export function Dashboard() {
                   key={g.key}
                   type="button"
                   className={`block w-full cursor-pointer text-left${selected === g.key ? ' phase-picked' : ''}`}
-                  title={selected === g.key ? 'Showing this phase. Click again for the whole programme.' : `Show the curve and the cards for ${g.label} only`}
+                  title={selected === g.key ? 'Showing this phase. Click again for the whole project.' : `Show the curve and the cards for ${g.label} only`}
                   onClick={() => setPhase(selected === g.key ? null : g.key)}
                 >
                   <div className="flex items-baseline justify-between gap-3">

@@ -59,8 +59,10 @@ export function buildWorkbook(model: Model, settings: Settings, current: P6Activ
     ...model.rows.map((r, i) => [i + 2, r.activity.rawActivityId, r.location, r.seqCode, r.matchKey, r.rateStatus, r.status, r.basis ?? '', r.loeFlag ? 'LOE?' : '', r.complexity ?? '', r.stdHours ?? '', r.overrideHours ?? '', r.budgetHours, d(r.baselineStart), d(r.baselineFinish), r.baselineSource, d(r.currentStart), d(r.currentFinish), r.pctComplete, r.pctSource, r.earnedHours, r.remainingHours, r.matchTier ?? '', r.phaseName, r.workType, r.activityName, r.activityType, r.discipline, d(r.earnStart), d(r.earnEnd), r.earnWindowSource, r.activity.activityName, r.renamed ? 'Y' : '', r.visibility ?? '']),
   ]), 'Budget_Master');
   XLSX.utils.book_append_sheet(wb, wsFrom([
-    ['Status_Date', 'P6_Activity_ID', 'Pct_Complete', 'Budget_Hours', 'Earned_Hours', 'Taken_At', 'Note'],
-    ...snapshots.flatMap((sn) => sn.lines.map((l) => [d(sn.statusDate), l.activityId, l.pctComplete, l.budgetHours, l.earnedHours, sn.takenAt, sn.note ?? ''])),
+    // Hidden snapshots are exported too. They are off the curve, not off the record,
+    // and a history sheet that quietly dropped them would not be a history.
+    ['Status_Date', 'P6_Activity_ID', 'Pct_Complete', 'Budget_Hours', 'Earned_Hours', 'Taken_At', 'Note', 'On_Curve'],
+    ...snapshots.flatMap((sn) => sn.lines.map((l) => [d(sn.statusDate), l.activityId, l.pctComplete, l.budgetHours, l.earnedHours, sn.takenAt, sn.note ?? '', sn.hidden ? 'HIDDEN' : 'Y'])),
   ]), 'Status_History');
   XLSX.utils.book_append_sheet(wb, wsFrom([
     ['Status_Date', 'P6_Activity_ID', 'Pct_Complete', 'Source'],
