@@ -55,6 +55,47 @@ would be re-added by the next import and tier 1 would catch it again. A library 
 with `retired: true` is therefore excluded from matching and from the type count, and is
 never re-added by discovery. Retire and restore are on the Activity Library screen.
 
+## What the user owns, and what P6 owns
+
+`activity-overrides.json` is the answer to "the schedule says this, and the schedule is
+wrong". It is keyed on the trimmed Activity ID and on nothing else, and a current
+schedule import replaces the P6 rows wholesale without ever touching it. That division
+is the whole contract:
+
+| P6 owns, and an import rewrites | The user owns, and an import cannot touch |
+| --- | --- |
+| Activity ID, original and remaining duration | The displayed name (`nameOverride`) |
+| Start and finish, planned and actual | Whether it takes part at all (`visibility`) |
+| The exported activity name | Budget hours (`overrideHours`), discipline, note |
+
+The Activity ID is therefore never editable anywhere in the UI. It is the only thing
+carrying the user's work across a monthly import, and an editable join key is not a
+join key.
+
+A rename is display-only on purpose. The activity type — and so the library key and the
+price — is derived from the **P6** name, which is kept alongside. Renaming an activity
+can never re-price it, and both names go into the export.
+
+### `visibility`
+
+- **HIDDEN** — the row is dropped from `Model.rows` immediately after it is built, so
+  every total, rollup, curve, library count and export sheet below that point is
+  computed without it. Hiding is a single cut rather than a flag every consumer has to
+  remember to test, which is what makes it trustworthy. The rows are kept, still
+  priced, on `Model.hiddenRows`, so Budget Master's Hidden view can say what bringing
+  one back would add. The import itself is never modified.
+- **EXCLUDED** — listed and searchable, carrying no hours.
+- **INCLUDED** — in the budget even though the library excludes its type or P6 marked
+  the name `(Deleted)`. It cannot conjure a rate: an unpriced type stays REVIEW rather
+  than silently budgeting zero.
+
+This is what makes REVIEW resolvable. Before, an activity whose type nobody would ever
+price sat on the dashboard as a permanent red count with no action that would clear it.
+Now it is either work (price the type) or it is not (hide it).
+
+An override whose Activity ID is in no import is *stale*, not deleted: it is reported
+on `Model.staleOverrides` and starts working again if the activity comes back.
+
 ## Grouping: phase, location, work type
 
 Three of the six Activity ID segments carry structure worth rolling up by, and all
@@ -99,6 +140,26 @@ against. One upsert path creates an entry when the first field is filled and del
 again when the last field is cleared, so the file never accumulates empty rows. Stored
 entries whose Activity ID is no longer budgeted are shown separately as orphans and can
 be removed in bulk, rather than silently inflating a count.
+
+A bare Activity ID is not a finding anybody can act on, so `TestProgressCheck` carries
+the name, the phase, the location, the activity type, the budget hours, everything that
+was keyed, and a sentence saying why the row earns nothing. The five cases are not the
+same problem and must not be offered the same remedy: a WBS header and an ID in no
+schedule are junk and are offered as a one-click bulk delete; a REVIEW or EXCLUDED row
+is real work being blocked by the library or by the Show column, and deleting it would
+throw away good keying. `checkReason()` in `compute.ts` writes that sentence, so the
+wording lives in one place and is testable.
+
+### Progress and dates are separate facts
+
+Keying a percent says *how much*; it says nothing about *when*, and only the earn window
+puts hours into a month or onto a curve point. Marking a row **done** sets the count and
+stamps no date — `updatedAt` is an audit field no curve reads. An activity at 100% that
+P6 has never actually started and that carries no test window earns its hours into the
+project total and into no month at all; that is what Earned vs Built reports as
+unphased. Test Progress names those rows in a warning and can filter to them, and the
+collapsible explainer at the top of the screen sets out the window precedence (TEST
+WINDOW → P6 ACTUAL → IN PROGRESS → NOT STARTED) and what the monthly import changes.
 
 ## Import paths
 
@@ -182,6 +243,22 @@ Two departures, both deliberate:
 Chart colors stay literal hex rather than `var(--…)`, matching cx-portal's own
 exception for Chart.js palettes. Here the reason is the PNG export: it
 rasterises through a detached SVG where custom properties do not resolve.
+
+## Table headings sit over their own data
+
+`.tbl th` sets `text-align: left` and scores (0,1,1); `.num` sets `text-align: right`
+and scores (0,1,0). The more specific rule won, so for a long time every numeric
+*heading* sat at the left of a column of right-aligned *figures* — measured at 592px
+adrift on a wide table. `.tbl th.num` now sets the alignment explicitly, specific
+enough to win. `.num` on its own is not sufficient inside `.tbl th`, and the same trap
+applies to any Tailwind utility used against `.tbl th` or `.tbl td` (`whitespace-normal`
+loses to `.tbl td`'s `nowrap` for exactly the same reason, which is why the one cell
+that has to wrap says so inline).
+
+The sort caret is rendered in a fixed-width slot whether or not the column is the
+sorted one, and on a numeric column it goes *before* the label, so sorting a table can
+never shift its headings sideways and the label's last character stays flush with the
+figures. `tests/table-alignment.test.ts` guards both facts at source level.
 
 ## Storage rules
 

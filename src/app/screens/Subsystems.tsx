@@ -1,10 +1,9 @@
 import { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { useApp } from '../state';
-import { Page, SortableTable, Panel, CellInput, Notice, Term, type Column, type HeroStat } from '../components/ui';
-import type { SubsystemStat, SubsystemCell, Subsystem } from '../../engine/types';
+import { Page, SortableTable, Panel, Notice, Term, type Column, type HeroStat } from '../components/ui';
+import type { SubsystemStat, SubsystemCell } from '../../engine/types';
 import { crewLines, UNASSIGNED } from '../../engine/compute';
-import { normKey } from '../../engine/keys';
 import { fmtHours, fmtPct } from '../format';
 import { href } from '../router';
 
@@ -20,7 +19,13 @@ const TONES = ['#e60012', '#0b6bcb', '#00875a', '#d97706', '#6d28d9', '#0e7490',
  * IXL engineer is a staffing problem, and only this screen can see it.
  */
 export function Subsystems() {
-  const { state, model, actions } = useApp();
+  /*
+   * There is deliberately no Name column. A subsystem code is ATS, IXL or COMMS:
+   * it is already the name everyone on the job uses, and a second column repeating
+   * it in longhand cost a column's width and told nobody anything. Names already
+   * stored are kept in the file and simply not shown.
+   */
+  const { model } = useApp();
   const [cut, setCut] = useState<'phase' | 'location'>('phase');
   const [open, setOpen] = useState<string | null>(null);
 
@@ -29,19 +34,6 @@ export function Subsystems() {
   const earned = stats.reduce((s, x) => s + x.earnedHours, 0);
   const split = model.summary.typesWithCrewSplit;
   const unassigned = model.summary.unassignedHours;
-
-  const setName = (code: string, patch: Partial<Subsystem>) => {
-    actions.update('subsystems', (list) => {
-      const i = list.findIndex((s) => normKey(s.code) === normKey(code));
-      const next: Subsystem = { ...(i >= 0 ? list[i] : { code }), ...patch };
-      const tidy: Subsystem = { code: next.code };
-      if (next.name?.trim()) tidy.name = next.name.trim();
-      if (next.notes?.trim()) tidy.notes = next.notes.trim();
-      // A row carrying nothing but a code says no more than the crew already does.
-      if (!tidy.name && !tidy.notes) return i >= 0 ? list.filter((_, j) => j !== i) : list;
-      return i >= 0 ? list.map((s, j) => (j === i ? tidy : s)) : [...list, tidy];
-    });
-  };
 
   const heroStats: HeroStat[] = [
     { label: 'Subsystems', value: stats.filter((s) => s.budgetHours > 0).length, tone: 'muted' },
@@ -83,20 +75,6 @@ export function Subsystems() {
           <a className="mono font-semibold" href={href('budget', { sub: r.code })} title="Show the activities that draw on this subsystem">
             {r.code}
           </a>
-        ),
-    },
-    {
-      key: 'name',
-      label: 'Name',
-      value: (r) => state.data.subsystems.find((s) => normKey(s.code) === normKey(r.code))?.name ?? '',
-      hint: '',
-      render: (r) =>
-        r.code === UNASSIGNED ? null : (
-          <CellInput
-            value={state.data.subsystems.find((s) => normKey(s.code) === normKey(r.code))?.name ?? ''}
-            placeholder="full name, optional"
-            onCommit={(v) => setName(r.code, { name: v })}
-          />
         ),
     },
     { key: 'acts', label: 'Activities', value: (r) => r.activities, num: true },

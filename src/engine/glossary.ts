@@ -53,6 +53,16 @@ export const GLOSSARY: Record<string, string> = {
   'At completion': 'Budget minus forecast. Negative is the size of the overrun if nothing changes.',
   Share: 'This subsystem as a percentage of the whole budget.',
 
+  // --- what the user decided about one activity ----------------------------
+  Show: 'Whether this activity takes part at all. Your decision about this one activity, which beats what the Activity Library says about its type.',
+  Auto: 'Leave it to the Activity Library and the P6 name to decide whether this activity is in the budget. The setting every activity starts on.',
+  'Force in': 'Budget this activity even though the library excludes its type, or P6 marked the name (Deleted) or (Cancelled). It still needs a priced type to earn hours.',
+  Exclude: 'Keep the activity listed and searchable but carrying no hours, for real work that belongs to somebody else\u2019s budget.',
+  Hide: 'Take the activity out of every table, total, curve and export. Nothing is deleted: the P6 import keeps the row, and Budget Master\u2019s Hidden view brings it back.',
+  'What it is': 'What the schedule says this keyed Activity ID actually is: a real activity in some state, a WBS summary header, or an ID no schedule has.',
+  Keyed: 'What has been recorded against this activity: test case counts, a percent override, and test window dates. This is what deleting the row would lose.',
+  Note: 'Your own words on why this activity was renamed, hidden, excluded or re-priced. It rides along into the export.',
+
   // --- progress ------------------------------------------------------------
   '%': 'Percent complete. Taken from your override first, then test case counts, then P6 duration.',
   '% complete': 'Percent complete. Taken from your override first, then test case counts, then P6 duration.',

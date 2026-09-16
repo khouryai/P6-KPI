@@ -218,8 +218,15 @@ export function SortableTable<T>({
                 style={c.width ? { width: c.width } : undefined}
                 onClick={() => toggle(c.key)}
               >
+                {/*
+                  * The caret is always rendered, in a fixed-width slot, so clicking a
+                  * heading cannot nudge the whole row of headings sideways. On a numeric
+                  * column it goes first, which leaves the label's last character sitting
+                  * exactly over the figures underneath it.
+                  */}
+                {c.num && <span className="th-sort">{sort?.key === c.key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>}
                 <Term text={c.label} hint={c.hint} />
-                {sort?.key === c.key && <span className="ml-1 text-[var(--hitachi-red)]">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
+                {!c.num && <span className="th-sort">{sort?.key === c.key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>}
               </th>
             ))}
           </tr>

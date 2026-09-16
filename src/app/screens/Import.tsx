@@ -133,7 +133,36 @@ export function Import() {
     const otherIds = new Set((other?.activities ?? []).filter((a) => a.rowType === 'ACTIVITY').map((a) => normKey(a.activityId)));
     const missingInOther = other ? real.filter((a) => !otherIds.has(normKey(a.activityId))).length : null;
     const noId = real.filter((a) => a.location === '').length;
-    return { acts, real, locs, types, newTypes, newLocs, missingInOther, noId };
+    /*
+     * What your own edits do when this import lands.
+     *
+     * A current-schedule import replaces every P6 row and touches nothing else, so
+     * renames, hidden flags, hours overrides and test counts survive it — they are
+     * keyed on the Activity ID and on nothing else. That is easy to say and hard to
+     * believe, so it is counted here against the file actually being imported, row
+     * by row, before anybody commits to it.
+     */
+    const incoming = new Set(real.map((a) => normKey(a.activityId)));
+    const edits = state.data.overrides.filter((o) => o.activityId.trim() !== '');
+    const keyed = state.data.testProgress.filter((t) => t.activityId.trim() !== '');
+    const carriedEdits = edits.filter((o) => incoming.has(normKey(o.activityId))).length;
+    const carriedTests = keyed.filter((t) => incoming.has(normKey(t.activityId))).length;
+    return {
+      acts,
+      real,
+      locs,
+      types,
+      newTypes,
+      newLocs,
+      missingInOther,
+      noId,
+      edits: edits.length,
+      keyed: keyed.length,
+      carriedEdits,
+      carriedTests,
+      strandedEdits: edits.length - carriedEdits,
+      strandedTests: keyed.length - carriedTests,
+    };
   }, [parsed, state.data, kind]);
 
   const commit = async () => {
@@ -314,6 +343,21 @@ export function Import() {
             ))}
           </div>
 
+          {kind === 'current' && (preview.edits > 0 || preview.keyed > 0) && (
+            <div className="mt-2">
+              <Notice tone={preview.strandedEdits + preview.strandedTests > 0 ? 'warn' : 'ok'}>
+                <b>Your edits are matched on the Activity ID, and nothing else.</b> This import brings in the P6 names, durations and dates and overwrites those only.{' '}
+                {preview.carriedEdits} of {preview.edits} activity {preview.edits === 1 ? 'edit' : 'edits'} (renames, hidden and excluded flags, hours overrides, notes) and{' '}
+                {preview.carriedTests} of {preview.keyed} keyed test {preview.keyed === 1 ? 'row' : 'rows'} land on an activity in this file and carry over unchanged.
+                {preview.strandedEdits + preview.strandedTests > 0 && (
+                  <>
+                    {' '}The other {preview.strandedEdits + preview.strandedTests} name an Activity ID this file does not contain, so they will sit idle rather than being
+                    deleted — renumbered in P6, or removed from the schedule. Budget Master and Test Progress both list them afterwards.
+                  </>
+                )}
+              </Notice>
+            </div>
+          )}
           {preview.real.length === 0 && (
             <div className="mt-2"><Notice tone="error">No activity rows were found. Check the column mapping above: the Activity Name column decides what is an activity and what is a WBS summary row.</Notice></div>
           )}

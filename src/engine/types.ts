@@ -92,7 +92,50 @@ export type ScheduleImport = {
 
 export type ImportIndexEntry = Omit<ScheduleImport, 'activities'> & { file: string };
 
-export type ActivityOverride = { activityId: string; overrideHours: number; note?: string };
+/**
+ * What an activity is, regardless of what its library entry or its P6 name says.
+ * Undefined means "whatever the library and the P6 name decide", which is the
+ * behaviour every activity had before this existed.
+ *
+ * HIDDEN   The activity leaves the program. It is in no table, no total, no curve
+ *          and no export, and the only screen that can still see it is the hidden
+ *          list on Budget Master, where it can be brought back. Nothing is deleted:
+ *          the schedule import stays exactly as P6 wrote it.
+ * EXCLUDED Still listed, still searchable, but carries no hours. Use it for work
+ *          that is real but belongs to someone else's budget.
+ * INCLUDED In the budget even though the library entry says exclude, or the P6 name
+ *          is marked (Deleted) or (Cancelled). It still needs a library entry to
+ *          price it; without one it stays REVIEW, because there is no rate to use.
+ */
+export type ActivityVisibility = 'HIDDEN' | 'EXCLUDED' | 'INCLUDED';
+
+/**
+ * Everything the user decided about ONE activity, as opposed to about its type.
+ *
+ * Keyed on the trimmed Activity ID and nothing else. A current-schedule import
+ * replaces the P6 rows wholesale and never touches this file, so every edit here
+ * survives every import for as long as the Activity ID does. That is the contract:
+ * P6 owns the durations, the dates and the original name; this file owns the rest.
+ */
+export type ActivityOverride = {
+  activityId: string;
+  /** Replaces the calculated budget hours. Optional: a row can carry only a name. */
+  overrideHours?: number;
+  /** Why. Free text, shown on the row and in the export. */
+  note?: string;
+  /**
+   * The name to show instead of the one P6 exported. The P6 name is never
+   * overwritten and still derives the activity type, so renaming an activity
+   * cannot silently re-price it.
+   */
+  nameOverride?: string;
+  /** Replaces the library entry's discipline for this one activity. */
+  discipline?: string;
+  /** Whether this activity is in the budget, out of it, or gone. */
+  visibility?: ActivityVisibility;
+  /** ISO datetime of the last edit, for the audit trail. */
+  updatedAt?: string;
+};
 
 export type TestProgress = {
   activityId: string;
@@ -146,6 +189,22 @@ export type MatchTier = 1 | 2 | null;
 export type BudgetRow = {
   activity: P6Activity;
   activityId: string;
+  /**
+   * The name to show. The user's rename if there is one, otherwise exactly what P6
+   * exported. Read this on every screen; `activity.activityName` is the P6 original
+   * and is only worth showing next to a rename, as the thing being replaced.
+   */
+  activityName: string;
+  /** True when activityName came from the user rather than from P6. */
+  renamed: boolean;
+  /** What the user decided this activity is. null when they left it to the library. */
+  visibility: ActivityVisibility | null;
+  /**
+   * The user took this activity out of the program. Hidden rows are NOT in
+   * `Model.rows` and so cannot reach a total, a curve or an export; they are in
+   * `Model.hiddenRows` so they can be listed and brought back.
+   */
+  hidden: boolean;
   location: string;
   /** Raw 2nd segment of the Activity ID, e.g. "P2". Derived, never stored. */
   phase: string;
@@ -399,18 +458,67 @@ export type Summary = {
   typesWithCrewSplit: number;
   /** Budget hours not attributed to any subsystem. */
   unassignedHours: number;
+  /** Activities the user hid. They are in no figure above. */
+  hidden: number;
+  /** Activities carrying a name the user typed. */
+  renamed: number;
+  /** Activities the user forced into the budget against the library. */
+  forcedIn: number;
+  /** Activities the user forced out of the budget while leaving them listed. */
+  forcedOut: number;
+  /** Overrides keyed against an Activity ID that is not in the current schedule. */
+  staleOverrides: number;
 };
 
+/**
+ * One keyed Test Progress row, checked against the schedule.
+ *
+ * An Activity ID on its own is not a finding anybody can act on: the question is
+ * always "what WAS this, and does losing it cost me anything". So this carries the
+ * name, where it sat, what it is worth, what was keyed against it, and a sentence
+ * of plain English saying why it matches nothing.
+ */
 export type TestProgressCheck = {
   activityId: string;
+  /** An activity with this ID exists in the current schedule, whatever its status. */
   matched: boolean;
-  status: ActivityStatus | 'not budgeted' | 'not in extract';
+  /** It exists AND carries budget hours, so the keyed numbers actually do something. */
+  inBudget: boolean;
+  status: ActivityStatus | 'not budgeted' | 'not in extract' | 'hidden';
+  /** The display name, or null when the ID is in no schedule at all. */
   activityName: string | null;
+  /** The name P6 exported, when it differs from the display name. */
+  p6Name: string | null;
+  rowType: RowType | null;
+  location: string;
+  phaseName: string;
+  activityType: string;
+  /** The library key it priced through, when it is a budgeted activity. */
+  matchKey: string | null;
+  budgetHours: number | null;
+  testsTotal: number | null;
+  testsComplete: number | null;
+  pctOverride: number | null;
+  testStartOverride: string | null;
+  testEndOverride: string | null;
+  updatedAt: string;
   pctEffective: number | null;
+  /** Why it matches nothing, and what dropping it would cost. Empty when it matches. */
+  reason: string;
 };
+
+/** An override whose Activity ID is in no imported schedule, so it does nothing. */
+export type StaleOverride = { activityId: string; hasHours: boolean; renamed: boolean; visibility: ActivityVisibility | null; note: string };
 
 export type Model = {
   rows: BudgetRow[];
+  /**
+   * The activities the user hid, priced as if they were still in, so the hidden list
+   * can say what bringing one back would add. Nothing else reads these.
+   */
+  hiddenRows: BudgetRow[];
+  /** Overrides pointing at an Activity ID the current schedule no longer has. */
+  staleOverrides: StaleOverride[];
   subsystems: SubsystemStat[];
   burn: BurnSummary;
   /** Rollups by every dimension, so screens never group by hand. */
