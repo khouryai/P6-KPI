@@ -82,6 +82,23 @@ export function Settings() {
           <div className="grid grid-cols-2 gap-3">
             <Field label="Default crew size"><input className="input w-full" type="number" step="any" value={s.defaultCrew} onChange={(e) => set({ defaultCrew: num(e.target.value) ?? 0 })} /></Field>
             <Field label="Default shift hours"><input className="input w-full" type="number" step="any" value={s.defaultShiftHours} onChange={(e) => set({ defaultShiftHours: num(e.target.value) ?? 0 })} /></Field>
+            <Field
+              label="Fiscal year starts in"
+              hint="Used by the fiscal year rollup on Earned vs Built. A year is named for the calendar year it ends in, so a July start makes Jul-26 to Jun-27 read as FY27."
+            >
+              <select
+                className="input w-full"
+                value={String(s.fiscalYearStartMonth ?? 7)}
+                onChange={(e) => set({ fiscalYearStartMonth: Number(e.target.value) })}
+              >
+                {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => (
+                  <option key={m} value={String(i + 1)}>
+                    {m}
+                    {i === 0 ? ' (fiscal year = calendar year)' : ''}
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Field label="Default complexity" hint="Used when a location has no factor."><input className="input w-full" type="number" step="0.05" value={s.defaultComplexity} onChange={(e) => set({ defaultComplexity: num(e.target.value) ?? 1 })} /></Field>
           </div>
         </div>

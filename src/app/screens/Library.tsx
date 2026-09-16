@@ -6,6 +6,7 @@ import { assignSubsystem, crewLines, setCrewCount } from '../../engine/compute';
 import { fmtHours, fmtPct, num } from '../format';
 import { normKey } from '../../engine/keys';
 import type { Route } from '../router';
+import { TERMS } from '../../engine/vocab';
 
 export function Library({ route }: { route: Route }) {
   const { state, model, actions } = useApp();
@@ -72,13 +73,13 @@ export function Library({ route }: { route: Route }) {
     { key: 'count', label: 'Count', value: (r) => r.count, num: true },
     { key: 'days', label: 'Total P6 days', value: (r) => r.totalP6Days, num: true },
     { key: 'status', label: 'Rate status', value: (r) => r.rateStatus, render: (r) => <Badge tone={statusTone(r.rateStatus)}>{r.rateStatus}</Badge> },
-    { key: 'disc', label: 'Discipline', value: (r) => r.entry.discipline ?? '', render: (r) => <CellInput value={r.entry.discipline ?? ''} list="disciplines" onCommit={(v) => edit(r.matchKey, { discipline: v.trim() || undefined })} /> },
+    { key: 'disc', label: TERMS.discipline, value: (r) => r.entry.discipline ?? '', render: (r) => <CellInput value={r.entry.discipline ?? ''} list="disciplines" onCommit={(v) => edit(r.matchKey, { discipline: v.trim() || undefined })} /> },
     { key: 'inc', label: 'Include', value: (r) => `${r.entry.includeOverride ?? ''}${r.include}`, render: (r) => <span className="flex items-center gap-1"><Select value={r.entry.includeOverride ?? ''} options={incOpts} onChange={(v) => edit(r.matchKey, { includeOverride: (v || undefined) as 'Y' | 'N' | undefined })} /><Badge tone={r.include === 'Y' ? 'good' : 'muted'}>{r.include}</Badge></span> },
     { key: 'basis', label: 'Basis', value: (r) => r.basisEff, render: (r) => <Select value={r.entry.basis ?? ''} options={basisOpts} onChange={(v) => edit(r.matchKey, { basis: (v || undefined) as Basis | undefined })} /> },
     {
       key: 'subsystem',
-      label: 'Subsystem',
-      hint: 'The resource group whose hours this activity type spends. Most types belong to one group: type it here. Only a type drawing on two or more groups needs a split.',
+      label: TERMS.subsystem,
+      hint: `The ${TERMS.subsystemLower} whose hours this activity type spends. Most types belong to one: type it here. Only a type drawing on two or more needs a split.`,
       width: '150px',
       value: (r) => (r.crewEffLines.length > 1 ? `${r.crewEffLines.length} groups` : (r.crewEffLines[0]?.subsystem ?? '')),
       render: (r) =>

@@ -6,6 +6,7 @@ import type { SubsystemStat, SubsystemCell } from '../../engine/types';
 import { crewLines, UNASSIGNED } from '../../engine/compute';
 import { fmtHours, fmtPct } from '../format';
 import { href } from '../router';
+import { TERMS } from '../../engine/vocab';
 
 const GRID = '#e4e7ec';
 const AXIS = '#6e7179';
@@ -36,7 +37,7 @@ export function Subsystems() {
   const unassigned = model.summary.unassignedHours;
 
   const heroStats: HeroStat[] = [
-    { label: 'Subsystems', value: stats.filter((s) => s.budgetHours > 0).length, tone: 'muted' },
+    { label: TERMS.subsystemPlural, value: stats.filter((s) => s.budgetHours > 0).length, tone: 'muted' },
     { label: 'Budget', value: `${fmtHours(total)} h`, tone: 'muted' },
     { label: 'Complete', value: fmtPct(total ? earned / total : 0, 0), tone: 'blue' },
   ];
@@ -63,16 +64,16 @@ export function Subsystems() {
   const columns: Column<SubsystemStat>[] = [
     {
       key: 'code',
-      label: 'Subsystem',
+      label: TERMS.subsystem,
       value: (r) => r.code || 'zzz',
       width: '150px',
       render: (r) =>
         r.code === UNASSIGNED ? (
-          <span className="text-[var(--text-muted)]" title="Hours from crews that were never split by subsystem. Split them in the Activity Library.">
+          <span className="text-[var(--text-muted)]" title={`Hours from crews that were never split by ${TERMS.subsystemLower}. Split them in the Activity Library.`}>
             Unassigned
           </span>
         ) : (
-          <a className="mono font-semibold" href={href('budget', { sub: r.code })} title="Show the activities that draw on this subsystem">
+          <a className="mono font-semibold" href={href('budget', { sub: r.code })} title={`Show the activities that draw on this ${TERMS.subsystemLower}`}>
             {r.code}
           </a>
         ),
@@ -123,8 +124,8 @@ export function Subsystems() {
   return (
     <Page
       eyebrow="Budget"
-      title="Subsystems"
-      subtitle="Man-hours by resource group, and the same hours cut by phase and location. An activity needing an ATS and an IXL engineer counts under both; its hours are split between them, so the totals still add back to the budget."
+      title={TERMS.subsystemPlural}
+      subtitle={`Man-hours by ${TERMS.subsystemLower}, and the same hours cut by phase and location. An activity needing an ATS and an IXL engineer counts under both; its hours are split between them, so the totals still add back to the budget.`}
       stats={heroStats}
       toolbar={
         <>
@@ -138,7 +139,7 @@ export function Subsystems() {
     >
       {split === 0 && (
         <Notice tone="warn">
-          No activity type has its crew split by subsystem yet, so every hour is Unassigned. Open the <a href={href('library')}>Activity Library</a>, find a type, and
+          No activity type has its crew split by {TERMS.subsystemLower} yet, so every hour is Unassigned. Open the <a href={href('library')}>Activity Library</a>, find a type, and
           click <b>split</b> on its Crew cell. Pricing does not change: a crew of two becomes one ATS plus one IXL, same hours.
         </Notice>
       )}
@@ -150,7 +151,7 @@ export function Subsystems() {
       )}
 
       {chart.length > 0 && (
-        <Panel title="Budget by subsystem" meta="Whole bar is the budget; the solid part is earned." className="mb-3">
+        <Panel title={`Budget by ${TERMS.subsystemLower}`} meta="Whole bar is the budget; the solid part is earned." className="mb-3">
           <div style={{ height: Math.max(150, chart.length * 34 + 40) }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart layout="vertical" data={chart} margin={{ top: 4, right: 16, left: 4, bottom: 4 }} barCategoryGap="22%">
@@ -206,7 +207,7 @@ export function Subsystems() {
         </Panel>
       )}
 
-      <Panel title="How a crew becomes subsystem hours" className="mt-3">
+      <Panel title={`How a crew becomes ${TERMS.subsystemLower} hours`} className="mt-3">
         <p className="text-[12px] text-[var(--text-muted)]">
           Each activity type in the library carries a crew. Give that crew named lines — <span className="mono">ATS 1</span>, <span className="mono">IXL 1</span> — and the
           activity’s budget is divided between them in proportion to what each line costs per shift. The division is of the final, rounded budget figure, so an override or

@@ -357,3 +357,82 @@ describe('no key ever widens itself', () => {
     expect(m.rows[0].budgetHours).toBe(0);
   });
 });
+
+describe('a forced-in activity has to end up with hours', () => {
+  /*
+   * "Forced in" that allocates nothing is the failure that looks like success: the
+   * row says IN BUDGET, it appears on Test Progress, and it contributes zero to
+   * every total. Three things cause it, and none is visible from the row.
+   */
+  const deletedType = 'Dead Type (Deleted)';
+  const forced = (settings: Partial<Settings>, od: number | null, library: LibraryEntry[]) => {
+    const current: P6Activity[] = [
+      makeActivity({
+        activityId: 'A-P2-TC-X10-FA-0010',
+        activityName: `[T&C] X10 (Ph2) - ${deletedType}`,
+        activityType: deletedType,
+        excludeReason: 'DELETED',
+        originalDuration: od,
+        remainingDuration: od,
+        sortOrder: 0,
+      }),
+    ];
+    return computeModel({
+      ...scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'INCLUDED' }], [], { current, library }),
+      settings: { ...settings, ...scenarioSettings, ...settings },
+    });
+  };
+  const scenarioSettings = { ...settings };
+
+  it('a bare key under a RATE default prices it at zero, which is why the key names its basis', () => {
+    const rate: Partial<Settings> = { defaultBasis: 'RATE' };
+    // What a bare `{ matchKey }` would have done.
+    const bare = forced(rate, 10, [{ matchKey: deletedType }]);
+    expect(bare.rows[0].status).toBe('IN BUDGET');
+    expect(bare.rows[0].budgetHours).toBe(0);
+
+    // What Budget Master actually writes now.
+    const withBasis = forced(rate, 10, [{ matchKey: deletedType, basis: 'DUR' }]);
+    expect(withBasis.rows[0].budgetHours).toBeGreaterThan(0);
+  });
+
+  it('says NEEDS SHIFTS rather than DEFAULT for a RATE entry that has none', () => {
+    // DEFAULT is a reassuring word for an entry that prices every activity at zero.
+    const m = forced({ defaultBasis: 'RATE' }, 10, [{ matchKey: deletedType }]);
+    expect(m.rows[0].rateStatus).toBe('NEEDS SHIFTS');
+  });
+
+  it('a zero P6 duration still prices at zero, and is counted so it can be found', () => {
+    const m = forced({ defaultBasis: 'DUR' }, 0, [{ matchKey: deletedType, basis: 'DUR' }]);
+    expect(m.rows[0].status).toBe('IN BUDGET');
+    expect(m.rows[0].budgetHours).toBe(0);
+    expect(m.summary.forcedInUnpriced).toBe(1);
+  });
+
+  it('an hours override prices it whatever the library can or cannot do', () => {
+    const current: P6Activity[] = [
+      makeActivity({
+        activityId: 'A-P2-TC-X10-FA-0010',
+        activityName: `[T&C] X10 (Ph2) - ${deletedType}`,
+        activityType: deletedType,
+        excludeReason: 'DELETED',
+        originalDuration: 0,
+        sortOrder: 0,
+      }),
+    ];
+    const m = computeModel(
+      scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'INCLUDED', overrideHours: 24 }], [], {
+        current,
+        library: [{ matchKey: deletedType, basis: 'DUR' }],
+      }),
+    );
+    expect(m.rows[0].budgetHours).toBe(24);
+    expect(m.summary.forcedInUnpriced).toBe(0);
+  });
+
+  it('counts nothing when the forced-in activity is properly priced', () => {
+    const m = forced({ defaultBasis: 'DUR' }, 10, [{ matchKey: deletedType, basis: 'DUR' }]);
+    expect(m.summary.forcedInUnpriced).toBe(0);
+    expect(m.rows[0].budgetHours).toBeGreaterThan(0);
+  });
+});

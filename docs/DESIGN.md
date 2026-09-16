@@ -331,6 +331,68 @@ blue, the obvious partner, separates from it by ΔE 4 under tritanopia and was
 rejected for it. The outcome tiles carry their own words, so colour is never the
 only thing saying what a group is.
 
+## Forcing in has to allocate something
+
+Creating the library key was only half of it. A forced-in activity can reach IN
+BUDGET and still carry **zero hours**, which is the failure that looks like success:
+the row says IN BUDGET, Test Progress lists it, and it adds nothing to any total.
+Three causes, none visible from the row:
+
+- a P6 original duration of zero (a milestone);
+- a duration P6 never supplied;
+- a RATE-basis key with no shift count, since RATE hours are crew x shift x shifts.
+
+The third was the nastiest, because `libraryRateStatus` checked `isOnDefaults`
+*before* the missing-shifts case. An entry with nothing set at all reported DEFAULT
+— a reassuring word for something pricing every one of its activities at zero. The
+order is now reversed, and the key Budget Master creates names `basis: 'DUR'`
+explicitly rather than inheriting a Settings default that might be RATE.
+
+What is left is genuine: a duration of zero cannot be priced by any rate. So
+`summary.forcedInUnpriced` counts them, Budget Master carries a filter and a notice
+naming them, and the notice offers to write an hours override across the lot —
+which is independent of the library and survives every import.
+
+## The vocabulary
+
+Two words changed after the app was in use: what was **Discipline** is now
+**Subsystem**, and what was **Subsystem** is now **Resource**. The stored field
+names did not change with them — `activity-library.json` has carried `discipline`
+and `crew[].subsystem` since the first release, and renaming a key would orphan
+every file in every OneDrive folder and every backup taken from one.
+
+So `src/engine/vocab.ts` holds the mapping and every screen reads `TERMS` from it.
+The indirection is worth it precisely because the mapping is confusing to read: one
+file that says so beats sixty string literals that quietly disagree. The exported
+workbook uses the new words too, since that is what goes to the client.
+
+## Hours or percent
+
+`src/app/units.ts` is one setting shared by the Dashboard and the Two-Week Log, not
+a toggle on each. "I am presenting to the client now" is a mode the person is in,
+not a property of a page — flipping one screen and finding the other still full of
+hours would miss the point entirely. It lives in `localStorage` for the same reason
+the column layouts do.
+
+In percent mode **not one man-hour figure survives** on either screen, which is the
+requirement: a stray "93,240 h" in the corner of a client pack invites the
+conversation about rates that the mode exists to avoid. The cards change what they
+measure rather than relabelling, and the curve divides every series by the same
+total, so the shapes are identical and only the axis changes — a percent curve that
+disagreed in shape with the hours curve would mean one of them was lying.
+
+## Fiscal years
+
+`src/engine/fiscal.ts`. The arithmetic is trivial; the convention is what has to be
+right, because getting it silently wrong shifts every reported figure by twelve
+months. A year is named for the calendar year it **ends** in, the US federal and
+transit convention: with a July start, Jul 2026 to Jun 2027 is FY27. January makes
+a fiscal year a calendar year and the labels say so. The start month is a Setting.
+
+In-year figures are summed from the months; the cumulative figures are taken from
+the **last month** of the year rather than summed, because they are already running
+totals and adding them would produce a number meaning nothing at all.
+
 ## Choosing columns
 
 `SortableTable` takes an optional `tableId`, and with one it grows a Columns

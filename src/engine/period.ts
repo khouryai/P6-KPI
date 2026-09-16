@@ -77,6 +77,14 @@ export type PeriodLog = {
   achievement: number | null;
   /** Earned hours in the window as a share of the whole project budget. */
   shareOfBudget: number;
+  /** Planned hours in the window as a share of the whole project budget. */
+  plannedShareOfBudget: number;
+  /**
+   * The whole in-budget total these shares are taken against. Carried so a screen
+   * reporting in percent divides by the same number the engine did, rather than
+   * reaching for a total from somewhere else and quietly disagreeing.
+   */
+  projectBudgetHours: number;
   /** Percent complete for the whole project at the start and end of the window. */
   pctAtStart: number;
   pctAtEnd: number;
@@ -222,6 +230,8 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
     earnedHours,
     achievement: Math.abs(plannedHours) > 1e-9 ? earnedHours / plannedHours : null,
     shareOfBudget: totalBudget ? earnedHours / totalBudget : 0,
+    plannedShareOfBudget: totalBudget ? plannedHours / totalBudget : 0,
+    projectBudgetHours: totalBudget,
     pctAtStart: totalBudget ? earnedBy(before) / totalBudget : 0,
     pctAtEnd: totalBudget ? earnedBy(hi) / totalBudget : 0,
     counts,

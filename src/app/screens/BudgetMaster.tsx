@@ -5,6 +5,7 @@ import type { ActivityOverride, ActivityVisibility, BudgetRow } from '../../engi
 import { fmtHours, fmtPct, fmtDate, num } from '../format';
 import { normKey } from '../../engine/keys';
 import { href, type Route } from '../router';
+import { TERMS } from '../../engine/vocab';
 
 const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> = {
   review: { label: 'Needing REVIEW', test: (r) => r.status === 'REVIEW' },
@@ -15,6 +16,7 @@ const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> 
   shifts: { label: 'RATE type missing shifts', test: (r) => r.needsShifts },
   override: { label: 'Has an hours override', test: (r) => r.overrideHours !== null },
   edited: { label: 'Carries an edit of yours', test: (r) => r.renamed || r.visibility !== null || r.overrideHours !== null },
+  forcedzero: { label: 'Forced in but carrying no hours', test: (r) => r.visibility === 'INCLUDED' && r.status === 'IN BUDGET' && r.budgetHours === 0 },
 };
 
 /** What the Show column offers, in the order a person works through them. */
@@ -122,9 +124,17 @@ export function BudgetMaster({ route }: { route: Route }) {
     if (added.length === 0 && restored.length === 0) return { added, restored };
     // The updater stays pure: what changed is worked out from the current state
     // above, never inside the reducer, which React is free to call more than once.
+    /*
+     * The new key names its basis rather than inheriting the Settings default.
+     * A bare key under a RATE default has no shift count, and RATE hours are
+     * crew x shift x shifts — so it would price every activity it matched at
+     * zero, which is exactly the "I forced it in and nothing happened" the key
+     * creation exists to prevent. DUR at least multiplies by the P6 duration,
+     * which is a real number the schedule already supplied.
+     */
     actions.update('library', (prev) => [
       ...prev.map((e) => (restored.some((t) => normKey(t) === normKey(e.matchKey)) ? { ...e, retired: undefined } : e)),
-      ...added.map((t) => ({ matchKey: t })),
+      ...added.map((t) => ({ matchKey: t, basis: 'DUR' as const })),
     ]);
     return { added, restored };
   };
@@ -265,7 +275,7 @@ export function BudgetMaster({ route }: { route: Route }) {
     { key: 'rate', label: 'Rate', value: (r) => r.rateStatus, render: (r) => (r.status === 'IN BUDGET' ? <Badge tone={statusTone(r.rateStatus)}>{r.rateStatus}</Badge> : '') },
     {
       key: 'disc',
-      label: 'Discipline',
+      label: TERMS.discipline,
       value: (r) => r.discipline,
       hint: 'Editable. Overrides the discipline the Activity Library gives this type, for this one activity. Clear it to follow the library again.',
       render: (r) => (
@@ -334,11 +344,50 @@ export function BudgetMaster({ route }: { route: Route }) {
    */
   const forcedButUnpriced = useMemo(() => model.rows.filter((r) => r.visibility === 'INCLUDED' && r.status === 'REVIEW'), [model.rows]);
 
+  /*
+   * Forced in, in the budget, and worth nothing.
+   *
+   * This is the other half of "I forced it in and nothing happened", and it is the
+   * half that looks fine: the row says IN BUDGET, it appears on Test Progress, and
+   * it contributes zero to every total. Three things cause it — a P6 duration of
+   * zero (a milestone), a duration P6 never supplied, and a RATE-basis key with no
+   * shift count — and none of them are visible from the row.
+   */
+  const forcedAtZero = useMemo(
+    () => model.rows.filter((r) => r.visibility === 'INCLUDED' && r.status === 'IN BUDGET' && r.budgetHours === 0),
+    [model.rows],
+  );
+
+  /** Give every zero-priced forced-in row the same hours, since they are usually alike. */
+  const priceForcedAtZero = () => {
+    const raw = prompt(
+      `Set budget hours on ${forcedAtZero.length} forced-in ${forcedAtZero.length === 1 ? 'activity' : 'activities'} that currently carry none.\n\n` +
+        'This writes an hours override on each one, which is independent of the Activity Library and survives every import.',
+      '8',
+    );
+    const n = num(raw ?? '');
+    if (n === undefined || n <= 0) return;
+    const stamp = new Date().toISOString();
+    const ids = forcedAtZero.map((r) => r.activityId);
+    actions.update('overrides', (ovs) => {
+      const next = [...ovs];
+      for (const id of ids) {
+        const i = next.findIndex((o) => normKey(o.activityId) === normKey(id));
+        const base: ActivityOverride = i >= 0 ? next[i] : { activityId: id };
+        const merged = tidyOverride({ ...base, overrideHours: n, updatedAt: stamp });
+        if (i >= 0) next[i] = merged;
+        else next.push(merged);
+      }
+      return next;
+    });
+    actions.notify('ok', `Set ${n} h on ${ids.length} ${ids.length === 1 ? 'activity' : 'activities'}. Save to write.`);
+  };
+
   const hiddenCount = model.summary.hidden;
   const subtitle =
     view === 'hidden'
       ? `${rows.length} of ${hiddenCount} hidden activities. They are in no total, no curve and no export. Priced here as if they were back in, so you can see what each one would add: ${fmtHours(total)} h.`
-      : `${rows.length} of ${model.rows.length} activities shown. Budget ${fmtHours(total)} h, earned ${fmtHours(earned)} h. Name, Show, Discipline, Override h and Note are yours to edit and survive every import; everything from P6 is read-only.`;
+      : `${rows.length} of ${model.rows.length} activities shown. Budget ${fmtHours(total)} h, earned ${fmtHours(earned)} h. Name, Show, ${TERMS.discipline}, Override h and Note are yours to edit and survive every import; everything from P6 is read-only.`;
 
   return (
     <Page
@@ -355,10 +404,10 @@ export function BudgetMaster({ route }: { route: Route }) {
           <select className="input" value={phase} onChange={(e) => setPhase(e.target.value)}>{opts(phases).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All phases' : (model.groups.phase.find((g) => g.key === o.value)?.label ?? o.label)}</option>)}</select>
           <select className="input" value={loc} onChange={(e) => setLoc(e.target.value)}>{opts(locs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All locations' : o.label}</option>)}</select>
           <select className="input" value={work} onChange={(e) => setWork(e.target.value)}>{opts(works).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All work types' : o.label}</option>)}</select>
-          <select className="input" value={disc} onChange={(e) => setDisc(e.target.value)}>{opts(discs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All disciplines' : o.label}</option>)}</select>
+          <select className="input" value={disc} onChange={(e) => setDisc(e.target.value)}>{opts(discs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? `All ${TERMS.disciplineLowerPlural}` : o.label}</option>)}</select>
           {subs.length > 0 && (
-            <select className="input" value={sub} onChange={(e) => setSub(e.target.value)} title="Activities whose crew includes this subsystem">
-              {opts(subs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All subsystems' : o.label}</option>)}
+            <select className="input" value={sub} onChange={(e) => setSub(e.target.value)} title={`Activities whose crew includes this ${TERMS.subsystemLower}`}>
+              {opts(subs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? `All ${TERMS.subsystemLowerPlural}` : o.label}</option>)}
             </select>
           )}
           <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>{opts(['IN BUDGET', 'EXCLUDED', 'REVIEW', 'DELETED', 'CANCELLED']).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All statuses' : o.label}</option>)}</select>
@@ -392,6 +441,19 @@ export function BudgetMaster({ route }: { route: Route }) {
             Nothing is hidden. Hiding is for schedule rows that are noise rather than work — placeholders, duplicates, activities that belong to another contractor. Set a
             row's <b>Show</b> column to Hide, or filter the active list and use the Hide button. Nothing is deleted: the P6 import keeps every row exactly as exported, and
             anything hidden comes back from here.
+          </Notice>
+        </div>
+      )}
+
+      {view === 'active' && forcedAtZero.length > 0 && (
+        <div className="mb-3">
+          <Notice tone="warn">
+            <b>{forcedAtZero.length} forced-in {forcedAtZero.length === 1 ? 'activity carries' : 'activities carry'} no hours.</b> They are in the budget and listed on Test
+            Progress, but they add nothing to any total, so forcing them in looks like it did nothing. The usual reasons are a P6 duration of zero, a duration P6 never
+            gave, or a RATE-basis key with no shift count.{' '}
+            <a href={href('budget', { flag: 'forcedzero' })}>Show just these</a>, then either price their type in the{' '}
+            <a href={href('library')}>Activity Library</a> or type hours into <b>Override h</b> on each row.{' '}
+            <button className="btn-link" onClick={priceForcedAtZero}>Set hours on all {forcedAtZero.length}</button>
           </Notice>
         </div>
       )}

@@ -6,11 +6,12 @@ import type { GroupDim, GroupStat } from '../../engine/types';
 import { groupRows } from '../../engine/compute';
 import { fmtHours, fmtPct, fmtDate } from '../format';
 import { href } from '../router';
+import { TERMS } from '../../engine/vocab';
 
 const DIMS: { id: GroupDim; label: string; note: string }[] = [
   { id: 'phase', label: 'Phase', note: 'From the 2nd segment of the Activity ID, so P2 is Phase 2.' },
   { id: 'location', label: 'Location', note: 'From the 4th segment of the Activity ID.' },
-  { id: 'discipline', label: 'Discipline', note: 'From the discipline you set on each Activity Library key.' },
+  { id: 'discipline', label: TERMS.discipline, note: `From the ${TERMS.disciplineLower} you set on each Activity Library key.` },
   { id: 'workType', label: 'Work type', note: 'From the 3rd segment of the Activity ID, so TC is Testing and Commissioning.' },
 ];
 

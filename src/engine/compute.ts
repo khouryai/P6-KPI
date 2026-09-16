@@ -112,8 +112,16 @@ export function isOnDefaults(entry: LibraryEntry): boolean {
  */
 export function libraryRateStatus(entry: LibraryEntry, settings: Settings, forcedIn = false): RateStatus {
   if (!forcedIn && effectiveInclude(entry) === 'N') return 'EXCLUDED';
-  if (isOnDefaults(entry)) return 'DEFAULT';
+  /*
+   * Missing shifts is checked BEFORE "on defaults", and the order is the whole
+   * point. An entry with nothing set at all reads as DEFAULT, which sounds
+   * harmless — but when Settings makes RATE the default basis, that same entry
+   * prices every one of its activities at zero, because RATE hours are
+   * crew x shift x durationShifts and durationShifts is undefined. Reporting
+   * DEFAULT there hid a silent zero behind a reassuring word.
+   */
   if (effectiveBasis(entry, settings) === 'RATE' && entry.durationShifts === undefined) return 'NEEDS SHIFTS';
+  if (isOnDefaults(entry)) return 'DEFAULT';
   return 'SET';
 }
 
@@ -608,6 +616,7 @@ export function computeModel(input: ModelInput): Model {
     hidden: hiddenRows.length,
     renamed: count((r) => r.renamed),
     forcedIn: count((r) => r.visibility === 'INCLUDED'),
+    forcedInUnpriced: count((r) => r.visibility === 'INCLUDED' && r.status === 'IN BUDGET' && r.budgetHours === 0),
     forcedOut: count((r) => r.visibility === 'EXCLUDED'),
     staleOverrides: staleOverrides.length,
   };

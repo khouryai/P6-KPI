@@ -9,6 +9,8 @@
  * Definitions say what the number MEANS and where it comes from, not what it is
  * called. "Original Duration" is not an explanation of "OD".
  */
+import { TERMS } from './vocab';
+
 export const GLOSSARY: Record<string, string> = {
   // --- identity ------------------------------------------------------------
   'Activity ID': 'The P6 activity code, e.g. 0-P2-TC-W40-FA-0100. Everything joins on this. Segment 2 is the phase, 3 the work type, 4 the location.',
@@ -18,14 +20,14 @@ export const GLOSSARY: Record<string, string> = {
   'Work type': 'Third segment of the Activity ID. TC is test and commissioning, AC is acceptance.',
   Type: 'The activity type, stripped of the location and phase prefix. This is what the rate library is keyed on.',
   'Match key': 'The rate library entry this activity resolved to, by an exact match on its activity type. No match means REVIEW and no hours.',
-  Discipline: 'A free-text grouping you set on the rate library entry. Not derived from P6.',
+  [TERMS.discipline]: 'A free-text grouping you set on the Activity Library entry, so a rollup can cut the budget by it. Not derived from P6.',
 
   // --- rating --------------------------------------------------------------
   Basis: 'How the budget is calculated. RATE = a fixed number of shifts you set, independent of P6. DUR = P6 original duration in days.',
   RATE: 'A fixed number of shifts you set. The budget does not change when the schedule does.',
   DUR: 'Driven by the P6 original duration. The budget changes when the schedule does.',
   Crew: 'How many people the activity takes. Split it by subsystem to see the workload each group carries.',
-  Subsystem: 'The resource group doing the work: ATS, IXL, COMMS and so on. An activity can need several at once.',
+  [TERMS.subsystem]: 'The group actually doing the work: ATS, IXL, COMMS and so on. An activity can need several at once, and its hours are split between them.',
   Shift: 'Hours in one shift for this activity type. A crew line can override it where one group works a shorter shift.',
   'Shift hours': 'Hours in one shift for this activity type.',
   Shifts: 'How many shifts one instance of this activity takes. Only used on the RATE basis.',
@@ -63,6 +65,10 @@ export const GLOSSARY: Record<string, string> = {
   'What it is': 'What the schedule says this keyed Activity ID actually is: a real activity in some state, a WBS summary header, or an ID no schedule has.',
   Keyed: 'What has been recorded against this activity: test case counts, a percent override, and test window dates. This is what deleting the row would lose.',
   Note: 'Your own words on why this activity was renamed, hidden, excluded or re-priced. It rides along into the export.',
+
+  // --- fiscal years ---------------------------------------------------------
+  'Fiscal year': 'The funding year this row covers, named for the calendar year it ends in. With a July start, Jul 26 to Jun 27 is FY27. Set the start month in Settings.',
+  Months: 'How many months of this fiscal year have rows. A year part-way through the programme will have fewer than twelve.',
 
   // --- the two-week log ----------------------------------------------------
   'Planned h': 'Budget hours the baseline said would accrue inside this period, spread evenly across each activity by calendar day.',

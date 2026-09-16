@@ -4,6 +4,7 @@ import { href } from '../router';
 import { fmtDateTime } from '../format';
 import { BUILD_COMMIT, BUILD_TIME, buildLabel } from '../build';
 import { applyUpdate, useUpdateReady } from '../update';
+import { TERMS } from '../../engine/vocab';
 
 /** Nav grouped into mono-labelled sections, as in cx-portal's sidenav. */
 const NAV: { section: string; items: { id: string; label: string }[] }[] = [
@@ -19,7 +20,7 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
     items: [
       { id: 'library', label: 'Activity Library' },
       { id: 'locations', label: 'Locations' },
-      { id: 'subsystems', label: 'Subsystems' },
+      { id: 'subsystems', label: TERMS.subsystemPlural },
       { id: 'budget', label: 'Budget Master' },
     ],
   },
