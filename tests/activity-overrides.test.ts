@@ -229,3 +229,60 @@ describe('the fixture model is unchanged by the feature existing', () => {
     expect(m.rows.every((r) => r.activityName === r.activity.activityName)).toBe(true);
   });
 });
+
+describe('no key ever widens itself', () => {
+  /*
+   * The removed tier 2. It dropped an activity type's last bracketed phrase and
+   * retried, so one key could price variants nobody had looked at. These hold the
+   * removal: a near-miss prices nothing, and says so as REVIEW rather than quietly
+   * borrowing a rate from a shorter key.
+   */
+  const priced: LibraryEntry[] = [{ matchKey: 'Test Type', basis: 'DUR', crewSize: 2, shiftHours: 8 }];
+
+  it('a type that only differs by a trailing bracket is REVIEW, not priced', () => {
+    const current: P6Activity[] = [
+      makeActivity({ activityId: 'A-P2-TC-X10-FA-0010', activityName: '[T&C] X10 (Ph2) - Test Type', sortOrder: 0 }),
+      makeActivity({
+        activityId: 'A-P2-TC-X10-FA-0020',
+        activityName: '[T&C] X10 (Ph2) - Test Type (DF: X10 → Y20)',
+        activityType: 'Test Type (DF: X10 → Y20)',
+        sortOrder: 1,
+      }),
+    ];
+    const m = computeModel(scenario([], [], { library: priced, current }));
+    const exact = m.rows.find((r) => r.activityId === 'A-P2-TC-X10-FA-0010')!;
+    const variant = m.rows.find((r) => r.activityId === 'A-P2-TC-X10-FA-0020')!;
+
+    expect(exact.status).toBe('IN BUDGET');
+    expect(exact.budgetHours).toBe(160);
+    expect(variant.status).toBe('REVIEW');
+    expect(variant.budgetHours).toBe(0);
+    // It keeps its own spelling, so the REVIEW row names the type that needs pricing.
+    expect(variant.matchKey).toBe('Test Type (DF: X10 → Y20)');
+  });
+
+  it('pricing the variant in its own right is what fixes it', () => {
+    const current: P6Activity[] = [
+      makeActivity({
+        activityId: 'A-P2-TC-X10-FA-0020',
+        activityName: '[T&C] X10 (Ph2) - Test Type (DF: X10 → Y20)',
+        activityType: 'Test Type (DF: X10 → Y20)',
+        sortOrder: 0,
+      }),
+    ];
+    const library: LibraryEntry[] = [...priced, { matchKey: 'Test Type (DF: X10 → Y20)', basis: 'DUR', crewSize: 2, shiftHours: 8 }];
+    const m = computeModel(scenario([], [], { library, current }));
+    expect(m.rows[0].status).toBe('IN BUDGET');
+    expect(m.rows[0].budgetHours).toBe(160);
+  });
+
+  it('a retired key prices nothing at all, rather than falling back to a shorter one', () => {
+    const current: P6Activity[] = [
+      makeActivity({ activityId: 'A-P2-TC-X10-FA-0010', activityName: '[T&C] X10 (Ph2) - Test Type', sortOrder: 0 }),
+    ];
+    const library: LibraryEntry[] = [{ ...priced[0], retired: true }];
+    const m = computeModel(scenario([], [], { library, current }));
+    expect(m.rows[0].status).toBe('REVIEW');
+    expect(m.rows[0].budgetHours).toBe(0);
+  });
+});

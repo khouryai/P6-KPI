@@ -1,7 +1,7 @@
 /* Generated at build time. Precache the app shell so the window opens instantly with no network. */
-const VERSION = 'mu3hrqao';
+const VERSION = 'mu3l3xba';
 const CACHE = `tc-budget-${VERSION}`;
-const PRECACHE = ["/","/index.html","/manifest.webmanifest","/icon-192.png","/icon-512.png","/assets/archivo-latin-wght-normal-E0tuGl4L.woff2","/assets/ibm-plex-mono-latin-500-normal-DSY6xOcd.woff2","/assets/ibm-plex-mono-latin-400-normal-DMJ8VG8y.woff2","/assets/ibm-plex-mono-latin-600-normal-BgSNZQsw.woff2","/assets/index-_CUMqHeW.css","/assets/index-BEBazq2G.js"];
+const PRECACHE = ["/","/index.html","/manifest.webmanifest","/icon-192.png","/icon-512.png","/assets/archivo-latin-wght-normal-E0tuGl4L.woff2","/assets/ibm-plex-mono-latin-400-normal-DMJ8VG8y.woff2","/assets/ibm-plex-mono-latin-500-normal-DSY6xOcd.woff2","/assets/ibm-plex-mono-latin-600-normal-BgSNZQsw.woff2","/assets/index-h4PkvQGi.css","/assets/index-C2LtTmhK.js"];
 
 /*
  * A new worker installs but does NOT take over on its own. Taking over mid-session

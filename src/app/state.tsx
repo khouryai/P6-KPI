@@ -125,6 +125,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const handleRef = useRef<FileSystemDirectoryHandle | null>(null);
   /** Set when a save fails, so auto-save waits for the next edit rather than looping. */
   const autoSaveFailedRef = useRef(false);
+  /** True while a folder reconnect is in flight, so two never overlap. */
+  const reconnectingRef = useRef(false);
   const identity = useMemo(() => ownerIdentity(), []);
 
   const idb = useCallback(() => {
@@ -208,7 +210,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         handleRef.current = handle;
-        const perm = await queryPermission(handle);
+        let perm = await queryPermission(handle);
+        /*
+         * The folder was chosen once and is remembered; being asked to confirm it on
+         * every launch is the browser's permission grant lapsing, not the app
+         * forgetting. Where the person answered "Allow on every visit" the grant is
+         * merely dormant, and asking for it back here revives it with no prompt at
+         * all, so the app opens on the dashboard. Where it does not, this costs
+         * nothing: requestPermission never throws, and the first click anywhere in
+         * the window tries again (see the effect below).
+         */
+        if (perm !== 'granted') perm = await requestPermission(handle);
+        if (cancelled) return;
         if (perm === 'granted') await openHandle(handle);
         else patch({ status: 'needs-permission', folderName: handle.name });
       } catch (err) {
@@ -219,6 +232,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [idb, openHandle, patch]);
+
+  /*
+   * Reconnect on the first thing the person does.
+   *
+   * Chromium will only hand the folder back inside a user gesture, and there is no
+   * way around that from the page. What there is a way around is making them hunt
+   * for a button first: any click or keypress in the window is a gesture, so the
+   * reconnect rides on whatever they were going to do anyway. It runs once.
+   */
+  const grantRef = useRef<() => Promise<void>>(async () => undefined);
+  useEffect(() => {
+    if (state.status !== 'needs-permission' || !handleRef.current) return;
+    const tryReconnect = () => void grantRef.current();
+    const opts = { capture: true } as const;
+    window.addEventListener('pointerdown', tryReconnect, opts);
+    window.addEventListener('keydown', tryReconnect, opts);
+    return () => {
+      window.removeEventListener('pointerdown', tryReconnect, opts);
+      window.removeEventListener('keydown', tryReconnect, opts);
+    };
+  }, [state.status]);
 
   // Refresh the advisory lock every minute while a folder is open.
   useEffect(() => {
@@ -255,13 +289,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [idb, openHandle, patch]);
 
+  /**
+   * Ask for the folder back. The button and the first-gesture listener both land
+   * here, and they can fire off the same click, so it is guarded: two overlapping
+   * requests would mean two permission prompts and two opens of the same store.
+   *
+   * A refusal leaves the app where it is rather than dropping to the first-run
+   * screen. The folder is still chosen and still remembered; only this attempt
+   * failed, and offering "choose a folder" as the answer to that would invite
+   * someone to re-link a folder they never unlinked.
+   */
   const grantPermission = useCallback(async () => {
     const handle = handleRef.current;
     if (!handle) return patch({ status: 'no-folder' });
-    const perm = await requestPermission(handle);
-    if (perm === 'granted') await openHandle(handle);
-    else patch({ status: 'no-folder', error: 'Permission to the folder was refused.' });
+    if (reconnectingRef.current) return;
+    reconnectingRef.current = true;
+    try {
+      const perm = await requestPermission(handle);
+      if (perm === 'granted') await openHandle(handle);
+      else patch({ status: 'needs-permission', folderName: handle.name, error: 'The folder was not reopened. Click “Open” and choose Allow when the browser asks.' });
+    } finally {
+      reconnectingRef.current = false;
+    }
   }, [openHandle, patch]);
+  // The first-gesture listener is armed before this exists, so it reads it from a ref.
+  grantRef.current = grantPermission;
 
   const useMemoryOnly = useCallback(() => {
     void openStore(new MemoryAdapter(), null);

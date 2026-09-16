@@ -39,7 +39,7 @@ The workbook never has to be opened again, and neither does Excel:
 | Job | Where |
 | --- | --- |
 | Load a schedule | **Import**: drop an `.xer`, `.xlsx` or `.csv`, paste rows, or pick a file already in the folder. Columns are matched by header name and can be corrected by hand before importing. |
-| Price activity types | **Activity Library**: inline editing, plus adding and consolidating keys. |
+| Price activity types | **Activity Library**: inline editing, plus adding keys by hand. An activity type is priced by an exact match on its library key; anything unmatched shows as REVIEW. |
 | Per-location complexity | **Locations** |
 | Edit one activity | **Budget Master**: rename it, set its discipline, override its hours, note why, or take it out of the budget or out of the program entirely. Everything you edit is keyed on the Activity ID and survives every import; everything P6 owns is read-only. |
 | Get rid of REVIEW rows you will never price | **Budget Master**: filter to *Needing REVIEW*, then **Hide**. Hidden activities leave every total, curve and export, nothing is deleted, and the Hidden view brings them back. |

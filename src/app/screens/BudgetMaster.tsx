@@ -12,8 +12,6 @@ const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> 
   nocurve: { label: 'In budget but on no curve', test: (r) => r.status === 'IN BUDGET' && r.budgetHours > 0 && !r.onPlannedCurve && !r.onForecastCurve },
   blcurrent: { label: 'Baseline falling back to current dates', test: (r) => r.baselineSource === 'CURRENT' },
   pctp6: { label: 'Percent complete from P6 duration', test: (r) => r.pctSource === 'P6' && r.status === 'IN BUDGET' },
-  loe: { label: 'LOE flag', test: (r) => r.loeFlag },
-  tier2: { label: 'Resolved through tier 2', test: (r) => r.matchTier === 2 },
   shifts: { label: 'RATE type missing shifts', test: (r) => r.needsShifts },
   override: { label: 'Has an hours override', test: (r) => r.overrideHours !== null },
   edited: { label: 'Carries an edit of yours', test: (r) => r.renamed || r.visibility !== null || r.overrideHours !== null },
@@ -195,9 +193,8 @@ export function BudgetMaster({ route }: { route: Route }) {
       label: 'Match key',
       value: (r) => r.matchKey,
       render: (r) => (
-        <span className="block max-w-xs truncate" title={`${r.matchKey}${r.matchTier === 2 ? ' (tier 2: last parenthetical dropped)' : ''}`}>
+        <span className="block max-w-xs truncate" title={r.matchKey}>
           {r.matchKey}
-          {r.matchTier === 2 && <Badge tone="purple"> T2</Badge>}
         </span>
       ),
     },
@@ -229,7 +226,7 @@ export function BudgetMaster({ route }: { route: Route }) {
         />
       ),
     },
-    { key: 'basis', label: 'Basis', value: (r) => r.basis ?? '', render: (r) => <>{r.basis ?? ''}{r.loeFlag && <Badge tone="warn"> LOE?</Badge>}</> },
+    { key: 'basis', label: 'Basis', value: (r) => r.basis ?? '' },
     { key: 'od', label: 'OD', value: (r) => r.activity.originalDuration, num: true, hint: 'Original Duration in days, straight from P6 and never editable here. Change it in P6 and re-import.' },
     { key: 'cx', label: 'Cx', value: (r) => r.complexity, num: true, render: (r) => (r.complexity === null ? '' : r.complexity.toFixed(2)) },
     { key: 'std', label: 'Std h', value: (r) => r.stdHours, num: true, render: (r) => fmtHours(r.stdHours) },

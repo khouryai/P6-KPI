@@ -33,7 +33,7 @@ export function buildWorkbook(model: Model, settings: Settings, current: P6Activ
   XLSX.utils.book_append_sheet(wb, wsFrom([
     ['Settings'], [],
     ['Default_Basis', settings.defaultBasis], ['Default_Crew', settings.defaultCrew], ['Default_Shift_Hours', settings.defaultShiftHours],
-    ['Default_Complexity', settings.defaultComplexity], ['LOE_Duration_Days', settings.loeDurationDays],
+    ['Default_Complexity', settings.defaultComplexity],
     ['Status_Date', d(settings.statusDate)], ['Data_Date', d(settings.dataDate)],
   ]), 'Settings');
   XLSX.utils.book_append_sheet(wb, extractSheet(current, true), 'P6_Extract');
@@ -55,8 +55,8 @@ export function buildWorkbook(model: Model, settings: Settings, current: P6Activ
   ]), 'Test_Progress');
   XLSX.utils.book_append_sheet(wb, extractSheet(baseline, false), 'Baseline_Extract');
   XLSX.utils.book_append_sheet(wb, wsFrom([
-    ['Row', 'P6_Activity_ID', 'Location', 'Seq_Code', 'Match_Key', 'Rate_Status', 'Status', 'Basis', 'LOE_Flag', 'Complexity', 'Std_Hours', 'Override_Hours', 'Budget_Hours', 'Baseline_Start', 'Baseline_Finish', 'Baseline_Source', 'Current_Start', 'Current_Finish', 'Pct_Complete', 'Pct_Source', 'Earned_Hours', 'Remaining_Hours', 'Match_Tier', 'Phase', 'Work_Type', 'Activity_Name', 'Activity_Type', 'Discipline', 'Earn_Start', 'Earn_End', 'Earn_Window_Source', 'P6_Activity_Name', 'Renamed_By_User', 'Visibility_Override'],
-    ...model.rows.map((r, i) => [i + 2, r.activity.rawActivityId, r.location, r.seqCode, r.matchKey, r.rateStatus, r.status, r.basis ?? '', r.loeFlag ? 'LOE?' : '', r.complexity ?? '', r.stdHours ?? '', r.overrideHours ?? '', r.budgetHours, d(r.baselineStart), d(r.baselineFinish), r.baselineSource, d(r.currentStart), d(r.currentFinish), r.pctComplete, r.pctSource, r.earnedHours, r.remainingHours, r.matchTier ?? '', r.phaseName, r.workType, r.activityName, r.activityType, r.discipline, d(r.earnStart), d(r.earnEnd), r.earnWindowSource, r.activity.activityName, r.renamed ? 'Y' : '', r.visibility ?? '']),
+    ['Row', 'P6_Activity_ID', 'Location', 'Seq_Code', 'Match_Key', 'Rate_Status', 'Status', 'Basis', 'Complexity', 'Std_Hours', 'Override_Hours', 'Budget_Hours', 'Baseline_Start', 'Baseline_Finish', 'Baseline_Source', 'Current_Start', 'Current_Finish', 'Pct_Complete', 'Pct_Source', 'Earned_Hours', 'Remaining_Hours', 'Phase', 'Work_Type', 'Activity_Name', 'Activity_Type', 'Discipline', 'Earn_Start', 'Earn_End', 'Earn_Window_Source', 'P6_Activity_Name', 'Renamed_By_User', 'Visibility_Override'],
+    ...model.rows.map((r, i) => [i + 2, r.activity.rawActivityId, r.location, r.seqCode, r.matchKey, r.rateStatus, r.status, r.basis ?? '', r.complexity ?? '', r.stdHours ?? '', r.overrideHours ?? '', r.budgetHours, d(r.baselineStart), d(r.baselineFinish), r.baselineSource, d(r.currentStart), d(r.currentFinish), r.pctComplete, r.pctSource, r.earnedHours, r.remainingHours, r.phaseName, r.workType, r.activityName, r.activityType, r.discipline, d(r.earnStart), d(r.earnEnd), r.earnWindowSource, r.activity.activityName, r.renamed ? 'Y' : '', r.visibility ?? '']),
   ]), 'Budget_Master');
   XLSX.utils.book_append_sheet(wb, wsFrom([
     // Hidden snapshots are exported too. They are off the curve, not off the record,

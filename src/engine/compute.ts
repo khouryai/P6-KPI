@@ -355,7 +355,6 @@ export function computeModel(input: ModelInput): Model {
       : overrideHours !== null
         ? overrideHours
         : excelRound((stdHours ?? 0) * (complexity ?? 1));
-    const loeFlag = inBudget && basis === 'DUR' && (a.originalDuration ?? 0) > settings.loeDurationDays;
     const needsShifts = inBudget && rateStatus === 'NEEDS SHIFTS';
 
     // Baseline dates: matched on trimmed Activity ID. Fall back to current dates when absent.
@@ -406,12 +405,10 @@ export function computeModel(input: ModelInput): Model {
       seqCode: a.seqCode,
       activityType: a.activityType,
       matchKey: match.matchKey,
-      matchTier: match.tier,
       rateStatus,
       status,
       discipline: ov?.discipline?.trim() || entry?.discipline || '',
       basis,
-      loeFlag,
       needsShifts,
       complexity,
       stdHours,
@@ -456,7 +453,9 @@ export function computeModel(input: ModelInput): Model {
   // Library stats.
   const libraryStats: LibraryStat[] = input.library.filter((e) => !e.retired).map((entry) => {
     const k = normKey(entry.matchKey);
-    const mine = rows.filter((r) => normKey(r.matchKey) === k && r.matchTier !== null);
+    // A row whose type did not match anything keeps its raw type as matchKey, so the
+    // match has to be confirmed against a real entry rather than against the name alone.
+    const mine = rows.filter((r) => normKey(r.matchKey) === k && r.status !== 'REVIEW');
     // Count and total P6 days follow the workbook: every ACTIVITY row whose raw type equals the key.
     const rawMine = visibleActs.filter((a) => normKey(a.activityType) === k);
     const basisEff = effectiveBasis(entry, settings);
@@ -582,9 +581,7 @@ export function computeModel(input: ModelInput): Model {
     testProgressKeyed: testProgress.filter((t) => t.activityId.trim() !== '').length,
     testProgressNotMatching: testProgress.length - tpMatched,
     testProgressUsingOverride: testProgress.filter((t) => t.pctOverride !== undefined && t.pctOverride !== null).length,
-    loeFlags: count((r) => r.loeFlag),
     rateNeedsShifts: count((r) => r.needsShifts),
-    tier2Resolved: count((r) => r.matchTier === 2),
     onNoCurve: count((r) => r.status === 'IN BUDGET' && r.budgetHours > 0 && !r.onPlannedCurve && !r.onForecastCurve),
     latestStatusDate: latestStatus,
     typesWithCrewSplit: libraryStats.filter((l) => l.crewEffLines.length > 0).length,

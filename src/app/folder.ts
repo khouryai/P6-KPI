@@ -43,11 +43,24 @@ export async function queryPermission(handle: FileSystemDirectoryHandle): Promis
   return h.queryPermission({ mode: 'readwrite' });
 }
 
-/** Must be called from a user gesture when the state is 'prompt'. */
+/**
+ * Ask for the permission back.
+ *
+ * Normally this needs a user gesture, and without one Chromium either returns
+ * 'prompt' or rejects. It is still worth calling without one: where the person
+ * chose "Allow on every visit", the grant is dormant rather than gone and this
+ * revives it silently, which is the whole difference between the app opening on
+ * the dashboard and the app opening on a wall. So it never throws — a failure here
+ * means "not yet", and the caller tries again on the first real click.
+ */
 export async function requestPermission(handle: FileSystemDirectoryHandle): Promise<PermissionState> {
   const h = handle as HandleWithPermission;
   if (!h.requestPermission) return 'granted';
-  return h.requestPermission({ mode: 'readwrite' });
+  try {
+    return await h.requestPermission({ mode: 'readwrite' });
+  } catch {
+    return 'prompt';
+  }
 }
 
 /** A stable per-browser identity for the advisory lock file. */

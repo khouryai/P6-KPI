@@ -2,7 +2,7 @@
  * What the abbreviations mean.
  *
  * This screen is full of shorthand that is obvious to whoever built it and opaque
- * to everyone else: OD, RD, LOE, EV, CPI, tier 2, DUR. Every definition lives here
+ * to everyone else: OD, RD, EV, CPI, DUR. Every definition lives here
  * once, keyed by the exact column label, so a table header explains itself on hover
  * without each screen inventing its own wording.
  *
@@ -17,8 +17,7 @@ export const GLOSSARY: Record<string, string> = {
   Location: 'Fourth segment of the Activity ID, e.g. W40. Each location can carry its own complexity factor.',
   'Work type': 'Third segment of the Activity ID. TC is test and commissioning, AC is acceptance.',
   Type: 'The activity type, stripped of the location and phase prefix. This is what the rate library is keyed on.',
-  'Match key': 'The rate library entry this activity resolved to. Tier 1 is an exact match; tier 2 dropped the last bracketed phrase to find one.',
-  Tier: 'How the activity found its rate. 1 = exact match on the type. 2 = matched after dropping the last bracketed phrase, which can over-consolidate.',
+  'Match key': 'The rate library entry this activity resolved to, by an exact match on its activity type. No match means REVIEW and no hours.',
   Discipline: 'A free-text grouping you set on the rate library entry. Not derived from P6.',
 
   // --- rating --------------------------------------------------------------
@@ -34,7 +33,6 @@ export const GLOSSARY: Record<string, string> = {
   RD: 'Remaining Duration: days P6 still expects the activity to take. (OD − RD) ÷ OD is the fallback percent complete.',
   'P6 days': 'Total original duration across every activity of this type, in days.',
   Complexity: 'The location factor the standard hours are multiplied by. 1.00 means no adjustment.',
-  LOE: 'Level of Effort. A DUR-basis activity longer than the level-of-effort threshold, so its hours are probably a placeholder rather than real work.',
   'Std hours': 'Standard hours before the location complexity factor: crew × shift hours × shifts (or × P6 days).',
   Override: 'A budget figure you typed by hand for this one activity. It replaces the calculated hours entirely.',
 
@@ -103,7 +101,6 @@ export const GLOSSARY: Record<string, string> = {
   Effective: 'The value actually in use, whether you set it or it fell back to the global default.',
   Include: 'Whether this activity type carries budget hours. Types marked (by BART), (by Others) or (Deleted) default to N.',
   Loc: 'Location: fourth segment of the Activity ID, e.g. W40.',
-  'LOE flag': 'Level of Effort: a DUR-basis activity longer than the threshold, so its hours are probably a placeholder rather than real work.',
   '% override': 'A percent complete you typed by hand. It beats test case counts and P6.',
   '% src': 'Where the percent complete came from. OVERRIDE = you typed it. TESTS = test case counts. P6 = (OD − RD) ÷ OD, the weakest of the three.',
   Source: 'Where this figure came from, rather than what it is.',

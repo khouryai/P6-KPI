@@ -47,13 +47,31 @@ the credit lands in the next period. The build prompt specifies the same-day rul
 test for it, and it is the right behaviour, so it is used. On the workbook's data this
 moves 400 hours from January 2026 to December 2025 and changes nothing else.
 
+## Matching is exact, and only exact
+
+An activity is priced by an exact, case-insensitive match of its activity type against a
+library key. There is no second attempt.
+
+There used to be one. Tier 2 dropped the last bracketed phrase and retried, so a key
+called `Sim Mode Test (Adjacent Location)` would price every `(DF: A10 -> B20)` variant
+of it. It is gone deliberately. A key that widens itself prices work nobody looked at,
+and the widening is invisible in every total it feeds — the badge on the row was the
+only trace, and a badge is not a decision. An unmatched type is now simply REVIEW, and
+the two answers are both explicit and both visible afterwards: price that type, or hide
+the activity.
+
+The cost is real and worth stating: each spelling needs its own library entry. A family
+of four `(DF: ...)` variants is four entries, not one. That is the trade — four rows of
+typing against a budget nobody can audit.
+
 ## The `retired` library flag
 
-The prompt says tier 2 fires only once the user has consolidated the library by hand,
-and that import never deletes a library entry. Without a marker, a consolidated variant
-would be re-added by the next import and tier 1 would catch it again. A library entry
-with `retired: true` is therefore excluded from matching and from the type count, and is
-never re-added by discovery. Retire and restore are on the Activity Library screen.
+Import never deletes a library entry, because the type may return in a later schedule
+revision. Without a marker, a key the user had deliberately dropped would be re-added by
+the next import and start pricing again. A library entry with `retired: true` is
+therefore excluded from matching and from the type count, and is never re-added by
+discovery; its activities show as REVIEW until a key matches them exactly. Retire and
+restore are on the Activity Library screen.
 
 ## What the user owns, and what P6 owns
 
@@ -180,16 +198,17 @@ Three formats reach the same `P6Activity[]`, so everything downstream is identic
 The XER path also reads dates the Excel path cannot: a P6 constraint star (`01-Oct-26*`)
 defeats Excel's `DATEVALUE`, but the native format carries a real timestamp.
 
-## Consolidating the library
+## Adding a library key by hand
 
-Tier 2 matching only fires when a shorter key exists to match against, and import never
-invents one. Two actions on the Activity Library screen close that loop:
+Keys are normally discovered from the schedule. **Add a key by hand** on the Activity
+Library screen creates an entry no import produced, for a type known to be coming before
+the schedule carries it.
 
-- **Add a key by hand** creates a library entry that no activity name produced.
-- **Consolidate variant families** finds keys that differ only by their last parenthetical
-  (the `(DF: W40 -> Y10)` families), creates the shortened key carrying the rates of an
-  already-priced variant, and retires the variants. Their activities then resolve through
-  tier 2 to the single consolidated entry, which Budget Master marks with a T2 badge.
+The **Consolidate variant families** action that used to sit beside it is gone with tier
+2. It created a shortened key and retired the variants, which only ever worked because
+something widened the match afterwards; without that, consolidating would have retired
+four priced keys in favour of one that matches nothing, silently zeroing their hours. A
+button whose whole effect depended on a removed feature had to go with it.
 
 A retired entry is excluded from matching and from the type count, and is never re-added by
 a later import.
@@ -279,6 +298,31 @@ The sort caret is rendered in a fixed-width slot whether or not the column is th
 sorted one, and on a numeric column it goes *before* the label, so sorting a table can
 never shift its headings sideways and the label's last character stays flush with the
 figures. `tests/table-alignment.test.ts` guards both facts at source level.
+
+## Opening straight onto the dashboard
+
+The folder is chosen once and the handle is kept in IndexedDB, so the app always knows
+which folder it wants. What lapses between launches is Chromium's *permission* to touch
+it, and a page cannot grant itself that: `requestPermission()` needs a user gesture.
+
+So the boot path tries three things in order, and stops at the first that works:
+
+1. `queryPermission()`. Where the person answered **Allow on every visit**, this returns
+   `granted` and the app opens on the dashboard having asked nothing. This is the only
+   route to a genuinely zero-click start, which is why both the first-run screen and the
+   reconnect screen name that option explicitly.
+2. `requestPermission()` immediately, with no gesture. Where the grant is dormant rather
+   than revoked this revives it silently. Where it is not, it costs nothing:
+   `requestPermission` is wrapped so it never throws, and a failure just means "not yet".
+3. A one-shot `pointerdown`/`keydown` listener on the window. Any click or keypress is a
+   gesture, so the reconnect rides on whatever the person was going to do anyway rather
+   than making them find a button first.
+
+Both the button and the listener call the same guarded action: two overlapping requests
+would mean two permission prompts and two opens of the same store. A refusal leaves the
+app on the reconnect screen rather than dropping to first-run setup — the folder is
+still chosen, and offering "choose a folder" as the answer invites someone to re-link a
+folder they never unlinked.
 
 ## Storage rules
 
@@ -403,7 +447,7 @@ month replaces it rather than adding the hours twice.
 ## Explaining the abbreviations
 
 The screens are full of shorthand that is obvious to whoever built it and opaque to
-everyone else: OD, RD, LOE, Cx, BL src, factor, tier 2. `src/engine/glossary.ts`
+everyone else: OD, RD, Cx, BL src, factor, DUR. `src/engine/glossary.ts`
 defines every term once, keyed by the exact column label, and `SortableTable` looks
 the label up automatically — so a column called `OD` explains itself on hover
 without any screen repeating the text, and a definition cannot drift between two

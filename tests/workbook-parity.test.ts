@@ -44,7 +44,6 @@ describe.skipIf(!available)('real workbook parity', () => {
     defaultCrew: setting('Default_Crew') as number,
     defaultShiftHours: setting('Default_Shift_Hours') as number,
     defaultComplexity: setting('Default_Complexity') as number,
-    loeDurationDays: setting('LOE_Duration_Days') as number,
     dataDate: parseP6Date(setting('Data_Date')).iso ?? '',
     statusDate: parseP6Date(setting('Status_Date')).iso ?? '',
   };
