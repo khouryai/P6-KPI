@@ -45,7 +45,7 @@ The workbook never has to be opened again, and neither does Excel:
 | Get rid of REVIEW rows you will never price | **Budget Master**: filter to *Needing REVIEW*, then **Hide**. Hidden activities leave every total, curve and export, nothing is deleted, and the Hidden view brings them back. |
 | Test case counts | **Test Progress**: every budgeted activity is already listed. Key counts inline, bulk-fill across a filter, or drop a spreadsheet. Keyed rows that earn nothing are listed with the name, the type and a sentence on why — and on whether deleting one costs you anything. |
 | Progress per phase or location | **By Phase & Location**: rollups by phase, location, discipline or work type, with drill-through into a filtered Budget Master. |
-| Status snapshots | **Snapshots** |
+| Status snapshots | **Snapshots**: take one, take it off the S-curve while keeping the record, or delete one that should never have been written. |
 | Defaults, dates, storage, backups | **Settings** |
 | Hand a spreadsheet to project controls | **Settings → Export workbook**, plus curve CSV and chart PNG on the Dashboard. |
 

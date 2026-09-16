@@ -485,6 +485,13 @@ body {
   box-shadow: none;
 }
 
+/* .btn-mini deliberately mutes its text, and it is declared AFTER .btn-primary at the
+   same specificity — so a small primary button came out muted grey on the red fill,
+   which is where the selected "Whole project" chip lost its contrast. The filled
+   variants have to say it again, and later, to get their white text back. */
+.btn-mini.btn-primary,
+.btn-mini.btn-danger { color: var(--white); }
+
 /* A plain text link-button, for inline row actions. */
 .btn-link {
   font-family: var(--f-ui);
@@ -498,8 +505,11 @@ body {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.btn-link:hover { color: var(--accent-blue-strong); }
+.btn-link:hover:not(:disabled) { color: var(--accent-blue-strong); }
 .btn-link.danger { color: var(--bad); }
+/* A link button that is doing something has to look like it, or a slow write reads
+   as a dead control and gets clicked again. */
+.btn-link:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ===========================================================================
    Form controls

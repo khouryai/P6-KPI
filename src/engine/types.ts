@@ -172,7 +172,18 @@ export type Snapshot = {
   statusDate: string;
   takenAt: string;
   note?: string;
+  /**
+   * Kept and still listed, but off the S-curve and out of every marker. For the
+   * snapshot taken against numbers that later turned out to be wrong: the record of
+   * what was reported at the time is worth keeping even when plotting it is not.
+   */
+  hidden?: boolean;
   lines: SnapshotLine[];
+  /**
+   * The file it was read from, filled in on load so a screen can hide or delete this
+   * exact one. It is not part of the record and is stripped before writing.
+   */
+  file?: string;
 };
 
 // ---------------------------------------------------------------------------

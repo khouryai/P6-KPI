@@ -125,6 +125,19 @@ export function classifyConflict(path: string): ConflictCopy | null {
   return null;
 }
 
+/** A guard on the two operations that can destroy history, so a bad path cannot. */
+export function isSnapshotFile(path: string): boolean {
+  const parts = path.split('/');
+  return parts.length === 2 && parts[0] === SNAPSHOT_DIR && CANONICAL_SNAPSHOT.test(parts[1]);
+}
+
+/** The record as it is stored: `file` is where it was read from, not part of it. */
+function snapshotRecord(snap: Snapshot): Omit<Snapshot, 'file'> {
+  const { file: _where, ...rest } = snap;
+  void _where;
+  return rest;
+}
+
 /**
  * Domain-level store: knows the file layout, reads everything into memory once, writes
  * on explicit save, appends imports, scans for conflict copies, and manages the
@@ -163,7 +176,9 @@ export class Store {
     const snapFiles = (await a.list(SNAPSHOT_DIR)).filter((p) => classifyConflict(p) === null && p.endsWith('.json'));
     for (const f of snapFiles.sort()) {
       const s = parseJson<Snapshot | null>(await a.read(f), null, f, problems);
-      if (s) data.snapshots.push(s);
+      // Remember which file this came from, so a screen can hide or delete this exact
+      // snapshot. Two snapshots can share a status date, so the date is not a key.
+      if (s) data.snapshots.push({ ...s, file: f });
     }
     data.snapshots.sort((x, y) => x.statusDate.localeCompare(y.statusDate) || x.takenAt.localeCompare(y.takenAt));
     return { data, problems };
@@ -192,13 +207,29 @@ export class Store {
     return text ? (JSON.parse(text) as ScheduleImport) : null;
   }
 
-  /** Snapshots are insert only. */
+  /**
+   * Snapshots are never edited in place: a new one is always a new file, so the
+   * history cannot be rewritten by accident. Hiding one and deleting one are the two
+   * deliberate exceptions, and both are explicit acts on a named file.
+   */
   async appendSnapshot(snap: Snapshot): Promise<string> {
     let file = `${SNAPSHOT_DIR}/${snap.statusDate}.json`;
     let n = 1;
     while (await this.adapter.exists(file)) file = `${SNAPSHOT_DIR}/${snap.statusDate}-${n++}.json`;
-    await this.adapter.write(file, JSON.stringify(snap, null, 2));
+    await this.adapter.write(file, JSON.stringify(snapshotRecord(snap), null, 2));
     return file;
+  }
+
+  /** Rewrite one snapshot file, for the hidden flag. The lines are never touched. */
+  async writeSnapshot(file: string, snap: Snapshot): Promise<void> {
+    if (!isSnapshotFile(file)) throw new Error(`${file} is not a snapshot file`);
+    await this.adapter.write(file, JSON.stringify(snapshotRecord(snap), null, 2));
+  }
+
+  /** Delete one snapshot file. Gone for good: there is no other copy. */
+  async deleteSnapshot(file: string): Promise<void> {
+    if (!isSnapshotFile(file)) throw new Error(`${file} is not a snapshot file`);
+    await this.adapter.remove(file);
   }
 
   async writeExport(name: string, bytes: Uint8Array): Promise<string> {
