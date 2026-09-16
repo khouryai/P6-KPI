@@ -7,6 +7,7 @@ import { fmtHours, fmtPct, fmtDate, todayISO } from '../format';
 import { isValidISO } from '../../engine/dates';
 import { href } from '../router';
 import { useUnit } from '../units';
+import { TERMS } from '../../engine/vocab';
 
 /*
  * Planned against achieved, in the two colours the S-curve already uses for the
@@ -398,7 +399,7 @@ export function PeriodLog() {
           An activity appears here if it did something in the window <i>or was supposed to</i>. That is what makes <b>NOT STARTED</b> and <b>MISSED</b> meaningful: they
           are the activities the plan was counting on. <b>MISSED</b> beats <b>STARTED</b> and <b>CONTINUED</b> deliberately — an activity that was due to finish here and
           did not is late, whatever else it also did. Activities with progress but no usable dates earn hours that belong to no window at all; the{' '}
-          <a href={href('team')}>Earned vs Built</a> screen reports that figure.
+          <a href={href('team')}>Earned vs {TERMS.built}</a> screen reports that figure.
         </p>
       </Panel>
     </Page>

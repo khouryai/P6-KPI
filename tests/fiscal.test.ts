@@ -6,7 +6,7 @@
  * quietly, so the boundary cases are pinned rather than assumed.
  */
 import { describe, it, expect } from 'vitest';
-import { fiscalYearOf, fiscalYearRange, fiscalYearLabel, fiscalYearSpan, fyStart, groupByFiscalYear } from '../src/engine/fiscal';
+import { fiscalYearOf, fiscalYearRange, fiscalYearLabel, fiscalYearSpan, fyStart, groupByFiscalYear, resourcesInYear } from '../src/engine/fiscal';
 import type { BurnRow } from '../src/engine/types';
 
 const row = (month: string, earned: number, built: number, cumEarned: number, cumBuilt: number): BurnRow => ({
@@ -127,5 +127,50 @@ describe('grouping the monthly rows', () => {
     const shuffled = groupByFiscalYear([...months].reverse(), 7);
     expect(shuffled.map((y) => y.fy)).toEqual([2026, 2027]);
     expect(shuffled[0].months.map((m) => m.month)).toEqual(['2026-05', '2026-06']);
+  });
+});
+
+describe('resources inside one year', () => {
+  const withCells = (month: string, cells: { code: string; earned: number; built: number }[]): BurnRow => ({
+    ...row(month, 0, 0, 0, 0),
+    bySubsystem: cells.map((c) => ({ code: c.code, label: c.code || 'Unassigned', earned: c.earned, built: c.built, variance: c.earned - c.built, factor: c.built ? c.earned / c.built : null })),
+  });
+  const months = [
+    withCells('2026-07', [{ code: 'ATS', earned: 30, built: 20 }, { code: 'IXL', earned: 10, built: 25 }]),
+    withCells('2026-08', [{ code: 'ATS', earned: 20, built: 20 }, { code: 'IXL', earned: 5, built: 5 }]),
+  ];
+  const res = resourcesInYear(months);
+
+  it('adds each resource up across the months of the year', () => {
+    expect(res.find((r) => r.code === 'ATS')).toMatchObject({ earned: 50, built: 40, variance: 10 });
+    expect(res.find((r) => r.code === 'IXL')).toMatchObject({ earned: 15, built: 30, variance: -15 });
+  });
+
+  it('computes the factor over the whole year, not by averaging months', () => {
+    expect(res.find((r) => r.code === 'IXL')!.factor).toBeCloseTo(15 / 30, 9);
+  });
+
+  it('orders by what was earned, so the biggest contributor is first', () => {
+    expect(res.map((r) => r.code)).toEqual(['ATS', 'IXL']);
+  });
+
+  it('shares add up to the whole year', () => {
+    expect(res.reduce((s, r) => s + r.shareOfEarned, 0)).toBeCloseTo(1, 9);
+  });
+
+  it('drops a resource that neither earned nor spent anything', () => {
+    const quiet = resourcesInYear([withCells('2026-07', [{ code: 'ATS', earned: 5, built: 0 }, { code: 'GONE', earned: 0, built: 0 }])]);
+    expect(quiet.map((r) => r.code)).toEqual(['ATS']);
+  });
+
+  it('reports no factor for a resource that spent nothing', () => {
+    const none = resourcesInYear([withCells('2026-07', [{ code: 'ATS', earned: 5, built: 0 }])]);
+    expect(none[0].factor).toBeNull();
+  });
+
+  it('agrees with the year total it was taken from', () => {
+    const [year] = groupByFiscalYear(months.map((m, i) => ({ ...m, earned: [40, 25][i], built: [45, 25][i] })), 7);
+    expect(resourcesInYear(year.months).reduce((s, r) => s + r.earned, 0)).toBe(year.earned);
+    expect(resourcesInYear(year.months).reduce((s, r) => s + r.built, 0)).toBe(year.built);
   });
 });

@@ -30,7 +30,7 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
       { id: 'rollup', label: 'By Phase & Location' },
       { id: 'progress', label: 'Test Progress' },
       { id: 'period', label: 'Two-Week Log' },
-      { id: 'team', label: 'Earned vs Built' },
+      { id: 'team', label: `Earned vs ${TERMS.built}` },
       { id: 'snapshots', label: 'Snapshots' },
     ],
   },

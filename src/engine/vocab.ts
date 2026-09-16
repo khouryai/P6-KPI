@@ -24,6 +24,15 @@ export const TERMS = {
   disciplineLower: 'subsystem',
   disciplineLowerPlural: 'subsystems',
 
+  /**
+   * Stored as `built` / `teamActuals`: the hours the team really spent, from
+   * timesheets. "Built" was shop language; "Actual" is what a schedule, a cost
+   * report and a client all already call it.
+   */
+  built: 'Actual',
+  builtLower: 'actual',
+  builtHours: 'Actual h',
+
   /** Stored as `subsystem` on a crew line: who actually does the work. */
   subsystem: 'Resource',
   subsystemPlural: 'Resources',

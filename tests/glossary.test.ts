@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { GLOSSARY, define } from '../src/engine/glossary';
+import { TERMS } from '../src/engine/vocab';
 
 const SCREENS = resolve(process.cwd(), 'src/app/screens');
 
@@ -55,9 +56,12 @@ describe('glossary', () => {
     }
   });
 
-  it('distinguishes earned from built, which is the whole point of tracking both', () => {
+  it('distinguishes what work was worth from what it cost, the whole point of tracking both', () => {
+    // Keyed through TERMS rather than the literal word: the vocabulary has already
+    // changed once (Built -> Actual) and a test naming the old word would fail for
+    // the rename rather than for the thing it is actually checking.
     expect(GLOSSARY.Earned).toMatch(/worth/i);
     expect(GLOSSARY.Earned).toMatch(/not what it cost/i);
-    expect(GLOSSARY.Built).toMatch(/cost|spent/i);
+    expect(GLOSSARY[TERMS.built]).toMatch(/cost|spent/i);
   });
 });

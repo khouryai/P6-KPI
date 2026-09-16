@@ -84,7 +84,7 @@ export function Settings() {
             <Field label="Default shift hours"><input className="input w-full" type="number" step="any" value={s.defaultShiftHours} onChange={(e) => set({ defaultShiftHours: num(e.target.value) ?? 0 })} /></Field>
             <Field
               label="Fiscal year starts in"
-              hint="Used by the fiscal year rollup on Earned vs Built. A year is named for the calendar year it ends in, so a July start makes Jul-26 to Jun-27 read as FY27."
+              hint="Used by the fiscal year rollup on Earned vs Actual. A year is named for the calendar year it ends in, so a July start makes Jul-26 to Jun-27 read as FY27."
             >
               <select
                 className="input w-full"

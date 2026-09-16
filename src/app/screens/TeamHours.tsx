@@ -10,7 +10,7 @@ import { normKey } from '../../engine/keys';
 import { fmtHours, fmtPct } from '../format';
 import { href } from '../router';
 import { readWorkbook, workbookGrid } from '../../engine/workbook';
-import { groupByFiscalYear, fyStart, fiscalYearOf, type FiscalYear } from '../../engine/fiscal';
+import { groupByFiscalYear, fyStart, fiscalYearOf, resourcesInYear, type FiscalYear, type ResourceYear } from '../../engine/fiscal';
 import { TERMS } from '../../engine/vocab';
 
 const GRID = '#e4e7ec';
@@ -58,7 +58,7 @@ export function TeamHours() {
   const project = burn.project;
   const heroStats: HeroStat[] = [
     { label: 'Earned', value: `${fmtHours(burn.totalEarned)} h`, tone: 'blue' },
-    { label: 'Built', value: `${fmtHours(burn.totalBuilt)} h`, tone: 'red' },
+    { label: TERMS.built, value: `${fmtHours(burn.totalBuilt)} h`, tone: 'red' },
     {
       label: 'Variance',
       value: burn.totalBuilt ? `${project.cumEarned - project.cumBuilt >= 0 ? '+' : ''}${fmtHours(project.cumEarned - project.cumBuilt)} h` : '—',
@@ -164,7 +164,7 @@ export function TeamHours() {
   const monthColumns: Column<BurnRow>[] = [
     { key: 'month', label: 'Month', value: (r) => r.month, render: (r) => <span className="mono">{monthLabel(r.month)}</span> },
     { key: 'earned', label: 'Earned h', value: (r) => r.earned, num: true, render: (r) => fmtHours(r.earned) },
-    { key: 'built', label: 'Built h', value: (r) => r.built, num: true, render: (r) => fmtHours(r.built) },
+    { key: 'built', label: TERMS.builtHours, value: (r) => r.built, num: true, render: (r) => fmtHours(r.built) },
     {
       key: 'variance',
       label: 'Variance',
@@ -189,7 +189,7 @@ export function TeamHours() {
         <span className="tabular-nums font-semibold">{fmtPct(project.budgetHours ? r.cumEarned / project.budgetHours : 0, 1)}</span>
       ),
     },
-    { key: 'cumBuilt', label: 'Cum built', value: (r) => r.cumBuilt, num: true, render: (r) => fmtHours(r.cumBuilt) },
+    { key: 'cumBuilt', label: `Cum ${TERMS.builtLower}`, value: (r) => r.cumBuilt, num: true, render: (r) => fmtHours(r.cumBuilt) },
     {
       key: 'cumVariance',
       label: 'Cum variance',
@@ -219,7 +219,7 @@ export function TeamHours() {
     { key: 'label', label: TERMS.subsystem, value: (r) => r.label, render: (r) => <span className="mono">{r.code || 'Unassigned'}</span> },
     { key: 'budget', label: 'Budget h', value: (r) => r.budgetHours, num: true, render: (r) => fmtHours(r.budgetHours) },
     { key: 'earned', label: 'Earned h', value: (r) => r.cumEarned, num: true, render: (r) => fmtHours(r.cumEarned) },
-    { key: 'built', label: 'Built h', value: (r) => r.cumBuilt, num: true, render: (r) => fmtHours(r.cumBuilt) },
+    { key: 'built', label: TERMS.builtHours, value: (r) => r.cumBuilt, num: true, render: (r) => fmtHours(r.cumBuilt) },
     { key: 'factor', label: 'Factor', value: (r) => r.factor ?? null, num: true, render: (r) => (r.factor === null ? <span className="text-[var(--text-subtle)]">—</span> : <span className={r.factor >= 1 ? 'tone-good font-semibold' : 'tone-bad font-semibold'}>{r.factor.toFixed(2)}</span>) },
     { key: 'toGo', label: 'To complete', value: (r) => r.hoursToComplete ?? null, num: true, render: (r) => (r.hoursToComplete === null ? <span className="text-[var(--text-subtle)]">—</span> : fmtHours(r.hoursToComplete)) },
     { key: 'forecast', label: 'Forecast', value: (r) => r.forecastTotalHours ?? null, num: true, render: (r) => (r.forecastTotalHours === null ? <span className="text-[var(--text-subtle)]">—</span> : fmtHours(r.forecastTotalHours)) },
@@ -276,7 +276,7 @@ export function TeamHours() {
     },
     { key: 'months', label: 'Months', value: (r) => r.months.length, num: true, optional: true },
     { key: 'earned', label: 'Earned h', value: (r) => r.earned, num: true, render: (r) => fmtHours(r.earned) },
-    { key: 'built', label: 'Built h', value: (r) => r.built, num: true, render: (r) => fmtHours(r.built) },
+    { key: 'built', label: TERMS.builtHours, value: (r) => r.built, num: true, render: (r) => fmtHours(r.built) },
     {
       key: 'variance',
       label: 'Variance',
@@ -303,7 +303,7 @@ export function TeamHours() {
       hint: 'Where the running total stood at the end of the year. Taken from the last month, never summed: adding running totals together produces a number that means nothing.',
       render: (r) => fmtHours(r.cumEarned),
     },
-    { key: 'cumBuilt', label: 'Cum built', value: (r) => r.cumBuilt, num: true, optional: true, render: (r) => fmtHours(r.cumBuilt) },
+    { key: 'cumBuilt', label: `Cum ${TERMS.builtLower}`, value: (r) => r.cumBuilt, num: true, optional: true, render: (r) => fmtHours(r.cumBuilt) },
     {
       key: 'pct',
       label: '% complete',
@@ -311,6 +311,31 @@ export function TeamHours() {
       hint: 'How complete the whole job was by the end of that fiscal year.',
       num: true,
       render: (r) => <span className="tabular-nums font-semibold">{fmtPct(project.budgetHours ? r.cumEarned / project.budgetHours : 0, 1)}</span>,
+    },
+  ];
+
+  const yearResourceColumns: Column<ResourceYear>[] = [
+    { key: 'code', label: TERMS.subsystem, locked: true, value: (r) => r.label || 'zzz', render: (r) => <span className="mono font-semibold">{r.code || 'Unassigned'}</span> },
+    { key: 'earned', label: 'Earned h', value: (r) => r.earned, num: true, render: (r) => fmtHours(r.earned) },
+    { key: 'share', label: 'Share', value: (r) => r.shareOfEarned, num: true, hint: 'This resource as a share of everything earned in the year.', render: (r) => <span className="tabular-nums text-[var(--text-muted)]">{fmtPct(r.shareOfEarned, 0)}</span> },
+    { key: 'built', label: TERMS.builtHours, value: (r) => r.built, num: true, render: (r) => fmtHours(r.built) },
+    {
+      key: 'variance',
+      label: 'Variance',
+      value: (r) => r.variance,
+      num: true,
+      render: (r) => (
+        <span className={`tone-${varianceTone(r.variance)} font-semibold`}>
+          {r.variance >= 0 ? '+' : ''}{fmtHours(r.variance)}
+        </span>
+      ),
+    },
+    {
+      key: 'factor',
+      label: 'Factor',
+      value: (r) => r.factor ?? null,
+      num: true,
+      render: (r) => (r.factor === null ? <span className="text-[var(--text-subtle)]">—</span> : <span className={r.factor >= 1 ? 'tone-good font-semibold' : 'tone-bad font-semibold'}>{r.factor.toFixed(2)}</span>),
     },
   ];
 
@@ -323,7 +348,7 @@ export function TeamHours() {
       render: (r) => <CellInput value={r.subsystem} list="team-subsystems" placeholder="Unassigned" onCommit={(v) => editRow(r.id, { subsystem: v.trim() })} />,
     },
     { key: 'person', label: 'Person', value: (r) => r.person ?? '', render: (r) => <CellInput value={r.person ?? ''} onCommit={(v) => editRow(r.id, { person: v.trim() || undefined })} /> },
-    { key: 'hours', label: 'Built h', value: (r) => r.hours, num: true, render: (r) => <CellInput type="number" value={String(r.hours)} onCommit={(v) => editRow(r.id, { hours: Number(v) || 0 })} /> },
+    { key: 'hours', label: TERMS.builtHours, value: (r) => r.hours, num: true, render: (r) => <CellInput type="number" value={String(r.hours)} onCommit={(v) => editRow(r.id, { hours: Number(v) || 0 })} /> },
     { key: 'act', label: '', value: () => '', hint: '', render: (r) => <button className="btn-link text-[11px] font-normal" onClick={() => removeRow(r.id)}>remove</button> },
   ];
 
@@ -338,16 +363,31 @@ export function TeamHours() {
   const fyMonth = fyStart(state.data.settings.fiscalYearStartMonth);
   const fiscalYears = useMemo(() => groupByFiscalYear(burn.months, fyMonth), [burn.months, fyMonth]);
 
-  let shownMonths = hideQuiet ? burn.months.filter((m) => m.earned !== 0 || m.built !== 0) : burn.months;
-  if (fy) shownMonths = shownMonths.filter((m) => String(fiscalYearOf(m.month, fyMonth)) === fy);
-  const quiet = burn.months.length - (hideQuiet ? burn.months.filter((m) => m.earned !== 0 || m.built !== 0).length : burn.months.length);
+  /*
+   * How many months are quiet is a fact about the data, NOT about the checkbox.
+   *
+   * It used to be derived as "rows before minus rows after", which is zero whenever
+   * the checkbox is off — and the control was rendered only when `quiet > 0 ||
+   * hideQuiet`. So unticking it made it compute zero, fail its own condition, and
+   * remove itself from the page, leaving no way to turn it back on. Counting the
+   * quiet months directly keeps the control on screen in both states.
+   */
+  const quiet = burn.months.filter((m) => m.earned === 0 && m.built === 0).length;
+  const inYear = (m: BurnRow) => !fy || String(fiscalYearOf(m.month, fyMonth)) === fy;
+  const yearMonths = burn.months.filter(inYear);
+  const shownMonths = hideQuiet ? yearMonths.filter((m) => m.earned !== 0 || m.built !== 0) : yearMonths;
+  /** Quiet months inside the chosen year, which is what the table actually hid. */
+  const hiddenHere = yearMonths.length - shownMonths.length;
+  const selectedYear = fy ? fiscalYears.find((y) => String(y.fy) === fy) : null;
+  /** Per-resource figures for the chosen year. Empty when no year is chosen. */
+  const yearResources = useMemo(() => (selectedYear ? resourcesInYear(selectedYear.months) : []), [selectedYear]);
   const keyed = state.data.teamActuals;
 
   return (
     <Page
       eyebrow="Progress"
-      title="Earned vs Built"
-      subtitle="What the completed work was worth, against what it cost. Earned comes from the budget and the percent complete; built comes from your timesheets. The gap between them is the whole question."
+      title="Earned vs Actual"
+      subtitle={`What the completed work was worth, against what it cost. Earned comes from the budget and the percent complete; ${TERMS.builtLower} hours come from your timesheets. The gap between them is the whole question.`}
       stats={heroStats}
       toolbar={
         <>
@@ -361,7 +401,7 @@ export function TeamHours() {
 
       {burn.totalBuilt === 0 && (
         <Notice tone="info">
-          No built hours keyed yet, so there is nothing to compare the budget against. Paste your team’s monthly hours below — months across the top or one row per month,
+          No {TERMS.builtLower} hours keyed yet, so there is nothing to compare the budget against. Paste your team’s monthly hours below — months across the top or one row per month,
           either reads — and this screen fills in.
         </Notice>
       )}
@@ -373,7 +413,7 @@ export function TeamHours() {
       )}
       {burn.builtWithNoBudget.length > 0 && (
         <Notice tone="warn">
-          Hours were built against <b>{burn.builtWithNoBudget.map((c) => c || 'Unassigned').join(', ')}</b>, which hold no budget. Nothing can ever be earned there, so
+          Hours were spent against <b>{burn.builtWithNoBudget.map((c) => c || 'Unassigned').join(', ')}</b>, which hold no budget. Nothing can ever be earned there, so
           those hours are pure loss unless the crews in the <a href={href('library')}>Activity Library</a> are missing a group.
         </Notice>
       )}
@@ -387,8 +427,8 @@ export function TeamHours() {
               <div className={`text-[26px] font-semibold ${project.factor >= 1 ? 'tone-good' : 'tone-bad'}`}>{project.factor.toFixed(2)}</div>
               <div className="text-[12px] text-[var(--text-muted)]">
                 {project.factor >= 1
-                  ? `Every hour built earns ${project.factor.toFixed(2)}. The team is ahead of the budget.`
-                  : `Every hour built earns only ${project.factor.toFixed(2)}. ${fmtPct(1 - project.factor, 0)} of every hour is going in unrecovered.`}
+                  ? `Every hour spent earns ${project.factor.toFixed(2)}. The team is ahead of the budget.`
+                  : `Every hour spent earns only ${project.factor.toFixed(2)}. ${fmtPct(1 - project.factor, 0)} of every hour is going in unrecovered.`}
               </div>
             </div>
             <div>
@@ -434,12 +474,12 @@ export function TeamHours() {
                       <div style={{ background: '#fff', border: `1px solid ${GRID}`, borderRadius: 8, padding: '8px 11px', fontSize: 12, boxShadow: '0 6px 16px -8px rgba(15,17,21,0.2)' }}>
                         <div style={{ fontWeight: 600 }}>{String(label)}</div>
                         <div>Earned {fmtHours(d.earned)} h</div>
-                        <div>Built {fmtHours(d.built)} h</div>
+                        <div>{TERMS.built} {fmtHours(d.built)} h</div>
                         <div style={{ color: v >= 0 ? '#0d7a4f' : '#e60012', fontWeight: 600 }}>
                           {v >= 0 ? '+' : ''}{fmtHours(v)} h this month
                         </div>
                         <div style={{ color: AXIS, marginTop: 3 }}>
-                          Cumulative {fmtHours(d.cumEarned)} earned / {fmtHours(d.cumBuilt)} built
+                          Cumulative {fmtHours(d.cumEarned)} earned / {fmtHours(d.cumBuilt)} {TERMS.builtLower}
                         </div>
                       </div>
                     );
@@ -447,9 +487,9 @@ export function TeamHours() {
                 />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Bar dataKey="earned" name="Earned" fill={EARNED} radius={[3, 3, 0, 0]} legendType="square" />
-                <Bar dataKey="built" name="Built" fill={BUILT} radius={[3, 3, 0, 0]} legendType="square" />
+                <Bar dataKey="built" name={TERMS.built} fill={BUILT} radius={[3, 3, 0, 0]} legendType="square" />
                 <Line dataKey="cumEarned" name="Cumulative earned" stroke={EARNED} strokeWidth={2} dot={false} legendType="plainline" />
-                <Line dataKey="cumBuilt" name="Cumulative built" stroke={BUILT} strokeWidth={2} strokeDasharray="5 3" dot={false} legendType="plainline" />
+                <Line dataKey="cumBuilt" name={`Cumulative ${TERMS.builtLower}`} stroke={BUILT} strokeWidth={2} strokeDasharray="5 3" dot={false} legendType="plainline" />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -487,11 +527,16 @@ export function TeamHours() {
                   ))}
                 </select>
               )}
-              {(quiet > 0 || hideQuiet) && (
+              {quiet > 0 && (
                 <label className="flex cursor-pointer items-center gap-1.5">
                   <input type="checkbox" checked={hideQuiet} onChange={(e) => setHideQuiet(e.target.checked)} />
-                  Hide the {quiet > 0 ? quiet : ''} months with nothing earned and nothing built
+                  Hide the {hiddenHere || quiet} quiet {(hiddenHere || quiet) === 1 ? 'month' : 'months'}
                 </label>
+              )}
+              {selectedYear && (
+                <button className="btn btn-mini" onClick={() => setFy('')} title="Show every fiscal year again">
+                  Showing {selectedYear.label} ✕
+                </button>
               )}
             </span>
           }
@@ -508,7 +553,7 @@ export function TeamHours() {
             columns={[
               { key: 'code', label: TERMS.subsystem, value: (c) => c.label, render: (c) => <span className="mono">{c.code || 'Unassigned'}</span> },
               { key: 'earned', label: 'Earned h', value: (c) => c.earned, num: true, render: (c) => fmtHours(c.earned) },
-              { key: 'built', label: 'Built h', value: (c) => c.built, num: true, render: (c) => fmtHours(c.built) },
+              { key: 'built', label: TERMS.builtHours, value: (c) => c.built, num: true, render: (c) => fmtHours(c.built) },
               { key: 'variance', label: 'Variance', value: (c) => c.variance, num: true, render: (c) => <span className={`tone-${varianceTone(c.variance)} font-semibold`}>{c.variance >= 0 ? '+' : ''}{fmtHours(c.variance)}</span> },
               { key: 'factor', label: 'Factor', value: (c) => c.factor ?? null, num: true, render: (c) => (c.factor === null ? <span className="text-[var(--text-subtle)]">—</span> : c.factor.toFixed(2)) },
             ]}
@@ -519,14 +564,47 @@ export function TeamHours() {
         </Panel>
       )}
 
+      {selectedYear && (
+        <Panel
+          title={`${selectedYear.label} by ${TERMS.subsystemLower}`}
+          meta={
+            <span className="flex flex-wrap items-center gap-3">
+              <span>{selectedYear.span}</span>
+              <button className="btn btn-mini" onClick={() => setFy('')}>Show every year ✕</button>
+            </span>
+          }
+          className="mb-3"
+        >
+          {yearResources.length === 0 ? (
+            <Notice tone="info">Nothing was earned and nothing was spent by any {TERMS.subsystemLower} in {selectedYear.label}.</Notice>
+          ) : (
+            <>
+              <SortableTable
+                tableId="burn-year-resource"
+                rows={yearResources}
+                columns={yearResourceColumns}
+                rowKey={(r) => r.code || '(unassigned)'}
+                defaultSort={{ key: 'earned', dir: 'desc' }}
+                maxHeight="320px"
+              />
+              <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">
+                What each {TERMS.subsystemLower} earned and spent inside {selectedYear.label}. There is deliberately no forecast here: to-complete and at-completion divide
+                the whole remaining budget by a rate, and a remaining budget is not something one fiscal year has — quoting one per year would be inventing a number. The
+                whole-project forecast is below.
+              </p>
+            </>
+          )}
+        </Panel>
+      )}
+
       {burn.totalBuilt > 0 && (
-        <Panel title={`Forecast by ${TERMS.subsystemLower}`} meta="Each group at its own rate, so the one in trouble is not hidden by the ones that are fine." className="mb-3">
+        <Panel title={`Forecast by ${TERMS.subsystemLower}`} meta="Each group at its own rate, so the one in trouble is not hidden by the ones that are fine. Whole project, every year." className="mb-3">
           <SortableTable tableId="burn-forecast" rows={burn.bySubsystem} columns={forecastColumns} rowKey={(r) => r.code || '(unassigned)'} defaultSort={{ key: 'budget', dir: 'desc' }} maxHeight="320px" />
         </Panel>
       )}
 
       {/* --- getting the data in --- */}
-      <Panel title="Add the hours your team built" className="mb-3">
+      <Panel title="Add the hours your team actually spent" className="mb-3">
         {pending ? (
           <div className="space-y-2">
             <Notice tone="info">{pending.note} {pending.rows.length} rows, {pending.months.length} months{pending.skipped ? `, ${pending.skipped} cells skipped` : ''}.</Notice>
@@ -545,7 +623,7 @@ export function TeamHours() {
             </div>
             <div className="table-wrap" style={{ maxHeight: 200 }}>
               <table className="tbl">
-                <thead><tr><th>Month</th><th>{labelsAre === 'subsystem' ? TERMS.subsystem : 'Person'}</th><th className="num">Built h</th></tr></thead>
+                <thead><tr><th>Month</th><th>{labelsAre === 'subsystem' ? TERMS.subsystem : 'Person'}</th><th className="num">{TERMS.builtHours}</th></tr></thead>
                 <tbody>
                   {pending.rows.slice(0, 40).map((r, i) => (
                     <tr key={i}><td className="mono">{r.month}</td><td>{r.label || <span className="text-[var(--text-subtle)]">(blank)</span>}</td><td className="num">{fmtHours(r.hours)}</td></tr>

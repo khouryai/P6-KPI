@@ -56,6 +56,52 @@ export function fiscalYearSpan(fy: number, startMonth: number): string {
   return `${part(from)} – ${part(to)}`;
 }
 
+/** One resource's year: what it earned, what it actually spent, and the gap. */
+export type ResourceYear = {
+  code: string;
+  label: string;
+  earned: number;
+  built: number;
+  variance: number;
+  factor: number | null;
+  /** Share of everything earned in the year, so the big contributors stand out. */
+  shareOfEarned: number;
+};
+
+/**
+ * Roll the per-resource cells of a set of months into one row per resource.
+ *
+ * Deliberately NOT a forecast. To-complete and at-completion divide the whole
+ * remaining budget by a rate, and a remaining budget is not a thing a single
+ * fiscal year has — quoting one per year would be inventing a number. What a year
+ * does have is what each resource earned in it, what it spent, and the ratio.
+ */
+export function resourcesInYear(months: BurnRow[]): ResourceYear[] {
+  const acc = new Map<string, { label: string; earned: number; built: number }>();
+  for (const m of months) {
+    for (const c of m.bySubsystem) {
+      const prev = acc.get(c.code) ?? { label: c.label, earned: 0, built: 0 };
+      prev.earned += c.earned;
+      prev.built += c.built;
+      if (c.label) prev.label = c.label;
+      acc.set(c.code, prev);
+    }
+  }
+  const totalEarned = [...acc.values()].reduce((s, v) => s + v.earned, 0);
+  return [...acc.entries()]
+    .map(([code, v]) => ({
+      code,
+      label: v.label,
+      earned: v.earned,
+      built: v.built,
+      variance: v.earned - v.built,
+      factor: v.built > 0 ? v.earned / v.built : null,
+      shareOfEarned: totalEarned ? v.earned / totalEarned : 0,
+    }))
+    .filter((r) => Math.abs(r.earned) > 1e-9 || Math.abs(r.built) > 1e-9)
+    .sort((a, b) => b.earned - a.earned || b.built - a.built);
+}
+
 export type FiscalYear = {
   fy: number;
   label: string;

@@ -538,6 +538,12 @@ export type StaleOverride = { activityId: string; hasHours: boolean; renamed: bo
 export type Model = {
   rows: BudgetRow[];
   /**
+   * Location codes the file carries that no activity uses. Kept out of `locations`
+   * and out of every count, and listed only so the Locations screen can say they
+   * are there rather than appearing to have lost them.
+   */
+  unusedLocations: LocationStat[];
+  /**
    * The activities the user hid, priced as if they were still in, so the hidden list
    * can say what bringing one back would add. Nothing else reads these.
    */
