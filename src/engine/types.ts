@@ -13,6 +13,12 @@ export type Settings = {
   defaultComplexity: number; // 1.00
   dataDate: string; // ISO date, end of the earned curve
   statusDate: string; // ISO date, used when taking a snapshot
+  /**
+   * The calendar month a fiscal year starts in, 1-12. 7 (July) is the usual
+   * transit-agency year; 1 makes a fiscal year a calendar year. Optional, because
+   * every store written before fiscal years existed has no such key.
+   */
+  fiscalYearStartMonth?: number;
 };
 
 /**
@@ -477,6 +483,12 @@ export type Summary = {
   renamed: number;
   /** Activities the user forced into the budget against the library. */
   forcedIn: number;
+  /**
+   * Forced in, in the budget, and still carrying no hours. "Included" with a zero
+   * allocation is the one outcome of forcing something in that looks like nothing
+   * happened, so it is counted rather than left for somebody to notice.
+   */
+  forcedInUnpriced: number;
   /** Activities the user forced out of the budget while leaving them listed. */
   forcedOut: number;
   /** Overrides keyed against an Activity ID that is not in the current schedule. */
@@ -570,4 +582,5 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultComplexity: 1.0,
   dataDate: '',
   statusDate: '',
+  fiscalYearStartMonth: 7,
 };

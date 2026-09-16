@@ -1,7 +1,7 @@
 import { forwardRef } from 'react';
 import { ComposedChart, Line, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import type { CurvePoint } from '../../engine/types';
-import { fmtHours, fmtDate } from '../format';
+import { fmtHours, fmtPct, fmtDate } from '../format';
 
 /**
  * Chart colors stay literal hex rather than var(--…): SVG attributes rendered by
@@ -18,7 +18,7 @@ const AXIS = '#6e7179';
 
 type TipItem = { name?: string; value?: unknown; color?: string; dataKey?: string };
 
-function CurveTooltip({ active, payload }: { active?: boolean; payload?: TipItem[] }) {
+function CurveTooltip({ active, payload, percent }: { active?: boolean; payload?: TipItem[]; percent?: boolean }) {
   if (!active || !payload?.length) return null;
   const point = (payload[0] as TipItem & { payload?: { periodEnd?: string } }).payload;
   const items = payload.filter((p) => p.dataKey !== 'label' && typeof p.value === 'number');
@@ -50,18 +50,41 @@ function CurveTooltip({ active, payload }: { active?: boolean; payload?: TipItem
         <div key={String(p.dataKey)} style={{ display: 'flex', alignItems: 'baseline', gap: 8, lineHeight: 1.6 }}>
           <span style={{ width: 7, height: 7, borderRadius: 999, background: p.color, display: 'inline-block' }} />
           <span style={{ color: '#6e7179' }}>{p.name}</span>
-          <span style={{ marginLeft: 'auto', fontWeight: 700, color: INK, fontVariantNumeric: 'tabular-nums' }}>{fmtHours(p.value as number, 1)} h</span>
+          <span style={{ marginLeft: 'auto', fontWeight: 700, color: INK, fontVariantNumeric: 'tabular-nums' }}>
+            {percent ? fmtPct(p.value as number, 1) : `${fmtHours(p.value as number, 1)} h`}
+          </span>
         </div>
       ))}
     </div>
   );
 }
 
-export const CurveChart = forwardRef<HTMLDivElement, { curve: CurvePoint[]; dataDate: string | null; height?: number }>(function CurveChart(
-  { curve, dataDate, height = 380 },
-  ref,
-) {
-  const data = curve.map((c) => ({ ...c, label: c.periodEnd.slice(0, 7) }));
+export const CurveChart = forwardRef<
+  HTMLDivElement,
+  {
+    curve: CurvePoint[];
+    dataDate: string | null;
+    height?: number;
+    /**
+     * Draw the curves as percent complete rather than man hours. Every series is
+     * divided by the SAME total, so the shapes are identical and only the axis
+     * changes — a percent curve that disagreed in shape with the hours curve would
+     * mean one of them was lying.
+     */
+    percent?: boolean;
+    /** The divisor for percent mode: the whole budget these curves are drawn from. */
+    total?: number;
+  }
+>(function CurveChart({ curve, dataDate, height = 380, percent = false, total = 0 }, ref) {
+  const scale = percent && total > 0 ? (v: number | null) => (v === null ? null : v / total) : (v: number | null) => v;
+  const data = curve.map((c) => ({
+    ...c,
+    planned: scale(c.planned),
+    forecast: scale(c.forecast),
+    earned: scale(c.earned),
+    snapshot: scale(c.snapshot),
+    label: c.periodEnd.slice(0, 7),
+  }));
   const axisTick = { fontSize: 10.5, fill: AXIS, fontFamily: "'IBM Plex Mono', ui-monospace, Menlo, monospace" };
   return (
     <div ref={ref} className="w-full" style={{ height }}>
@@ -74,10 +97,11 @@ export const CurveChart = forwardRef<HTMLDivElement, { curve: CurvePoint[]; data
             tick={axisTick}
             tickLine={false}
             axisLine={false}
-            tickFormatter={(v: number) => fmtHours(v)}
+            tickFormatter={(v: number) => (percent ? fmtPct(v, 0) : fmtHours(v))}
             width={54}
+            domain={percent ? [0, (max: number) => Math.max(1, max)] : undefined}
           />
-          <Tooltip content={<CurveTooltip />} cursor={{ stroke: '#cfd5df', strokeDasharray: '3 3' }} />
+          <Tooltip content={<CurveTooltip percent={percent} />} cursor={{ stroke: '#cfd5df', strokeDasharray: '3 3' }} />
           <Legend wrapperStyle={{ fontSize: 11.5, paddingTop: 8 }} />
           {dataDate && (
             <ReferenceLine

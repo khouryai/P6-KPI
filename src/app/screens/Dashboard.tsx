@@ -6,6 +6,7 @@ import { fmtHours, fmtPct, fmtDate } from '../format';
 import type { GroupStat } from '../../engine/types';
 import { buildCurve, rowTotals } from '../../engine/compute';
 import { href } from '../router';
+import { useUnit } from '../units';
 import { svgToPng, curveCsv, downloadBytes, stamp } from '../export';
 
 /** Filenames have to survive a Windows folder, so anything but letters and digits goes. */
@@ -18,6 +19,7 @@ export function Dashboard() {
   const [busy, setBusy] = useState(false);
   const dataDate = state.data.settings.dataDate || null;
 
+  const { percent, setUnit } = useUnit();
   const phaseGroups: GroupStat[] = model.groups.phase.filter((g) => g.inBudget > 0);
 
   /**
@@ -43,8 +45,10 @@ export function Dashboard() {
     setBusy(true);
     try {
       const bytes = await svgToPng(chart, {
-        title: selectedLabel ? `Planned, forecast and earned man hours — ${selectedLabel}` : 'Planned, forecast and earned man hours',
-        subtitle: `${fmtHours(totals.budgetHours)} h budget, ${fmtHours(totals.earnedHours)} h earned (${fmtPct(totals.pctComplete, 1)}).${dataDate ? ` Data date ${fmtDate(dataDate)}.` : ''}`,
+        title: `${percent ? 'Planned, forecast and earned progress' : 'Planned, forecast and earned man hours'}${selectedLabel ? ` — ${selectedLabel}` : ''}`,
+        subtitle: percent
+          ? `${fmtPct(totals.pctComplete, 1)} complete across ${totals.inBudget} activities.${dataDate ? ` Data date ${fmtDate(dataDate)}.` : ''}`
+          : `${fmtHours(totals.budgetHours)} h budget, ${fmtHours(totals.earnedHours)} h earned (${fmtPct(totals.pctComplete, 1)}).${dataDate ? ` Data date ${fmtDate(dataDate)}.` : ''}`,
       });
       const name = `s-curve-${selected === null ? 'project' : slug(selectedLabel!)}-${stamp()}.png`;
       if (state.adapterKind === 'filesystem') actions.notify('ok', `Chart written to ${await actions.writeExport(name, bytes)}`);
@@ -140,13 +144,20 @@ export function Dashboard() {
   ];
   const outstanding = steps.filter((x) => !x.done);
 
-  const heroStats: HeroStat[] = [
-    { label: 'Activities', value: totals.inBudget, tone: 'muted' },
-    { label: 'Locations', value: s.locations, tone: 'muted' },
-    { label: 'Needs attention', value: attention, tone: attention > 0 ? 'amber' : 'good' },
-  ];
+  const heroStats: HeroStat[] = percent
+    ? [
+        { label: 'Complete', value: fmtPct(totals.pctComplete, 1), tone: 'blue' },
+        { label: 'Activities', value: totals.inBudget, tone: 'muted' },
+        { label: 'Locations', value: s.locations, tone: 'muted' },
+      ]
+    : [
+        { label: 'Activities', value: totals.inBudget, tone: 'muted' },
+        { label: 'Locations', value: s.locations, tone: 'muted' },
+        { label: 'Needs attention', value: attention, tone: attention > 0 ? 'amber' : 'good' },
+      ];
 
   const summaryRows: [string, React.ReactNode][] = [
+    ['Percent complete', fmtPct(s.pctComplete, 1)],
     ['Extract rows', s.extractRows],
     ['WBS summary rows (auto-excluded)', s.wbsRows],
     ['Real activities', s.activities],
@@ -188,9 +199,17 @@ export function Dashboard() {
         </>
       }
       toolbar={
-        phaseGroups.length > 1 || selected !== null ? (
+        <>
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Measure in</span>
+          <span className="seg">
+            <button className={`seg-btn${percent ? '' : ' is-on'}`} onClick={() => setUnit('hours')}>Man hours</button>
+            <button className={`seg-btn${percent ? ' is-on' : ''}`} onClick={() => setUnit('percent')} title="Hide every hours figure and report progress only. For sharing with the client.">
+              % complete
+            </button>
+          </span>
+          {(phaseGroups.length > 1 || selected !== null) && (
           <>
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Show</span>
+            <span className="ml-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Show</span>
             <button className={`btn btn-mini${selected === null ? ' btn-primary' : ''}`} onClick={() => setPhase(null)}>
               Whole project
             </button>
@@ -198,7 +217,7 @@ export function Dashboard() {
               <button
                 key={g.key}
                 className={`btn btn-mini${selected === g.key ? ' btn-primary' : ''}`}
-                title={`${fmtHours(g.budgetHours)} h budget across ${g.inBudget} activities`}
+                title={percent ? `${fmtPct(g.pctComplete, 1)} complete across ${g.inBudget} activities` : `${fmtHours(g.budgetHours)} h budget across ${g.inBudget} activities`}
                 onClick={() => setPhase(g.key)}
               >
                 {g.label}
@@ -210,7 +229,8 @@ export function Dashboard() {
               </span>
             )}
           </>
-        ) : undefined
+          )}
+        </>
       }
     >
       {outstanding.length > 0 && (
@@ -234,31 +254,71 @@ export function Dashboard() {
         </div>
       )}
 
+      {/*
+        * In percent mode not one man-hour figure survives on this screen. Leaving
+        * "93,240 h" in a corner of a client pack invites the conversation about
+        * rates that the mode exists to avoid, so the cards change what they measure
+        * rather than just relabelling: progress, and the activity counts behind it.
+        */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label={selected === null ? 'Total budget' : `${selectedLabel} budget`} value={`${fmtHours(totals.budgetHours)} h`} sub={`${totals.inBudget} activities in budget`} primary />
-        <Stat
-          label="Earned"
-          value={`${fmtHours(totals.earnedHours)} h`}
-          tone="good"
-          sub={`${fmtPct(totals.pctComplete, 1)} of the budget · ${totals.pctFromTests} from tests, ${totals.pctFromP6} from P6 duration`}
-        />
-        <Stat
-          label="Remaining"
-          value={`${fmtHours(totals.remainingHours)} h`}
-          sub={`${fmtPct(1 - totals.pctComplete, 1)} of the budget still to earn · ${totals.notStarted} activities not started`}
-        />
-        <Stat label="Percent complete" value={fmtPct(totals.pctComplete)} sub={`${totals.inProgress} in progress, ${totals.finished} finished`} />
+        {percent ? (
+          <>
+            <Stat
+              label={selected === null ? 'Percent complete' : `${selectedLabel} complete`}
+              value={fmtPct(totals.pctComplete)}
+              sub={`${totals.inBudget} activities in scope`}
+              primary
+            />
+            <Stat
+              label="Remaining"
+              value={fmtPct(1 - totals.pctComplete)}
+              tone={1 - totals.pctComplete > 0 ? undefined : 'good'}
+              sub={`${totals.notStarted} activities not started`}
+            />
+            <Stat
+              label="Activities finished"
+              value={`${totals.finished}/${totals.inBudget}`}
+              tone="good"
+              sub={totals.inBudget ? `${fmtPct(totals.finished / totals.inBudget, 0)} of the activities` : undefined}
+            />
+            <Stat label="In progress" value={totals.inProgress} sub={`${totals.pctFromTests} measured by test counts`} />
+          </>
+        ) : (
+          <>
+            <Stat label={selected === null ? 'Total budget' : `${selectedLabel} budget`} value={`${fmtHours(totals.budgetHours)} h`} sub={`${totals.inBudget} activities in budget`} primary />
+            <Stat
+              label="Earned"
+              value={`${fmtHours(totals.earnedHours)} h`}
+              tone="good"
+              sub={`${fmtPct(totals.pctComplete, 1)} of the budget · ${totals.pctFromTests} from tests, ${totals.pctFromP6} from P6 duration`}
+            />
+            <Stat
+              label="Remaining"
+              value={`${fmtHours(totals.remainingHours)} h`}
+              sub={`${fmtPct(1 - totals.pctComplete, 1)} of the budget still to earn · ${totals.notStarted} activities not started`}
+            />
+            <Stat label="Percent complete" value={fmtPct(totals.pctComplete)} sub={`${totals.inProgress} in progress, ${totals.finished} finished`} />
+          </>
+        )}
       </div>
 
       <div className="mt-4">
         <Panel
-          title={selected === null ? 'Planned, forecast and earned man hours' : `Planned, forecast and earned man hours — ${selectedLabel}`}
+          title={
+            percent
+              ? selected === null
+                ? 'Planned, forecast and earned progress'
+                : `Planned, forecast and earned progress — ${selectedLabel}`
+              : selected === null
+                ? 'Planned, forecast and earned man hours'
+                : `Planned, forecast and earned man hours — ${selectedLabel}`
+          }
           meta={`Calendar-linear spread, ignores the P6 work calendar. Earned stops at the data date. Diamonds are snapshots.${
             selected === null ? '' : ` Percentages are of ${selectedLabel}'s own budget.`
           }`}
         >
           {curve.length ? (
-            <CurveChart ref={chartRef} curve={curve} dataDate={dataDate} />
+            <CurveChart ref={chartRef} curve={curve} dataDate={dataDate} percent={percent} total={totals.budgetHours} />
           ) : (
             <div className="py-14 text-center text-[var(--text-subtle)]">No dated activities to plot.</div>
           )}

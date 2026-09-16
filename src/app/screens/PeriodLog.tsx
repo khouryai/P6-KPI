@@ -6,6 +6,7 @@ import { periodLog, addDays, OUTCOMES, type PeriodActivity, type PeriodOutcome }
 import { fmtHours, fmtPct, fmtDate, todayISO } from '../format';
 import { isValidISO } from '../../engine/dates';
 import { href } from '../router';
+import { useUnit } from '../units';
 
 /*
  * Planned against achieved, in the two colours the S-curve already uses for the
@@ -49,6 +50,7 @@ function defaultEnd(dataDate: string): string {
 
 export function PeriodLog() {
   const { state, model, actions } = useApp();
+  const { percent, setUnit } = useUnit();
   const [end, setEnd] = useState(() => defaultEnd(state.data.settings.dataDate));
   const [span, setSpan] = useState(14);
   const [outcome, setOutcome] = useState<PeriodOutcome | ''>('');
@@ -61,17 +63,26 @@ export function PeriodLog() {
     [log.activities, outcome],
   );
 
+  /**
+   * Hours, or the same hours as a share of the whole job. Every figure on the
+   * screen goes through this, so percent mode cannot leave one stray hours value
+   * behind — which on a client pack is the only kind of mistake that matters here.
+   */
+  const total = log.projectBudgetHours;
+  const val = (hours: number, digits = 0) => (percent ? fmtPct(total ? hours / total : 0, 2) : `${fmtHours(hours, digits)} h`);
+  const scale = (hours: number) => (percent && total ? (hours / total) * 100 : hours);
+
   const chart = log.slices.map((s) => ({
     label: s.label,
     range: `${fmtDate(s.from)} – ${fmtDate(s.to)}`,
-    planned: Math.round(s.planned),
-    achieved: Math.round(s.earned),
+    planned: percent ? Math.round(scale(s.planned) * 100) / 100 : Math.round(s.planned),
+    achieved: percent ? Math.round(scale(s.earned) * 100) / 100 : Math.round(s.earned),
   }));
 
   const variance = log.earnedHours - log.plannedHours;
   const heroStats: HeroStat[] = [
-    { label: 'Planned', value: `${fmtHours(log.plannedHours)} h`, tone: 'muted' },
-    { label: 'Achieved', value: `${fmtHours(log.earnedHours)} h`, tone: 'good' },
+    { label: 'Planned', value: val(log.plannedHours), tone: 'muted' },
+    { label: 'Achieved', value: val(log.earnedHours), tone: 'good' },
     {
       label: 'Of plan',
       value: log.achievement === null ? '—' : fmtPct(log.achievement, 0),
@@ -88,9 +99,9 @@ export function PeriodLog() {
     const lines = [
       `T&C two-week log: ${fmtDate(log.from)} to ${fmtDate(log.to)} (${log.days} days)`,
       '',
-      `Planned    ${fmtHours(log.plannedHours)} h`,
-      `Achieved   ${fmtHours(log.earnedHours)} h  (${log.achievement === null ? 'nothing was planned' : `${fmtPct(log.achievement, 0)} of plan`})`,
-      `Variance   ${variance >= 0 ? '+' : ''}${fmtHours(variance)} h`,
+      `Planned    ${val(log.plannedHours)}`,
+      `Achieved   ${val(log.earnedHours)}  (${log.achievement === null ? 'nothing was planned' : `${fmtPct(log.achievement, 0)} of plan`})`,
+      `Variance   ${variance >= 0 ? '+' : ''}${val(variance)}`,
       `Project    ${fmtPct(log.pctAtStart, 1)} -> ${fmtPct(log.pctAtEnd, 1)} complete`,
       `Due to finish in the period: ${log.dueToFinish}; actually finished: ${log.finishedOnTime}`,
       '',
@@ -100,7 +111,7 @@ export function PeriodLog() {
       if (!list.length) continue;
       lines.push(`${o} (${list.length})`);
       for (const a of list) {
-        lines.push(`  ${a.activityId}  ${a.activityName}  ${fmtPct(a.pctComplete, 0)}  ${fmtHours(a.earnedHours, 1)} h earned`);
+        lines.push(`  ${a.activityId}  ${a.activityName}  ${fmtPct(a.pctComplete, 0)} complete${percent ? '' : `  ${fmtHours(a.earnedHours, 1)} h earned`}`);
       }
       lines.push('');
     }
@@ -135,19 +146,19 @@ export function PeriodLog() {
     { key: 'loc', label: 'Loc', value: (a) => a.location },
     {
       key: 'planned',
-      label: 'Planned h',
+      label: percent ? 'Planned' : 'Planned h',
       value: (a) => a.plannedHours,
       num: true,
-      hint: 'Budget hours the baseline expected this activity to accrue inside the period.',
-      render: (a) => <span className="text-[var(--text-muted)]">{fmtHours(a.plannedHours, 1)}</span>,
+      hint: 'What the baseline expected this activity to get through inside the period.',
+      render: (a) => <span className="text-[var(--text-muted)]">{val(a.plannedHours, 1)}</span>,
     },
     {
       key: 'earned',
-      label: 'Achieved h',
+      label: percent ? 'Achieved' : 'Achieved h',
       value: (a) => a.earnedHours,
       num: true,
-      hint: 'Budget hours actually earned inside the period.',
-      render: (a) => <b>{fmtHours(a.earnedHours, 1)}</b>,
+      hint: 'What this activity actually got through inside the period.',
+      render: (a) => <b>{val(a.earnedHours, 1)}</b>,
     },
     {
       key: 'pct',
@@ -158,13 +169,13 @@ export function PeriodLog() {
       render: (a) => (
         <div className="flex items-center justify-end gap-2">
           <span className="w-9 text-right tabular-nums font-semibold">{fmtPct(a.pctComplete, 0)}</span>
-          <div className="bar" style={{ width: 60 }} title={`${fmtPct(a.pctComplete, 1)} of ${fmtHours(a.budgetHours)} h`}>
+          <div className="bar" style={{ width: 60 }} title={percent ? fmtPct(a.pctComplete, 1) : `${fmtPct(a.pctComplete, 1)} of ${fmtHours(a.budgetHours)} h`}>
             <span style={{ width: `${Math.min(100, Math.round(a.pctComplete * 100))}%` }} />
           </div>
         </div>
       ),
     },
-    { key: 'budget', label: 'Budget h', value: (a) => a.budgetHours, num: true, optional: true, render: (a) => fmtHours(a.budgetHours) },
+    { key: 'budget', label: 'Budget h', value: (a) => a.budgetHours, num: true, optional: true, render: (a) => (percent ? '' : fmtHours(a.budgetHours)) },
     { key: 'bls', label: 'BL start', value: (a) => a.baselineStart, optional: true, render: (a) => fmtDate(a.baselineStart) },
     { key: 'blf', label: 'BL finish', value: (a) => a.baselineFinish, render: (a) => fmtDate(a.baselineFinish) },
     { key: 'as', label: 'Actual start', value: (a) => a.actualStart, render: (a) => fmtDate(a.actualStart) },
@@ -201,7 +212,11 @@ export function PeriodLog() {
     <Page
       eyebrow="Progress"
       title="Two-Week Log"
-      subtitle={`${fmtDate(log.from)} to ${fmtDate(log.to)}. What the baseline said would happen in this window, what actually happened, and which activities are behind it. Hours are measured exactly as the S-curve measures them, so every window adds back to the same total.`}
+      subtitle={
+        percent
+          ? `${fmtDate(log.from)} to ${fmtDate(log.to)}. What the baseline said would happen in this window and what actually happened, as a share of the whole job. No hours anywhere on this screen.`
+          : `${fmtDate(log.from)} to ${fmtDate(log.to)}. What the baseline said would happen in this window, what actually happened, and which activities are behind it. Hours are measured exactly as the S-curve measures them, so every window adds back to the same total.`
+      }
       stats={heroStats}
       actions={
         <>
@@ -211,6 +226,12 @@ export function PeriodLog() {
       }
       toolbar={
         <>
+          <span className="seg">
+            <button className={`seg-btn${percent ? '' : ' is-on'}`} onClick={() => setUnit('hours')}>Man hours</button>
+            <button className={`seg-btn${percent ? ' is-on' : ''}`} onClick={() => setUnit('percent')} title="Report progress only, with no hours anywhere. For sharing with the client.">
+              % complete
+            </button>
+          </span>
           <button className="btn btn-mini" onClick={() => step(-1)} title="The period before this one">← Previous</button>
           <label className="flex items-center gap-1.5 text-[12px]">
             <span className="text-[var(--text-muted)]">Ending</span>
@@ -263,20 +284,20 @@ export function PeriodLog() {
                 <div className="plan-bar-track">
                   <span style={{ width: '100%', background: PLANNED }} />
                 </div>
-                <span className="plan-bar-val">{fmtHours(log.plannedHours)} h</span>
+                <span className="plan-bar-val">{val(log.plannedHours)}</span>
               </div>
               <div className="plan-bar-row">
                 <span className="plan-bar-key"><i style={{ background: ACHIEVED }} /> Achieved</span>
                 <div className="plan-bar-track">
                   <span style={{ width: `${achievedPctWidth}%`, background: ACHIEVED }} />
                 </div>
-                <span className="plan-bar-val">{fmtHours(log.earnedHours)} h</span>
+                <span className="plan-bar-val">{val(log.earnedHours)}</span>
               </div>
             </div>
             <div className="mt-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[12px]">
               <span>
                 <b className={`text-[20px] ${variance >= 0 ? 'tone-good' : 'tone-bad'}`}>
-                  {variance >= 0 ? '+' : ''}{fmtHours(variance)} h
+                  {variance >= 0 ? '+' : ''}{val(variance)}
                 </b>
                 <span className="ml-1.5 text-[var(--text-muted)]">against plan</span>
               </span>
@@ -296,7 +317,13 @@ export function PeriodLog() {
               <BarChart data={chart} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap="28%" barGap={2}>
                 <CartesianGrid stroke={GRID} vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={{ stroke: GRID }} />
-                <YAxis tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width={44} />
+                <YAxis
+                  tick={{ fontSize: 11, fill: AXIS }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={percent ? 52 : 44}
+                  tickFormatter={(v: number) => (percent ? `${v}%` : fmtHours(v))}
+                />
                 <Tooltip
                   cursor={{ fill: 'rgba(15,17,21,0.04)' }}
                   content={({ active, payload }) => {
@@ -307,9 +334,11 @@ export function PeriodLog() {
                       <div style={{ background: '#fff', border: `1px solid ${GRID}`, borderRadius: 8, padding: '8px 11px', fontSize: 12, boxShadow: '0 6px 16px -8px rgba(15,17,21,0.2)' }}>
                         <div style={{ fontWeight: 600 }}>{d.label}</div>
                         <div style={{ color: AXIS }}>{d.range}</div>
-                        <div style={{ marginTop: 3 }}>Planned {fmtHours(d.planned)} h</div>
-                        <div>Achieved {fmtHours(d.achieved)} h</div>
-                        <div style={{ fontWeight: 600, color: v >= 0 ? ACHIEVED : '#c01017' }}>{v >= 0 ? '+' : ''}{fmtHours(v)} h</div>
+                        <div style={{ marginTop: 3 }}>Planned {percent ? `${d.planned}%` : `${fmtHours(d.planned)} h`}</div>
+                        <div>Achieved {percent ? `${d.achieved}%` : `${fmtHours(d.achieved)} h`}</div>
+                        <div style={{ fontWeight: 600, color: v >= 0 ? ACHIEVED : '#c01017' }}>
+                          {v >= 0 ? '+' : ''}{percent ? `${Math.round(v * 100) / 100}%` : `${fmtHours(v)} h`}
+                        </div>
                       </div>
                     );
                   }}
@@ -360,7 +389,8 @@ export function PeriodLog() {
 
       <Panel title="How this log is worked out" className="mt-3">
         <p className="text-[12px] text-[var(--text-muted)]">
-          <b>Planned</b> is what the baseline said would accrue between these dates; <b>achieved</b> is what actually earned in them. Both spread an activity's hours
+          <b>Planned</b> is what the baseline said would get done between these dates; <b>achieved</b> is what actually did.{' '}
+          {percent ? 'Both are shown as a share of the whole job.' : 'Both are in budget hours.'} Both spread an activity's hours
           evenly across its window by calendar day, exactly as the S-curve does, so every two-week window adds back to the same totals the curve draws — this screen can
           never disagree with the Dashboard.
         </p>

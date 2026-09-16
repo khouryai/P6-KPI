@@ -50,6 +50,21 @@ The workbook never has to be opened again, and neither does Excel:
 | Defaults, dates, storage, backups | **Settings** |
 | Hand a spreadsheet to project controls | **Settings → Export workbook**, plus curve CSV and chart PNG on the Dashboard. |
 
+## Sharing with the client
+
+The Dashboard and the Two-Week Log have a **Man hours / % complete** switch. In
+percent mode every hours figure disappears — cards, curve, axis, tooltips, the
+exported PNG and the copied text — and the screens report progress only. It is one
+setting shared by both screens, remembered per machine.
+
+## Fiscal years
+
+**Earned vs Built** rolls the months up by fiscal year, with earned, built,
+variance, factor and how complete the job was at each year end. Click a year to
+narrow the monthly table to it. The year is named for the calendar year it ends in,
+so with a July start Jul-26 to Jun-27 reads as FY27; set the start month in
+**Settings**.
+
 ## Percentages, not just hours
 
 Hours answer "how big"; a percentage answers "how big next to everything else", and

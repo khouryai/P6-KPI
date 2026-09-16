@@ -10,6 +10,8 @@ import { normKey } from '../../engine/keys';
 import { fmtHours, fmtPct } from '../format';
 import { href } from '../router';
 import { readWorkbook, workbookGrid } from '../../engine/workbook';
+import { groupByFiscalYear, fyStart, fiscalYearOf, type FiscalYear } from '../../engine/fiscal';
+import { TERMS } from '../../engine/vocab';
 
 const GRID = '#e4e7ec';
 const AXIS = '#6e7179';
@@ -44,6 +46,8 @@ export function TeamHours() {
   const [pendingSubsystem, setPendingSubsystem] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [hideQuiet, setHideQuiet] = useState(true);
+  /** '' is every year; otherwise the fiscal year the months table is narrowed to. */
+  const [fy, setFy] = useState<string>('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const knownSubsystems = useMemo(
@@ -212,7 +216,7 @@ export function TeamHours() {
   ];
 
   const forecastColumns: Column<Reforecast>[] = [
-    { key: 'label', label: 'Subsystem', value: (r) => r.label, render: (r) => <span className="mono">{r.code || 'Unassigned'}</span> },
+    { key: 'label', label: TERMS.subsystem, value: (r) => r.label, render: (r) => <span className="mono">{r.code || 'Unassigned'}</span> },
     { key: 'budget', label: 'Budget h', value: (r) => r.budgetHours, num: true, render: (r) => fmtHours(r.budgetHours) },
     { key: 'earned', label: 'Earned h', value: (r) => r.cumEarned, num: true, render: (r) => fmtHours(r.cumEarned) },
     { key: 'built', label: 'Built h', value: (r) => r.cumBuilt, num: true, render: (r) => fmtHours(r.cumBuilt) },
@@ -258,11 +262,63 @@ export function TeamHours() {
     },
   ];
 
+  const fyColumns: Column<FiscalYear>[] = [
+    {
+      key: 'fy',
+      label: 'Fiscal year',
+      locked: true,
+      value: (r) => r.fy,
+      render: (r) => (
+        <button className="btn-link" title={`Show only the months in ${r.label}`} onClick={() => setFy(fy === String(r.fy) ? '' : String(r.fy))}>
+          <b>{r.label}</b> <span className="font-normal text-[var(--text-muted)]">{r.span}</span>
+        </button>
+      ),
+    },
+    { key: 'months', label: 'Months', value: (r) => r.months.length, num: true, optional: true },
+    { key: 'earned', label: 'Earned h', value: (r) => r.earned, num: true, render: (r) => fmtHours(r.earned) },
+    { key: 'built', label: 'Built h', value: (r) => r.built, num: true, render: (r) => fmtHours(r.built) },
+    {
+      key: 'variance',
+      label: 'Variance',
+      value: (r) => r.variance,
+      num: true,
+      render: (r) => (
+        <span className={`tone-${varianceTone(r.variance)} font-semibold`}>
+          {r.variance >= 0 ? '+' : ''}{fmtHours(r.variance)}
+        </span>
+      ),
+    },
+    {
+      key: 'factor',
+      label: 'Factor',
+      value: (r) => r.factor ?? null,
+      num: true,
+      render: (r) => (r.factor === null ? <span className="text-[var(--text-subtle)]">—</span> : <span className={r.factor >= 1 ? 'tone-good font-semibold' : 'tone-bad font-semibold'}>{r.factor.toFixed(2)}</span>),
+    },
+    {
+      key: 'cumEarned',
+      label: 'Cum earned',
+      value: (r) => r.cumEarned,
+      num: true,
+      hint: 'Where the running total stood at the end of the year. Taken from the last month, never summed: adding running totals together produces a number that means nothing.',
+      render: (r) => fmtHours(r.cumEarned),
+    },
+    { key: 'cumBuilt', label: 'Cum built', value: (r) => r.cumBuilt, num: true, optional: true, render: (r) => fmtHours(r.cumBuilt) },
+    {
+      key: 'pct',
+      label: '% complete',
+      value: (r) => (project.budgetHours ? r.cumEarned / project.budgetHours : 0),
+      hint: 'How complete the whole job was by the end of that fiscal year.',
+      num: true,
+      render: (r) => <span className="tabular-nums font-semibold">{fmtPct(project.budgetHours ? r.cumEarned / project.budgetHours : 0, 1)}</span>,
+    },
+  ];
+
   const keyedColumns: Column<TeamActual>[] = [
     { key: 'month', label: 'Month', value: (r) => r.month, render: (r) => <CellInput value={r.month} placeholder="2026-08" onCommit={(v) => editRow(r.id, { month: v.trim() })} /> },
     {
       key: 'subsystem',
-      label: 'Subsystem',
+      label: TERMS.subsystem,
       value: (r) => r.subsystem,
       render: (r) => <CellInput value={r.subsystem} list="team-subsystems" placeholder="Unassigned" onCommit={(v) => editRow(r.id, { subsystem: v.trim() })} />,
     },
@@ -279,8 +335,12 @@ export function TeamHours() {
    * carrying the same cumulative figure bury the months that matter. They are
    * hidden by default and counted, never dropped.
    */
-  const shownMonths = hideQuiet ? burn.months.filter((m) => m.earned !== 0 || m.built !== 0) : burn.months;
-  const quiet = burn.months.length - shownMonths.length;
+  const fyMonth = fyStart(state.data.settings.fiscalYearStartMonth);
+  const fiscalYears = useMemo(() => groupByFiscalYear(burn.months, fyMonth), [burn.months, fyMonth]);
+
+  let shownMonths = hideQuiet ? burn.months.filter((m) => m.earned !== 0 || m.built !== 0) : burn.months;
+  if (fy) shownMonths = shownMonths.filter((m) => String(fiscalYearOf(m.month, fyMonth)) === fy);
+  const quiet = burn.months.length - (hideQuiet ? burn.months.filter((m) => m.earned !== 0 || m.built !== 0).length : burn.months.length);
   const keyed = state.data.teamActuals;
 
   return (
@@ -293,7 +353,7 @@ export function TeamHours() {
         <>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void loadFile(f); }} />
           <button className="btn" onClick={() => fileRef.current?.click()}>Import a sheet…</button>
-          <a className="btn" href={href('subsystems')}>Subsystems</a>
+          <a className="btn" href={href('subsystems')}>{TERMS.subsystemPlural}</a>
         </>
       }
     >
@@ -396,16 +456,44 @@ export function TeamHours() {
         </Panel>
       )}
 
+      {fiscalYears.length > 0 && (
+        <Panel
+          title="By fiscal year"
+          meta={`Year starts in ${['January','February','March','April','May','June','July','August','September','October','November','December'][fyMonth - 1]}, named for the year it ends in. Change it in Settings.`}
+          className="mb-3"
+        >
+          <SortableTable
+            tableId="burn-fiscal"
+            rows={fiscalYears}
+            columns={fyColumns}
+            rowKey={(r) => String(r.fy)}
+            defaultSort={{ key: 'fy', dir: 'asc' }}
+            maxHeight="300px"
+            rowClass={(r) => (fy === String(r.fy) ? 'row-warn' : '')}
+          />
+        </Panel>
+      )}
+
       {burn.months.length > 0 && (
         <Panel
           title="Every month"
           meta={
-            quiet > 0 || hideQuiet ? (
-              <label className="flex cursor-pointer items-center gap-1.5">
-                <input type="checkbox" checked={hideQuiet} onChange={(e) => setHideQuiet(e.target.checked)} />
-                Hide the {quiet > 0 ? quiet : ''} months with nothing earned and nothing built
-              </label>
-            ) : undefined
+            <span className="flex flex-wrap items-center gap-3">
+              {fiscalYears.length > 1 && (
+                <select className="input" value={fy} onChange={(e) => setFy(e.target.value)}>
+                  <option value="">Every fiscal year</option>
+                  {fiscalYears.map((y) => (
+                    <option key={y.fy} value={String(y.fy)}>{y.label} ({y.span})</option>
+                  ))}
+                </select>
+              )}
+              {(quiet > 0 || hideQuiet) && (
+                <label className="flex cursor-pointer items-center gap-1.5">
+                  <input type="checkbox" checked={hideQuiet} onChange={(e) => setHideQuiet(e.target.checked)} />
+                  Hide the {quiet > 0 ? quiet : ''} months with nothing earned and nothing built
+                </label>
+              )}
+            </span>
           }
           className="mb-3"
         >
@@ -414,11 +502,11 @@ export function TeamHours() {
       )}
 
       {openedMonth && (
-        <Panel title={`${monthLabel(openedMonth.month)} by subsystem`} className="mb-3">
+        <Panel title={`${monthLabel(openedMonth.month)} by ${TERMS.subsystemLower}`} className="mb-3">
           <SortableTable
             rows={openedMonth.bySubsystem}
             columns={[
-              { key: 'code', label: 'Subsystem', value: (c) => c.label, render: (c) => <span className="mono">{c.code || 'Unassigned'}</span> },
+              { key: 'code', label: TERMS.subsystem, value: (c) => c.label, render: (c) => <span className="mono">{c.code || 'Unassigned'}</span> },
               { key: 'earned', label: 'Earned h', value: (c) => c.earned, num: true, render: (c) => fmtHours(c.earned) },
               { key: 'built', label: 'Built h', value: (c) => c.built, num: true, render: (c) => fmtHours(c.built) },
               { key: 'variance', label: 'Variance', value: (c) => c.variance, num: true, render: (c) => <span className={`tone-${varianceTone(c.variance)} font-semibold`}>{c.variance >= 0 ? '+' : ''}{fmtHours(c.variance)}</span> },
@@ -432,7 +520,7 @@ export function TeamHours() {
       )}
 
       {burn.totalBuilt > 0 && (
-        <Panel title="Forecast by subsystem" meta="Each group at its own rate, so the one in trouble is not hidden by the ones that are fine." className="mb-3">
+        <Panel title={`Forecast by ${TERMS.subsystemLower}`} meta="Each group at its own rate, so the one in trouble is not hidden by the ones that are fine." className="mb-3">
           <SortableTable tableId="burn-forecast" rows={burn.bySubsystem} columns={forecastColumns} rowKey={(r) => r.code || '(unassigned)'} defaultSort={{ key: 'budget', dir: 'desc' }} maxHeight="320px" />
         </Panel>
       )}
@@ -445,7 +533,7 @@ export function TeamHours() {
             <div className="flex flex-wrap items-center gap-2 text-[12px]">
               <span>The <b>{pending.labelHeader || 'first'}</b> column is a</span>
               <select className="input" value={labelsAre} onChange={(e) => setLabelsAre(e.target.value as 'subsystem' | 'person')}>
-                <option value="subsystem">subsystem</option>
+                <option value="subsystem">{TERMS.subsystemLower}</option>
                 <option value="person">person</option>
               </select>
               {labelsAre === 'person' && (
@@ -457,7 +545,7 @@ export function TeamHours() {
             </div>
             <div className="table-wrap" style={{ maxHeight: 200 }}>
               <table className="tbl">
-                <thead><tr><th>Month</th><th>{labelsAre === 'subsystem' ? 'Subsystem' : 'Person'}</th><th className="num">Built h</th></tr></thead>
+                <thead><tr><th>Month</th><th>{labelsAre === 'subsystem' ? TERMS.subsystem : 'Person'}</th><th className="num">Built h</th></tr></thead>
                 <tbody>
                   {pending.rows.slice(0, 40).map((r, i) => (
                     <tr key={i}><td className="mono">{r.month}</td><td>{r.label || <span className="text-[var(--text-subtle)]">(blank)</span>}</td><td className="num">{fmtHours(r.hours)}</td></tr>
