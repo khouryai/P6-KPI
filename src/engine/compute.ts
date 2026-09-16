@@ -33,6 +33,8 @@ import type {
   Summary,
   TestProgress,
   TestProgressCheck,
+  ActivityVisibility,
+  StaleOverride,
 } from './types';
 import { normKey, containsCI } from './keys';
 import { indexLibrary, resolveMatchKey } from './match';
@@ -240,6 +242,47 @@ export function p6PctComplete(a: P6Activity): number {
   return Math.max(0, Math.min(1, (od - rd) / od));
 }
 
+/**
+ * Why a keyed Test Progress row matches nothing, in the words a person would use.
+ *
+ * "0-P2-TC-W40-FA-0100 does not match" tells nobody whether deleting it loses
+ * anything. What they need is which of the five quite different things happened, so
+ * they can decide in one read: a WBS header pasted in by mistake is junk, an
+ * activity that left the schedule may be worth keeping, and an activity that is
+ * there but priced at zero is a library problem, not a test-progress problem.
+ */
+function checkReason(
+  status: TestProgressCheck['status'],
+  a: P6Activity | undefined,
+  row: BudgetRow | null,
+  inBudget: boolean,
+): string {
+  if (inBudget) return '';
+  switch (status) {
+    case 'not in extract':
+      return 'No activity with this ID is in the current schedule. Either it was renumbered or removed in P6, or the ID was mistyped. Keeping it costs nothing and it starts counting again if the activity comes back.';
+    case 'hidden':
+      return 'You hid this activity, so it is out of the budget and these counts do nothing. Unhide it on Budget Master to put them back to work, or clear the row.';
+    case 'not budgeted':
+      return a?.rowType === 'WBS'
+        ? 'This is a WBS summary header, not an activity. It can never carry hours or test counts. Safe to remove.'
+        : 'This ID is in the schedule but produced no budget row, which should not happen. Worth reporting.';
+    case 'REVIEW':
+      return `Its activity type "${row?.activityType ?? ''}" is not priced in the Activity Library, so it budgets zero hours and nothing can be earned. Price the type and these counts start working. Do not remove it.`;
+    case 'EXCLUDED':
+      return row?.visibility === 'EXCLUDED'
+        ? 'You marked this activity excluded, so it carries no hours. The counts are kept and do nothing until you put it back in the budget.'
+        : 'Its activity type is set to exclude in the Activity Library, so it carries no hours. Include the type, or force this one activity in from Budget Master.';
+    case 'DELETED':
+    case 'CANCELLED':
+      return `P6 marks this activity ${status.toLowerCase()} in its name, so it is out of the budget. If it is really live work, force it in from Budget Master.`;
+    case 'IN BUDGET':
+      return 'This activity is in the budget but carries zero hours, so the counts change nothing. Check its rate in the Activity Library.';
+    default:
+      return '';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main computation
 // ---------------------------------------------------------------------------
@@ -265,15 +308,29 @@ export function computeModel(input: ModelInput): Model {
   const dataDate = isValidISO(settings.dataDate) ? settings.dataDate : null;
   if (!dataDate) notes.push('No data date is set. In-progress work cannot earn and the earned curve has no end.');
 
-  const rows: BudgetRow[] = [];
+  const allRows: BudgetRow[] = [];
   for (const a of current) {
     if (a.rowType !== 'ACTIVITY') continue;
     const match = resolveMatchKey(a.activityType, libIdx);
     const entry = match.entry;
     const rateStatus: RateStatus = entry ? libraryRateStatus(entry, settings) : 'NO MATCH';
+    const ovEarly = ovIdx.get(normKey(a.activityId));
+    const visibility: ActivityVisibility | null = ovEarly?.visibility ?? null;
 
+    /*
+     * The user's decision about this one activity beats the library's decision about
+     * its type, and beats P6's "(Deleted)" marker in the name. That is the whole
+     * point: a schedule nobody controls should not be able to force work into or out
+     * of a budget somebody is accountable for.
+     *
+     * INCLUDED still needs a rate. Forcing in an activity whose type is not in the
+     * library would budget zero hours and read as a bug, so it stays REVIEW and says
+     * what is missing instead.
+     */
     let status: ActivityStatus;
-    if (a.excludeReason) status = a.excludeReason;
+    if (visibility === 'EXCLUDED') status = 'EXCLUDED';
+    else if (visibility === 'INCLUDED') status = entry ? 'IN BUDGET' : 'REVIEW';
+    else if (a.excludeReason) status = a.excludeReason;
     else if (!entry) status = 'REVIEW';
     else if (effectiveInclude(entry) !== 'Y') status = 'EXCLUDED';
     else status = 'IN BUDGET';
@@ -283,8 +340,8 @@ export function computeModel(input: ModelInput): Model {
     const loc = locIdx.get(normKey(a.location));
     const complexity = inBudget ? (loc?.complexityFactor ?? settings.defaultComplexity) : null;
     const stdHours = inBudget && entry ? stdHoursFor(entry, settings, a.originalDuration) : null;
-    const ov = ovIdx.get(normKey(a.activityId));
-    const overrideHours = inBudget && ov && Number.isFinite(ov.overrideHours) ? ov.overrideHours : null;
+    const ov = ovEarly;
+    const overrideHours = inBudget && ov && ov.overrideHours !== undefined && Number.isFinite(ov.overrideHours) ? ov.overrideHours : null;
     const budgetHours = !inBudget
       ? 0
       : overrideHours !== null
@@ -324,9 +381,14 @@ export function computeModel(input: ModelInput): Model {
       earnWindowSource = testStart ? 'TEST WINDOW' : a.actualFinish ? 'P6 ACTUAL' : 'IN PROGRESS';
     }
 
-    rows.push({
+    const renamed = !!ov?.nameOverride?.trim();
+    allRows.push({
       activity: a,
       activityId: a.activityId,
+      activityName: renamed ? ov!.nameOverride!.trim() : a.activityName,
+      renamed,
+      visibility,
+      hidden: visibility === 'HIDDEN',
       location: a.location,
       // Derived from the Activity ID rather than stored, so imports written by an
       // earlier version of the app group correctly without a migration.
@@ -339,7 +401,7 @@ export function computeModel(input: ModelInput): Model {
       matchTier: match.tier,
       rateStatus,
       status,
-      discipline: entry?.discipline ?? '',
+      discipline: ov?.discipline?.trim() || entry?.discipline || '',
       basis,
       loeFlag,
       needsShifts,
@@ -369,12 +431,26 @@ export function computeModel(input: ModelInput): Model {
     });
   }
 
+  /*
+   * Hidden activities leave here and never come back.
+   *
+   * Everything below — the library counts, the locations, the rollups, the curves,
+   * the summary, the export — reads `rows`, so hiding is a single cut rather than a
+   * flag every consumer has to remember to test. `hiddenRows` keeps them priced so
+   * the hidden list can say what bringing one back would add to the budget.
+   */
+  const rows = allRows.filter((r) => !r.hidden);
+  const hiddenRows = allRows.filter((r) => r.hidden);
+  const hiddenIds = new Set(hiddenRows.map((r) => normKey(r.activityId)));
+  /** ACTIVITY rows still in play: the extract minus what the user hid. */
+  const visibleActs = current.filter((a) => a.rowType === 'ACTIVITY' && !hiddenIds.has(normKey(a.activityId)));
+
   // Library stats.
   const libraryStats: LibraryStat[] = input.library.filter((e) => !e.retired).map((entry) => {
     const k = normKey(entry.matchKey);
     const mine = rows.filter((r) => normKey(r.matchKey) === k && r.matchTier !== null);
     // Count and total P6 days follow the workbook: every ACTIVITY row whose raw type equals the key.
-    const rawMine = current.filter((a) => a.rowType === 'ACTIVITY' && normKey(a.activityType) === k);
+    const rawMine = visibleActs.filter((a) => normKey(a.activityType) === k);
     const basisEff = effectiveBasis(entry, settings);
     const crewEff = effectiveCrew(entry, settings);
     const shiftEff = effectiveShiftHours(entry, settings);
@@ -410,18 +486,49 @@ export function computeModel(input: ModelInput): Model {
   // Test progress checks.
   const curIdx = firstByKey<P6Activity>(current, (a) => a.activityId);
   const rowIdx = firstByKey<BudgetRow>(rows, (r) => r.activityId);
+  const hiddenIdx = firstByKey<BudgetRow>(hiddenRows, (r) => r.activityId);
   const testProgressChecks: TestProgressCheck[] = testProgress.map((t) => {
     const k = normKey(t.activityId);
     const r = rowIdx.get(k);
+    const hidden = hiddenIdx.get(k);
     const a = curIdx.get(k);
+    const row = r ?? hidden ?? null;
+    const inBudget = !!r && r.status === 'IN BUDGET';
+    const status: TestProgressCheck['status'] = hidden ? 'hidden' : r ? r.status : a ? 'not budgeted' : 'not in extract';
     return {
       activityId: t.activityId,
       matched: !!r,
-      status: r ? r.status : a ? 'not budgeted' : 'not in extract',
-      activityName: a ? a.activityName : null,
+      inBudget,
+      status,
+      activityName: row ? row.activityName : a ? a.activityName : null,
+      p6Name: row && row.renamed ? row.activity.activityName : null,
+      rowType: a ? a.rowType : null,
+      location: row?.location ?? a?.location ?? '',
+      phaseName: row ? row.phaseName : a ? phaseLabel(phaseOf(a.activityId)) : '',
+      activityType: row?.activityType ?? a?.activityType ?? '',
+      matchKey: row ? row.matchKey : null,
+      budgetHours: row ? row.budgetHours : null,
+      testsTotal: t.testsTotal ?? null,
+      testsComplete: t.testsComplete ?? null,
+      pctOverride: t.pctOverride ?? null,
+      testStartOverride: t.testStartOverride ?? null,
+      testEndOverride: t.testEndOverride ?? null,
+      updatedAt: t.updatedAt,
       pctEffective: testPctEffective(t)?.pct ?? null,
+      reason: checkReason(status, a, row, inBudget),
     };
   });
+
+  /** Overrides keyed against an Activity ID this schedule does not have. */
+  const staleOverrides: StaleOverride[] = overrides
+    .filter((o) => o.activityId.trim() !== '' && !curIdx.has(normKey(o.activityId)))
+    .map((o) => ({
+      activityId: o.activityId,
+      hasHours: o.overrideHours !== undefined && Number.isFinite(o.overrideHours),
+      renamed: !!o.nameOverride?.trim(),
+      visibility: o.visibility ?? null,
+      note: o.note ?? '',
+    }));
 
   // Curves.
   const totalBudget = rows.reduce((s, r) => s + r.budgetHours, 0);
@@ -433,14 +540,14 @@ export function computeModel(input: ModelInput): Model {
   const { curve, periods } = buildCurve(rows, snapshots, dataDate);
 
   // Summary.
-  const acts = current.filter((a) => a.rowType === 'ACTIVITY');
+  const acts = visibleActs;
   const count = (pred: (r: BudgetRow) => boolean) => rows.filter(pred).length;
   const earnedTotal = rows.reduce((s, r) => s + r.earnedHours, 0);
   const tpMatched = testProgress.filter((t) => rowIdx.has(normKey(t.activityId))).length;
   const latestStatus = snapshots.map((s) => s.statusDate).filter(isValidISO).sort().pop() ?? null;
   const summary: Summary = {
-    extractRows: current.length,
-    wbsRows: current.length - acts.length,
+    extractRows: current.length - hiddenRows.length,
+    wbsRows: current.filter((a) => a.rowType === 'WBS').length,
     activities: acts.length,
     locations: input.locations.length,
     activityTypes: input.library.filter((e) => !e.retired).length,
@@ -474,8 +581,23 @@ export function computeModel(input: ModelInput): Model {
     latestStatusDate: latestStatus,
     typesWithCrewSplit: libraryStats.filter((l) => l.crewEffLines.length > 0).length,
     unassignedHours: rows.reduce((s, r) => s + (r.subsystemHours[UNASSIGNED] ?? 0), 0),
+    hidden: hiddenRows.length,
+    renamed: count((r) => r.renamed),
+    forcedIn: count((r) => r.visibility === 'INCLUDED'),
+    forcedOut: count((r) => r.visibility === 'EXCLUDED'),
+    staleOverrides: staleOverrides.length,
   };
   if (!hasBaseline) notes.push('No baseline import. The planned curve mirrors the forecast for every activity.');
+  if (hiddenRows.length > 0) {
+    notes.push(
+      `${hiddenRows.length} ${hiddenRows.length === 1 ? 'activity is' : 'activities are'} hidden, so ${hiddenRows.length === 1 ? 'it is' : 'they are'} in no figure on any screen. Budget Master lists them and can bring them back.`,
+    );
+  }
+  if (staleOverrides.length > 0) {
+    notes.push(
+      `${staleOverrides.length} of your activity edits point at an Activity ID the current schedule does not have. They are kept in case the activity returns, and do nothing until it does.`,
+    );
+  }
   if (summary.onNoCurve > 0) {
     notes.push(`${summary.onNoCurve} in-budget activities have hours but no usable dates. They count in the total but appear on no curve.`);
   }
@@ -503,6 +625,8 @@ export function computeModel(input: ModelInput): Model {
 
   return {
     rows,
+    hiddenRows,
+    staleOverrides,
     subsystems,
     burn,
     groups,

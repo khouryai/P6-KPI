@@ -41,8 +41,9 @@ The workbook never has to be opened again, and neither does Excel:
 | Load a schedule | **Import**: drop an `.xer`, `.xlsx` or `.csv`, paste rows, or pick a file already in the folder. Columns are matched by header name and can be corrected by hand before importing. |
 | Price activity types | **Activity Library**: inline editing, plus adding and consolidating keys. |
 | Per-location complexity | **Locations** |
-| Override one activity's hours | **Budget Master** |
-| Test case counts | **Test Progress**: every budgeted activity is already listed. Key counts inline, bulk-fill across a filter, or drop a spreadsheet. |
+| Edit one activity | **Budget Master**: rename it, set its discipline, override its hours, note why, or take it out of the budget or out of the program entirely. Everything you edit is keyed on the Activity ID and survives every import; everything P6 owns is read-only. |
+| Get rid of REVIEW rows you will never price | **Budget Master**: filter to *Needing REVIEW*, then **Hide**. Hidden activities leave every total, curve and export, nothing is deleted, and the Hidden view brings them back. |
+| Test case counts | **Test Progress**: every budgeted activity is already listed. Key counts inline, bulk-fill across a filter, or drop a spreadsheet. Keyed rows that earn nothing are listed with the name, the type and a sentence on why — and on whether deleting one costs you anything. |
 | Progress per phase or location | **By Phase & Location**: rollups by phase, location, discipline or work type, with drill-through into a filtered Budget Master. |
 | Status snapshots | **Snapshots** |
 | Defaults, dates, storage, backups | **Settings** |

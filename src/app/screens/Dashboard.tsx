@@ -68,7 +68,7 @@ export function Dashboard() {
   };
 
   const quality: { label: string; count: number; to: string; note: string }[] = [
-    { label: 'Activities needing REVIEW', count: s.review, to: href('budget', { flag: 'review' }), note: 'No library key matched, budgets zero hours.' },
+    { label: 'Activities needing REVIEW', count: s.review, to: href('budget', { flag: 'review' }), note: 'No library key matched, so they budget zero hours. Price the type, or hide the activity.' },
     { label: 'Library types still on defaults', count: s.typesOnDefaults, to: href('library', { flag: 'default' }), note: 'Priced with Settings defaults until you set a rate.' },
     { label: 'RATE types missing a shift count', count: s.typesNeedingShifts, to: href('library', { flag: 'shifts' }), note: 'These silently budget zero hours.' },
     { label: 'Activities with no dates at all', count: s.noDates, to: href('budget', { flag: 'nodates' }), note: 'Hours count in the total but appear on no curve.' },
@@ -77,7 +77,8 @@ export function Dashboard() {
     { label: 'Percent complete still from P6 duration', count: s.pctFromP6, to: href('budget', { flag: 'pctp6' }), note: 'Add test case counts to move these to earned tests.' },
     { label: 'LOE flags (DUR basis, long duration)', count: s.loeFlags, to: href('budget', { flag: 'loe' }), note: 'A long P6 duration is usually a hammock, not effort.' },
     { label: 'Resolved through tier 2 matching', count: s.tier2Resolved, to: href('budget', { flag: 'tier2' }), note: 'Check the consolidated key is not too broad.' },
-    { label: 'Test progress rows not matching an activity', count: s.testProgressNotMatching, to: href('progress', { flag: 'unmatched' }), note: 'Usually WBS rows pasted by mistake. They hide real errors.' },
+    { label: 'Test progress rows not matching an activity', count: s.testProgressNotMatching, to: href('progress', { flag: 'unmatched' }), note: 'Open the list: it says what each one is and whether losing it costs anything.' },
+    { label: 'Your edits pointing at an activity that is gone', count: s.staleOverrides, to: href('budget'), note: 'Kept in case the Activity ID comes back. Doing nothing until it does.' },
   ];
   const attention = quality.reduce((n, q) => n + (q.count > 0 ? 1 : 0), 0);
 
@@ -157,6 +158,9 @@ export function Dashboard() {
     ['Excluded by library', s.excluded],
     ['Deleted or cancelled', s.deletedOrCancelled],
     ['Needing REVIEW', s.review],
+    ['Hidden by you (in none of the above)', s.hidden],
+    ['Renamed by you', s.renamed],
+    ['Forced into the budget by you', s.forcedIn],
     ['Dates from baseline import', s.baselineMatched],
     ['Activities started, not finished', s.inProgress],
     ['Activities with P6 actual dates', s.p6Actual],

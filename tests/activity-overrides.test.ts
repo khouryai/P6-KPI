@@ -1,0 +1,231 @@
+/**
+ * Per-activity edits: the name, the discipline, and whether the activity takes part
+ * in the program at all.
+ *
+ * The contract these tests exist to hold is narrow and important. P6 owns the
+ * Activity ID, the durations and the dates. The user owns everything else, keyed on
+ * the Activity ID alone, and a fresh import must be unable to undo any of it. A
+ * hidden activity has to be gone from every total, not merely flagged, or the
+ * hiding is a lie the moment somebody reads a different screen.
+ */
+import { describe, it, expect } from 'vitest';
+import { computeModel } from '../src/engine/compute';
+import { fixtureModelInput, makeActivity } from './helpers';
+import type { ActivityOverride, LibraryEntry, ModelInput, P6Activity, Settings, TestProgress } from '../src/engine/types';
+import { DEFAULT_SETTINGS } from '../src/engine/types';
+
+const settings: Settings = { ...DEFAULT_SETTINGS, dataDate: '2026-08-31', defaultCrew: 2, defaultShiftHours: 8, defaultComplexity: 1 };
+
+/** Two priced activities and one whose type nobody has priced, so it reads REVIEW. */
+function scenario(overrides: ActivityOverride[] = [], testProgress: TestProgress[] = [], extra: Partial<ModelInput> = {}): ModelInput {
+  const library: LibraryEntry[] = [{ matchKey: 'Test Type', basis: 'DUR', crewSize: 2, shiftHours: 8 }];
+  const current: P6Activity[] = [
+    makeActivity({ activityId: 'A-P2-TC-X10-FA-0010', activityName: '[T&C] X10 (Ph2) - Test Type', sortOrder: 0 }),
+    makeActivity({ activityId: 'A-P2-TC-X10-FA-0020', activityName: '[T&C] X10 (Ph2) - Test Type', sortOrder: 1 }),
+    makeActivity({ activityId: 'A-P2-TC-X10-FA-0030', activityName: '[T&C] X10 (Ph2) - Unpriced Type', activityType: 'Unpriced Type', sortOrder: 2 }),
+  ];
+  return {
+    settings,
+    locations: [{ code: 'X10' }],
+    library,
+    overrides,
+    testProgress,
+    current,
+    baseline: null,
+    snapshots: [],
+    ...extra,
+  };
+}
+
+describe('hiding an activity', () => {
+  it('takes it out of the rows, the budget and the activity count', () => {
+    const before = computeModel(scenario());
+    const after = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'HIDDEN' }]));
+
+    expect(before.summary.inBudget).toBe(2);
+    expect(after.summary.inBudget).toBe(1);
+    expect(after.rows.map((r) => r.activityId)).not.toContain('A-P2-TC-X10-FA-0010');
+    expect(after.summary.totalBudgetHours).toBe(before.summary.totalBudgetHours / 2);
+    expect(after.summary.activities).toBe(before.summary.activities - 1);
+    expect(after.summary.hidden).toBe(1);
+  });
+
+  it('keeps it priced on hiddenRows, so the cost of bringing it back is visible', () => {
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'HIDDEN' }]));
+    expect(m.hiddenRows).toHaveLength(1);
+    expect(m.hiddenRows[0].hidden).toBe(true);
+    expect(m.hiddenRows[0].budgetHours).toBe(160);
+  });
+
+  it('removes it from the library count as well, so no screen disagrees with another', () => {
+    const before = computeModel(scenario());
+    const after = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'HIDDEN' }]));
+    const key = (m: ReturnType<typeof computeModel>) => m.library.find((l) => l.matchKey === 'Test Type')!;
+    expect(key(before).count).toBe(2);
+    expect(key(after).count).toBe(1);
+    expect(key(after).budgetHours).toBe(key(before).budgetHours / 2);
+  });
+
+  it('clears the REVIEW that has no answer, which is the point of hiding one', () => {
+    expect(computeModel(scenario()).summary.review).toBe(1);
+    expect(computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0030', visibility: 'HIDDEN' }])).summary.review).toBe(0);
+  });
+});
+
+describe('forcing an activity in or out', () => {
+  it('EXCLUDED leaves it listed but carrying nothing', () => {
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'EXCLUDED' }]));
+    const r = m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!;
+    expect(r.status).toBe('EXCLUDED');
+    expect(r.budgetHours).toBe(0);
+    expect(m.summary.inBudget).toBe(1);
+    expect(m.summary.forcedOut).toBe(1);
+  });
+
+  it('INCLUDED overrides a library exclusion', () => {
+    const excluded: LibraryEntry[] = [{ matchKey: 'Test Type', basis: 'DUR', crewSize: 2, shiftHours: 8, includeOverride: 'N' }];
+    const plain = computeModel(scenario([], [], { library: excluded }));
+    expect(plain.summary.inBudget).toBe(0);
+
+    const forced = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'INCLUDED' }], [], { library: excluded }));
+    expect(forced.summary.inBudget).toBe(1);
+    expect(forced.summary.forcedIn).toBe(1);
+    expect(forced.rows.find((r) => r.activityId === 'A-P2-TC-X10-FA-0010')!.budgetHours).toBe(160);
+  });
+
+  it('INCLUDED overrides P6 marking the name (Deleted)', () => {
+    const current = scenario().current.map((a) =>
+      a.activityId === 'A-P2-TC-X10-FA-0010' ? { ...a, excludeReason: 'DELETED' as const } : a,
+    );
+    expect(computeModel(scenario([], [], { current })).rows.find((r) => r.activityId === 'A-P2-TC-X10-FA-0010')!.status).toBe('DELETED');
+    const forced = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'INCLUDED' }], [], { current }));
+    expect(forced.rows.find((r) => r.activityId === 'A-P2-TC-X10-FA-0010')!.status).toBe('IN BUDGET');
+  });
+
+  it('cannot conjure a rate: forcing in an unpriced type stays REVIEW rather than budgeting zero silently', () => {
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0030', visibility: 'INCLUDED' }]));
+    const r = m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0030')!;
+    expect(r.status).toBe('REVIEW');
+    expect(r.budgetHours).toBe(0);
+  });
+});
+
+describe('renaming an activity', () => {
+  it('replaces the displayed name and leaves the P6 name alone', () => {
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', nameOverride: 'Signalling proving run' }]));
+    const r = m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!;
+    expect(r.activityName).toBe('Signalling proving run');
+    expect(r.renamed).toBe(true);
+    expect(r.activity.activityName).toBe('[T&C] X10 (Ph2) - Test Type');
+    expect(m.summary.renamed).toBe(1);
+  });
+
+  it('cannot re-price the activity, because the match key still comes from P6', () => {
+    const plain = computeModel(scenario());
+    const renamed = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', nameOverride: 'Something else entirely' }]));
+    const r = renamed.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!;
+    expect(r.matchKey).toBe('Test Type');
+    expect(r.budgetHours).toBe(plain.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!.budgetHours);
+    expect(renamed.summary.totalBudgetHours).toBe(plain.summary.totalBudgetHours);
+  });
+
+  it('a discipline set on the activity beats the one on its library entry', () => {
+    const library: LibraryEntry[] = [{ matchKey: 'Test Type', basis: 'DUR', crewSize: 2, shiftHours: 8, discipline: 'Signalling' }];
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', discipline: 'Comms' }], [], { library }));
+    expect(m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!.discipline).toBe('Comms');
+    expect(m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0020')!.discipline).toBe('Signalling');
+  });
+});
+
+describe('edits survive a re-import', () => {
+  /*
+   * The whole promise of the feature. The schedule is replaced by a new export in
+   * which the names, durations and dates have all moved on; the edits are keyed on
+   * the Activity ID and are expected to come through untouched.
+   */
+  it('keeps the rename, the hidden flag and the hours override when P6 sends everything else back different', () => {
+    const edits: ActivityOverride[] = [
+      { activityId: 'A-P2-TC-X10-FA-0010', nameOverride: 'Signalling proving run', overrideHours: 400, note: 'agreed with the client' },
+      { activityId: 'A-P2-TC-X10-FA-0030', visibility: 'HIDDEN' },
+    ];
+    const reimported: P6Activity[] = [
+      makeActivity({ activityId: 'A-P2-TC-X10-FA-0010', activityName: '[T&C] X10 (Ph2) - Test Type', originalDuration: 25, startDate: '2026-08-01', actualStart: true, sortOrder: 0 }),
+      makeActivity({ activityId: 'A-P2-TC-X10-FA-0020', activityName: '[T&C] X10 (Ph2) - Test Type', originalDuration: 30, sortOrder: 1 }),
+      makeActivity({ activityId: 'A-P2-TC-X10-FA-0030', activityName: '[T&C] X10 (Ph2) - Unpriced Type', activityType: 'Unpriced Type', originalDuration: 99, sortOrder: 2 }),
+    ];
+    const m = computeModel(scenario(edits, [], { current: reimported }));
+    const r = m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!;
+
+    expect(r.activityName).toBe('Signalling proving run');
+    expect(r.overrideHours).toBe(400);
+    expect(r.budgetHours).toBe(400);
+    // P6 still owns the duration and the dates, which is what makes the import worth doing.
+    expect(r.activity.originalDuration).toBe(25);
+    expect(r.earnStart).toBe('2026-08-01');
+    expect(m.summary.hidden).toBe(1);
+    expect(m.summary.review).toBe(0);
+  });
+
+  it('reports an edit whose Activity ID left the schedule instead of dropping it', () => {
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-9999', nameOverride: 'gone', note: 'renumbered' }]));
+    expect(m.staleOverrides).toHaveLength(1);
+    expect(m.staleOverrides[0]).toMatchObject({ activityId: 'A-P2-TC-X10-FA-9999', renamed: true, hasHours: false, note: 'renumbered' });
+    expect(m.summary.staleOverrides).toBe(1);
+  });
+});
+
+describe('test progress checks say what a keyed row actually is', () => {
+  const keyed = (activityId: string): TestProgress => ({ activityId, testsTotal: 10, testsComplete: 4, updatedAt: '2026-08-01T00:00:00Z' });
+
+  it('an ID in no schedule is named as such and carries what would be lost', () => {
+    const c = computeModel(scenario([], [keyed('A-P2-TC-X10-FA-9999')])).testProgressChecks[0];
+    expect(c.status).toBe('not in extract');
+    expect(c.inBudget).toBe(false);
+    expect(c.activityName).toBeNull();
+    expect(c.testsTotal).toBe(10);
+    expect(c.testsComplete).toBe(4);
+    expect(c.reason).toMatch(/No activity with this ID is in the current schedule/i);
+  });
+
+  it('an unpriced activity is reported as a library problem, not as junk to delete', () => {
+    const c = computeModel(scenario([], [keyed('A-P2-TC-X10-FA-0030')])).testProgressChecks[0];
+    expect(c.status).toBe('REVIEW');
+    expect(c.activityName).toBe('[T&C] X10 (Ph2) - Unpriced Type');
+    expect(c.activityType).toBe('Unpriced Type');
+    expect(c.location).toBe('X10');
+    expect(c.reason).toMatch(/Do not remove it/);
+  });
+
+  it('a hidden activity says so, rather than looking like a mistyped ID', () => {
+    const c = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', visibility: 'HIDDEN' }], [keyed('A-P2-TC-X10-FA-0010')])).testProgressChecks[0];
+    expect(c.status).toBe('hidden');
+    expect(c.activityName).toBe('[T&C] X10 (Ph2) - Test Type');
+    expect(c.reason).toMatch(/You hid this activity/);
+  });
+
+  it('a budgeted activity is not a finding at all', () => {
+    const c = computeModel(scenario([], [keyed('A-P2-TC-X10-FA-0010')])).testProgressChecks[0];
+    expect(c.inBudget).toBe(true);
+    expect(c.budgetHours).toBe(160);
+    expect(c.reason).toBe('');
+  });
+
+  it('carries the renamed name, and the P6 one it replaced', () => {
+    const c = computeModel(
+      scenario([{ activityId: 'A-P2-TC-X10-FA-0010', nameOverride: 'Signalling proving run' }], [keyed('A-P2-TC-X10-FA-0010')]),
+    ).testProgressChecks[0];
+    expect(c.activityName).toBe('Signalling proving run');
+    expect(c.p6Name).toBe('[T&C] X10 (Ph2) - Test Type');
+  });
+});
+
+describe('the fixture model is unchanged by the feature existing', () => {
+  it('still computes with no overrides of the new kind', () => {
+    const m = computeModel(fixtureModelInput());
+    expect(m.hiddenRows).toEqual([]);
+    expect(m.summary.hidden).toBe(0);
+    expect(m.rows.every((r) => r.visibility === null && !r.renamed)).toBe(true);
+    // The display name falls back to P6's, so every screen reading it is safe.
+    expect(m.rows.every((r) => r.activityName === r.activity.activityName)).toBe(true);
+  });
+});

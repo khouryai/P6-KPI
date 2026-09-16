@@ -1,16 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, Badge, statusTone, Notice, Panel, type Column, type HeroStat } from '../components/ui';
-import type { TestProgress as TP, BudgetRow } from '../../engine/types';
+import type { TestProgress as TP, BudgetRow, TestProgressCheck } from '../../engine/types';
 import { fmtPct, fmtHours, num } from '../format';
 import { normKey } from '../../engine/keys';
 import { parseDelimitedText } from '../../engine/parse';
 import { readWorkbook, pickSheet, workbookGrid } from '../../engine/workbook';
 import { parseP6Date, isValidISO } from '../../engine/dates';
-import type { Route } from '../router';
+import { href, type Route } from '../router';
 
 /** What the user is looking for when they open this screen. */
-type StateFilter = 'all' | 'missing' | 'keyed' | 'started' | 'done';
+type StateFilter = 'all' | 'missing' | 'keyed' | 'started' | 'done' | 'nowindow';
 
 const STATE_LABEL: Record<StateFilter, string> = {
   all: 'All budgeted activities',
@@ -18,6 +18,7 @@ const STATE_LABEL: Record<StateFilter, string> = {
   keyed: 'Counts keyed',
   started: 'Started, not finished',
   done: 'Complete',
+  nowindow: 'Earning, but in no month',
 };
 
 type Row = BudgetRow & { entry: TP | undefined };
@@ -58,18 +59,39 @@ export function TestProgress({ route }: { route: Route }) {
     if (stateFilter === 'keyed') out = out.filter((r) => !!r.entry);
     if (stateFilter === 'started') out = out.filter((r) => r.pctComplete > 0 && r.pctComplete < 1);
     if (stateFilter === 'done') out = out.filter((r) => r.pctComplete >= 1);
+    if (stateFilter === 'nowindow') out = out.filter((r) => r.pctComplete > 0 && !r.earnStart);
     if (text.trim()) {
       const f = text.toLowerCase();
-      out = out.filter((r) => r.activityId.toLowerCase().includes(f) || r.activity.activityName.toLowerCase().includes(f));
+      out = out.filter((r) => r.activityId.toLowerCase().includes(f) || r.activityName.toLowerCase().includes(f));
     }
     return out;
   }, [budgeted, entries, phase, loc, stateFilter, text]);
 
-  /** Stored rows whose Activity ID is not a budgeted activity any more. */
-  const orphans = useMemo(() => {
-    const budgetedIds = new Set(budgeted.map((r) => normKey(r.activityId)));
-    return state.data.testProgress.filter((t) => !budgetedIds.has(normKey(t.activityId)));
-  }, [state.data.testProgress, budgeted]);
+  /**
+   * Keyed rows that are doing nothing, with the detail needed to decide about them.
+   *
+   * The engine works these out, because deciding whether a keyed row is junk needs
+   * the whole schedule and the library, not just the list of budgeted IDs. What
+   * comes back carries the name, where it sat, what was keyed, and a sentence
+   * saying why it matches nothing — a bare Activity ID never told anybody whether
+   * deleting it would lose something.
+   */
+  const orphans = useMemo(() => model.testProgressChecks.filter((c) => !c.inBudget), [model.testProgressChecks]);
+
+  /** The ones that are certainly junk: WBS headers and IDs in no schedule at all. */
+  const removable = useMemo(() => orphans.filter((c) => c.status === 'not in extract' || c.rowType === 'WBS'), [orphans]);
+
+  /**
+   * Activities that have earned hours but sit in no month.
+   *
+   * Progress and dates are two separate facts here. Keying a percent says HOW MUCH
+   * was done; it says nothing about WHEN, and the when is what puts hours on the
+   * S-curve and into an Earned-vs-Built month. An activity at 100% that P6 has
+   * never actually started, and that carries no test window, earns its hours into
+   * the project total and into no month at all. That is not a rounding difference,
+   * it is the gap the Earned vs Built screen reports as unphased.
+   */
+  const noWindow = useMemo(() => budgeted.filter((r) => r.pctComplete > 0 && !r.earnStart), [budgeted]);
 
   const now = () => new Date().toISOString();
 
@@ -166,6 +188,78 @@ export function TestProgress({ route }: { route: Route }) {
     }
   };
 
+  /** Delete a set of keyed rows, naming what is going so the confirm is informed. */
+  const removeChecks = (list: TestProgressCheck[], what: string) => {
+    if (list.length === 0) return;
+    if (!confirm(`Delete the test counts keyed against ${list.length} ${what} ${list.length === 1 ? 'activity' : 'activities'}? The keying cannot be recovered.`)) return;
+    const ids = new Set(list.map((c) => normKey(c.activityId)));
+    actions.update('testProgress', (tps) => tps.filter((t) => !ids.has(normKey(t.activityId))));
+    actions.notify('ok', `Removed ${list.length} keyed ${list.length === 1 ? 'row' : 'rows'}. Save to write.`);
+  };
+
+  /** What a keyed row that earns nothing needs to say for itself. */
+  const orphanColumns: Column<TestProgressCheck>[] = [
+    {
+      key: 'id',
+      label: 'Activity',
+      value: (c) => c.activityId,
+      hint: 'The Activity ID as it was keyed, and the name of the activity it points at when there is one.',
+      render: (c) => (
+        <div className="min-w-0">
+          <div className="mono text-[var(--text-muted)]">{c.activityId}</div>
+          <div className="max-w-[26rem] truncate font-semibold" title={c.p6Name ? `Renamed by you. P6 calls this:\n${c.p6Name}` : (c.activityName ?? '')}>
+            {c.activityName ?? <span className="font-normal text-[var(--text-subtle)]">no activity with this ID</span>}
+          </div>
+        </div>
+      ),
+    },
+    { key: 'status', label: 'What it is', value: (c) => c.status, render: (c) => <Badge tone={statusTone(c.status === 'not in extract' || c.status === 'not budgeted' ? 'NONE' : c.status === 'hidden' ? 'EXCLUDED' : c.status)}>{c.status}</Badge> },
+    { key: 'phase', label: 'Phase', value: (c) => c.phaseName },
+    { key: 'loc', label: 'Loc', value: (c) => c.location },
+    {
+      key: 'type',
+      label: 'Type',
+      value: (c) => c.activityType,
+      render: (c) => <span className="block max-w-[16rem] truncate" title={c.activityType}>{c.activityType || <span className="text-[var(--text-subtle)]">—</span>}</span>,
+    },
+    { key: 'budget', label: 'Budget h', value: (c) => c.budgetHours, num: true, render: (c) => (c.budgetHours === null ? <span className="text-[var(--text-subtle)]">—</span> : fmtHours(c.budgetHours)) },
+    {
+      key: 'keyed',
+      label: 'Keyed',
+      value: (c) => c.testsTotal ?? c.pctOverride ?? 0,
+      hint: 'What you would lose by deleting this row: the test counts, the percent override and the window dates keyed against it.',
+      render: (c) => (
+        <span className="text-[12px]">
+          {c.testsTotal !== null && <>{c.testsComplete ?? 0}/{c.testsTotal} tests</>}
+          {c.pctOverride !== null && <>{c.testsTotal !== null ? ', ' : ''}{fmtPct(c.pctOverride, 0)} override</>}
+          {c.testStartOverride && <>, from {c.testStartOverride}</>}
+          {c.testEndOverride && <> to {c.testEndOverride}</>}
+          {c.testsTotal === null && c.pctOverride === null && !c.testStartOverride && !c.testEndOverride && <span className="text-[var(--text-subtle)]">nothing</span>}
+        </span>
+      ),
+    },
+    {
+      key: 'reason',
+      label: 'Why it earns nothing, and what to do',
+      value: (c) => c.reason,
+      hint: '',
+      // `.tbl td` sets nowrap and outranks a utility class on specificity, so the
+      // sentence has to be told inline that it may wrap or it runs off the table.
+      render: (c) => <span className="block text-[12px] text-[var(--text-muted)]" style={{ maxWidth: '34rem', whiteSpace: 'normal' }}>{c.reason}</span>,
+    },
+    {
+      key: 'act',
+      label: '',
+      value: () => '',
+      hint: '',
+      render: (c) => (
+        <button className="btn-link danger text-[11px]" title="Delete the counts keyed against this Activity ID" onClick={() => clearRow(c.activityId)}>
+          remove
+        </button>
+      ),
+    },
+  ];
+
   const covered = budgeted.filter((r) => r.hasTestCounts || r.pctSource === 'OVERRIDE').length;
   const testsTotal = budgeted.reduce((s, r) => s + (r.testsTotal ?? 0), 0);
   const testsDone = budgeted.reduce((s, r) => s + (r.testsComplete ?? 0), 0);
@@ -188,8 +282,8 @@ export function TestProgress({ route }: { route: Route }) {
       render: (r) => (
         <div className="min-w-0">
           <div className="mono text-[var(--text-muted)]">{r.activityId}</div>
-          <div className="max-w-[26rem] truncate font-semibold" title={r.activity.activityName}>
-            {r.activity.activityName}
+          <div className="max-w-[26rem] truncate font-semibold" title={r.renamed ? `Renamed by you. P6 calls this:\n${r.activity.activityName}` : r.activityName}>
+            {r.activityName}
           </div>
         </div>
       ),
@@ -339,6 +433,74 @@ export function TestProgress({ route }: { route: Route }) {
         </>
       }
     >
+      <details className="card mb-4">
+        <summary className="cursor-pointer card-title">
+          Which dates decide when an activity earns — and what the monthly P6 import changes
+        </summary>
+        <div className="mt-3 grid gap-3 text-[12px] text-[var(--text-muted)] lg:grid-cols-2">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text)]">Two separate facts</div>
+            <p className="mt-1">
+              <b>How much</b> is done comes from this screen: the test counts, or a % override. <b>When</b> it was done comes from dates, and never from this screen unless
+              you type them into Test start and Test end. Marking a row <b>done</b> sets the count, not a date. It stamps nothing, and the date you clicked it is recorded
+              for the audit trail only — no curve, no month and no snapshot ever reads it.
+            </p>
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text)]">Where the window comes from</div>
+            <p className="mt-1">The earn window is picked in this order, and the Window column says which one won:</p>
+            <ul className="mt-1 list-disc pl-4">
+              <li><b>TEST WINDOW</b> — your Test start, and your Test end. Yours beats P6 both ends.</li>
+              <li><b>P6 ACTUAL</b> — P6's actual start to its actual finish. Both must be actual dates (the <span className="mono">A</span> flag), not planned ones.</li>
+              <li><b>IN PROGRESS</b> — P6 has an actual start but no actual finish, so the window runs from that start to the <b>data date</b> in Settings.</li>
+              <li><b>NOT STARTED</b> — no actual start and no test start. There is no window, so the hours belong to no month.</li>
+            </ul>
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text)]">How hours land in a month</div>
+            <p className="mt-1">
+              The hours spread evenly across the window by calendar day, and each month gets what accrued inside it. An activity running 10 Aug to 10 Sep puts roughly two
+              thirds of its earned hours in August and a third in September; it is not credited in a lump at either end. The P6 work calendar is ignored, so a window
+              spanning a shutdown still accrues straight through it.
+            </p>
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text)]">What the monthly import changes</div>
+            <p className="mt-1">
+              A current-schedule import rewrites P6's dates and durations, and nothing else. An activity that read IN PROGRESS against the data date last month, and comes
+              back carrying a real actual finish, becomes P6 ACTUAL — so its window ends on the day it really finished and its hours <b>re-spread across the months
+              retrospectively</b>. The S-curve and the Earned vs Built rows for earlier months can therefore move on an import. Anything you keyed here — counts, %
+              override, test window — is untouched and keeps overriding P6.
+            </p>
+            <p className="mt-1">
+              Snapshots are the exception, and the reason to take one: a snapshot is frozen on the day it is written and is the only record of what the numbers said at the
+              time.
+            </p>
+          </div>
+          <div className="lg:col-span-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text)]">Reading a month, e.g. August</div>
+            <p className="mt-1">
+              <b>Finished in August</b> is Earn end in August; <b>started in August</b> is Earn start in August; <b>worked on during August</b> is any window that overlaps
+              it, which is what the August row on Earned vs Built adds up. All three columns — Earn start, Earn end and Window — are on <a href={href('budget')}>Budget
+              Master</a>, where they can be sorted and filtered. If P6 is the only thing dating an activity, then August is only right once the August import has landed
+              with the actual dates in it; where you know better than P6, key the Test start and Test end here and they win permanently.
+            </p>
+          </div>
+        </div>
+      </details>
+
+      {noWindow.length > 0 && (
+        <div className="mb-4">
+          <Notice tone="warn">
+            <b>{noWindow.length} {noWindow.length === 1 ? 'activity has' : 'activities have'} progress but no date to hang it on.</b> They have a percent complete, so their
+            hours count in the project total, but P6 has never actually started them and no test window is keyed — so those hours land in no month, appear on no point of
+            the S-curve, and are what Earned vs Built reports as unphased. Give each one a <b>Test start</b> and <b>Test end</b>, or wait for the P6 import that carries its
+            actual dates.{' '}
+            <button className="btn-link" onClick={() => setStateFilter('nowindow')}>show them</button>
+          </Notice>
+        </div>
+      )}
+
       {budgeted.length === 0 && (
         <div className="mb-4">
           <Notice tone="info">
@@ -392,37 +554,51 @@ export function TestProgress({ route }: { route: Route }) {
       {orphans.length > 0 && (
         <div className="mb-4">
           <Notice tone="warn">
-            <b>{orphans.length} keyed {orphans.length === 1 ? 'row does' : 'rows do'} not match a budgeted activity.</b> Usually WBS rows pasted in by mistake, or activities
-            that left the schedule. They contribute nothing and hide real errors.{' '}
+            <b>{orphans.length} keyed {orphans.length === 1 ? 'row is' : 'rows are'} doing nothing.</b> The counts are stored but the activity they name carries no budget
+            hours, so nothing can be earned from them. They are not all the same problem, and the ones worth keeping are not the ones worth deleting — open the list to see
+            what each one actually is.{' '}
             <button className="btn-link" onClick={() => setShowOrphans((v) => !v)}>
-              {showOrphans ? 'hide' : 'show them'}
+              {showOrphans ? 'hide the detail' : `show all ${orphans.length}`}
             </button>
-            {showOrphans && (
-              <>
-                <ul className="mt-2 max-h-40 overflow-auto">
-                  {orphans.map((o) => (
-                    <li key={o.activityId} className="flex items-center gap-2 py-0.5">
-                      <code className="mono">{o.activityId}</code>
-                      <button className="btn-link danger text-[11px]" onClick={() => clearRow(o.activityId)}>
-                        remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  className="btn btn-mini mt-2"
-                  onClick={() => {
-                    const ids = new Set(orphans.map((o) => normKey(o.activityId)));
-                    actions.update('testProgress', (tps) => tps.filter((t) => !ids.has(normKey(t.activityId))));
-                    actions.notify('ok', `Removed ${orphans.length} unmatched rows. Save to write.`);
-                  }}
-                >
-                  Remove all {orphans.length}
-                </button>
-              </>
-            )}
           </Notice>
         </div>
+      )}
+
+      {orphans.length > 0 && showOrphans && (
+        <Panel
+          title={`${orphans.length} keyed rows that are earning nothing`}
+          meta={
+            <span className="flex flex-wrap items-center gap-2">
+              {removable.length > 0 && (
+                <button
+                  className="btn btn-mini"
+                  title="WBS summary headers and Activity IDs that are in no schedule. These can never carry hours."
+                  onClick={() => removeChecks(removable, 'certainly dead')}
+                >
+                  Remove the {removable.length} that {removable.length === 1 ? 'is' : 'are'} certainly dead
+                </button>
+              )}
+              <button className="btn btn-mini danger" onClick={() => removeChecks(orphans, 'unmatched')}>
+                Remove all {orphans.length}
+              </button>
+            </span>
+          }
+          className="mb-4"
+        >
+          <SortableTable
+            rows={orphans}
+            columns={orphanColumns}
+            rowKey={(c) => c.activityId}
+            defaultSort={{ key: 'status', dir: 'asc' }}
+            maxHeight="340px"
+            rowClass={(c) => (c.status === 'REVIEW' || c.status === 'IN BUDGET' ? 'row-warn' : '')}
+          />
+          <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">
+            <b>Not in extract</b> and <b>WBS</b> rows are safe to delete: no activity can ever claim them. A <b>REVIEW</b> or <b>EXCLUDED</b> row is the opposite — the
+            activity is really there and your counts are real, and it is the Activity Library or the Show column that is stopping it earning. Fix that and the counts start
+            working; delete the row and you lose the keying.
+          </p>
+        </Panel>
       )}
 
       <SortableTable

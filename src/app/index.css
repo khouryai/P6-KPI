@@ -604,9 +604,29 @@ select.cell-input { padding: 3px 22px 3px 6px; }
 
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* A numeric heading has to be right-aligned to sit over its numbers, and `.tbl th`
+   sets text-align: left. Two selectors, and the two-part one wins on specificity —
+   which is why every numeric heading used to sit at the LEFT of a column of
+   right-aligned figures. It has to be spelled out here to beat that, not left to
+   `.num` alone. */
+.tbl th.num { text-align: right; }
+
 /* A header is mono and letter-spaced; its trailing space would otherwise push a
    right-aligned heading a hair off the column of figures underneath it. */
 .tbl th.num { padding-right: calc(14px - 0.06em); }
+
+/* The sort caret gets a fixed slot that is there whether or not this is the sorted
+   column, so sorting a table cannot shift its headings sideways. On a numeric
+   column the slot goes BEFORE the label, keeping the label's last character flush
+   with the figures below it. */
+.th-sort {
+  display: inline-block;
+  width: 0.9em;
+  text-align: center;
+  color: var(--hitachi-red);
+  font-size: 9px;
+  vertical-align: baseline;
+}
 
 /* An editable cell is an input filling the cell, and the input's own padding was
    insetting its text from the column edge while the header stayed at the cell
