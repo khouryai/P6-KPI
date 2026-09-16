@@ -83,7 +83,6 @@ export function Settings() {
             <Field label="Default crew size"><input className="input w-full" type="number" step="any" value={s.defaultCrew} onChange={(e) => set({ defaultCrew: num(e.target.value) ?? 0 })} /></Field>
             <Field label="Default shift hours"><input className="input w-full" type="number" step="any" value={s.defaultShiftHours} onChange={(e) => set({ defaultShiftHours: num(e.target.value) ?? 0 })} /></Field>
             <Field label="Default complexity" hint="Used when a location has no factor."><input className="input w-full" type="number" step="0.05" value={s.defaultComplexity} onChange={(e) => set({ defaultComplexity: num(e.target.value) ?? 1 })} /></Field>
-            <Field label="LOE duration days" hint="A DUR activity longer than this is flagged. Long P6 durations are usually hammocks, not effort."><input className="input w-full" type="number" value={s.loeDurationDays} onChange={(e) => set({ loeDurationDays: num(e.target.value) ?? 60 })} /></Field>
           </div>
         </div>
         <div className="card space-y-3">
@@ -194,7 +193,6 @@ export function Settings() {
             <li>The curve spread is calendar-linear and ignores the P6 work calendar. An activity spanning a holiday shutdown accrues straight through it.</li>
             <li>Under RATE basis the budget is independent of P6 duration. A schedule change moves the curves but not the total.</li>
             <li>Percent complete from P6 duration is a weak proxy for progress and is only the fallback.</li>
-            <li>Tier 2 match resolution can over-consolidate if a library key is shortened too far. Budget Master shows which activities resolved through tier 2.</li>
             <li>Same-day activities credit in full on that day, unlike the source workbook which credited them from the following period.</li>
             <li>A date carrying a P6 constraint star (for example 01-Oct-26*) is treated as no date, as in the workbook, and is flagged on import.</li>
           </ul>

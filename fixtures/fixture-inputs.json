@@ -5,7 +5,6 @@
     "defaultCrew": 2,
     "defaultShiftHours": 8,
     "defaultComplexity": 1,
-    "loeDurationDays": 60,
     "dataDate": "2026-08-31",
     "statusDate": "2026-08-31"
   },
@@ -103,19 +102,35 @@
     },
     {
       "matchKey": "Sim Mode Test (Adjacent Location) (DF: A10 → B20)",
-      "retired": true
+      "discipline": "IXL",
+      "basis": "RATE",
+      "crewSize": 2,
+      "shiftHours": 10,
+      "durationShifts": 4
     },
     {
       "matchKey": "Sim Mode Test (Adjacent Location) (DF: B20 → A10)",
-      "retired": true
+      "discipline": "IXL",
+      "basis": "RATE",
+      "crewSize": 2,
+      "shiftHours": 10,
+      "durationShifts": 4
     },
     {
       "matchKey": "Sim Mode Test (Adjacent Location) (DF: C30 → B20)",
-      "retired": true
+      "discipline": "IXL",
+      "basis": "RATE",
+      "crewSize": 2,
+      "shiftHours": 10,
+      "durationShifts": 4
     },
     {
       "matchKey": "Sim Mode Test (Adjacent Location) (DF: B20 → C30)",
-      "retired": true
+      "discipline": "IXL",
+      "basis": "RATE",
+      "crewSize": 2,
+      "shiftHours": 10,
+      "durationShifts": 4
     },
     {
       "matchKey": "Special Test (Ad hoc)",

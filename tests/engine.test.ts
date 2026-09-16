@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parseP6Date, parseDdMmmYy, excelSerialToISO, monthEndsBetween } from '../src/engine/dates';
 import { parseTable, parseTsv, parseCsv, activityTypeOf, locationOf, seqCodeOf } from '../src/engine/parse';
 import { discoverLibrary, discoverLocations } from '../src/engine/discover';
-import { indexLibrary, resolveMatchKey, dropLastParenthetical } from '../src/engine/match';
+import { indexLibrary, resolveMatchKey } from '../src/engine/match';
 import { accruedFraction } from '../src/engine/curves';
 import { computeModel, buildSnapshot, effectiveInclude, buildCurve, rowTotals, assignSubsystem, setCrewCount, effectiveCrew, crewWeights, isOnDefaults } from '../src/engine/compute';
 import { DEFAULT_SETTINGS, type LibraryEntry } from '../src/engine/types';
@@ -113,26 +113,29 @@ describe('discovery', () => {
   });
 });
 
-describe('two tier match resolution', () => {
-  it('drops the last parenthetical group', () => {
-    expect(dropLastParenthetical('IXL Sim Mode Test (Adjacent Location) (DF: W40 -> Y10)')).toBe('IXL Sim Mode Test (Adjacent Location)');
-    expect(dropLastParenthetical('No parens')).toBe('No parens');
-  });
-  it('maps all four DF variants to one consolidated library key', () => {
+describe('match resolution', () => {
+  it('matches an activity type to its library key exactly', () => {
     const idx = indexLibrary([{ matchKey: 'IXL Sim Mode Test (Adjacent Location)' }]);
-    for (const v of ['W40 -> Y10', 'Y10 -> W40', 'W40 -> W34', 'W34 -> W40']) {
+    const r = resolveMatchKey('IXL Sim Mode Test (Adjacent Location)', idx);
+    expect(r.matchKey).toBe('IXL Sim Mode Test (Adjacent Location)');
+    expect(r.entry).not.toBeNull();
+  });
+  it('does NOT widen a key by dropping its last bracketed phrase', () => {
+    // The old tier 2. A key must never quietly price a type nobody looked at.
+    const idx = indexLibrary([{ matchKey: 'IXL Sim Mode Test (Adjacent Location)' }]);
+    for (const v of ['W40 -> Y10', 'Y10 -> W40', 'W40 -> W34']) {
       const r = resolveMatchKey(`IXL Sim Mode Test (Adjacent Location) (DF: ${v})`, idx);
-      expect(r.matchKey).toBe('IXL Sim Mode Test (Adjacent Location)');
-      expect(r.tier).toBe(2);
+      expect(r.entry).toBeNull();
+      expect(r.matchKey).toBe(`IXL Sim Mode Test (Adjacent Location) (DF: ${v})`);
     }
   });
-  it('leaves an unresolved type for REVIEW', () => {
+  it('leaves an unresolved type for REVIEW, keeping its own spelling', () => {
     const idx = indexLibrary([{ matchKey: 'Other' }]);
-    expect(resolveMatchKey('Special Test (Ad hoc)', idx)).toEqual({ matchKey: 'Special Test', entry: null, tier: null });
+    expect(resolveMatchKey('Special Test (Ad hoc)', idx)).toEqual({ matchKey: 'Special Test (Ad hoc)', entry: null });
   });
   it('matches case-insensitively, like Excel', () => {
     const idx = indexLibrary([{ matchKey: 'IXL Cutover (by BART)' }]);
-    expect(resolveMatchKey('IXL Cutover (By BART)', idx).tier).toBe(1);
+    expect(resolveMatchKey('IXL Cutover (By BART)', idx).entry).not.toBeNull();
   });
 });
 
@@ -177,7 +180,6 @@ describe('fixture acceptance', () => {
       expect(e, r.activityId).toBeDefined();
       expect(r.status).toBe(e.status);
       expect(r.matchKey).toBe(e.matchKey);
-      expect(r.matchTier).toBe(e.tier);
       expect(r.budgetHours).toBe(e.budget);
       expect(r.earnedHours).toBeCloseTo(e.earned as number, 9);
       expect(r.pctSource).toBe(e.pctSource);
@@ -185,7 +187,6 @@ describe('fixture acceptance', () => {
       expect(r.earnWindowSource).toBe(e.esrc);
       expect(r.earnStart).toBe(e.earnStart);
       expect(r.earnEnd).toBe(e.earnEnd);
-      expect(r.loeFlag).toBe(e.loe);
     }
     expect(model.rows.length).toBe(Object.keys(exp.activities).length);
   });
@@ -245,12 +246,11 @@ describe('fixture acceptance', () => {
     expect((aug.earned ?? 0) - (jul.earned ?? 0)).toBeCloseTo(42);
   });
 
-  it('the override bypasses the complexity factor and flags LOE', () => {
+  it('the override bypasses the complexity factor', () => {
     const r = model.rows.find((x) => x.activityId === '0-P2-TC-B20-FA-0060')!;
     expect(r.stdHours).toBe(1440);
     expect(r.overrideHours).toBe(400);
     expect(r.budgetHours).toBe(400);
-    expect(r.loeFlag).toBe(true);
   });
 
   it('a RATE type with no shift count budgets zero and is flagged', () => {

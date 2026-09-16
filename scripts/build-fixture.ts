@@ -141,7 +141,6 @@ const inputs = {
     defaultCrew: 2,
     defaultShiftHours: 8,
     defaultComplexity: 1.0,
-    loeDurationDays: 60,
     dataDate: '2026-08-31',
     statusDate: '2026-08-31',
   },
@@ -165,10 +164,14 @@ const inputs = {
     { matchKey: 'Database Survey' },
     { matchKey: 'Milestone Release', basis: 'RATE', crewSize: 2, shiftHours: 10, durationShifts: 2 },
     { matchKey: 'Program Milestone', basis: 'RATE', crewSize: 1, shiftHours: 8, durationShifts: 1 },
-    { matchKey: 'Sim Mode Test (Adjacent Location) (DF: A10 → B20)', retired: true },
-    { matchKey: 'Sim Mode Test (Adjacent Location) (DF: B20 → A10)', retired: true },
-    { matchKey: 'Sim Mode Test (Adjacent Location) (DF: C30 → B20)', retired: true },
-    { matchKey: 'Sim Mode Test (Adjacent Location) (DF: B20 → C30)', retired: true },
+    // Each variant is priced in its own right. There is no tier 2 any more, so a key
+    // that does not match an activity type exactly prices nothing: the four "(DF: ...)"
+    // spellings each need their own entry, which is precisely the work the feature's
+    // removal pushes onto whoever keeps the library.
+    { matchKey: 'Sim Mode Test (Adjacent Location) (DF: A10 → B20)', discipline: 'IXL', basis: 'RATE', crewSize: 2, shiftHours: 10, durationShifts: 4 },
+    { matchKey: 'Sim Mode Test (Adjacent Location) (DF: B20 → A10)', discipline: 'IXL', basis: 'RATE', crewSize: 2, shiftHours: 10, durationShifts: 4 },
+    { matchKey: 'Sim Mode Test (Adjacent Location) (DF: C30 → B20)', discipline: 'IXL', basis: 'RATE', crewSize: 2, shiftHours: 10, durationShifts: 4 },
+    { matchKey: 'Sim Mode Test (Adjacent Location) (DF: B20 → C30)', discipline: 'IXL', basis: 'RATE', crewSize: 2, shiftHours: 10, durationShifts: 4 },
     { matchKey: 'Special Test (Ad hoc)', retired: true },
   ],
   overrides: [{ activityId: '0-P2-TC-B20-FA-0060', overrideHours: 400, note: 'Hammock, agreed allowance' }],

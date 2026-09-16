@@ -3,7 +3,6 @@ import { useApp } from '../state';
 import { Page, SortableTable, CellInput, Select, Badge, statusTone, Notice, type Column } from '../components/ui';
 import type { LibraryStat, LibraryEntry, Basis, CrewLine } from '../../engine/types';
 import { assignSubsystem, crewLines, setCrewCount } from '../../engine/compute';
-import { dropLastParenthetical } from '../../engine/match';
 import { fmtHours, num } from '../format';
 import { normKey } from '../../engine/keys';
 import type { Route } from '../router';
@@ -63,36 +62,6 @@ export function Library({ route }: { route: Route }) {
     actions.notify('ok', `Added "${key}". Price it below, then Save.`);
   };
 
-  /**
-   * Families of keys that differ only by their last parenthetical, for example the
-   * "(DF: W40 -> Y10)" variants. Consolidating creates the shortened key and retires the
-   * variants, so tier 2 matching resolves every one of them to a single priced entry.
-   */
-  const families = useMemo(() => {
-    const groups = new Map<string, LibraryStat[]>();
-    for (const l of model.library) {
-      const stem = dropLastParenthetical(l.matchKey);
-      if (stem === l.matchKey || stem === '') continue;
-      const list = groups.get(stem) ?? [];
-      list.push(l);
-      groups.set(stem, list);
-    }
-    return [...groups.entries()]
-      .filter(([stem, list]) => list.length >= 2 && !state.data.library.some((e) => normKey(e.matchKey) === normKey(stem) && !e.retired))
-      .map(([stem, list]) => ({ stem, variants: list, count: list.reduce((n, l) => n + l.count, 0), days: list.reduce((n, l) => n + l.totalP6Days, 0) }))
-      .sort((a, b) => b.days - a.days);
-  }, [model.library, state.data.library]);
-
-  const consolidate = (stem: string, variants: LibraryStat[]) => {
-    const donor = variants.find((v) => v.rateStatus === 'SET')?.entry ?? variants[0].entry;
-    actions.update('library', (lib) => {
-      const next = lib.map((e) => (variants.some((v) => normKey(v.matchKey) === normKey(e.matchKey)) ? clean({ ...e, retired: true }) : e));
-      const exists = next.find((e) => normKey(e.matchKey) === normKey(stem));
-      if (exists) return next.map((e) => (normKey(e.matchKey) === normKey(stem) ? clean({ ...e, retired: undefined }) : e));
-      return [...next, clean({ ...donor, matchKey: stem, retired: undefined })];
-    });
-    actions.notify('ok', `Consolidated ${variants.length} variants into "${stem}". They now resolve through tier 2.`);
-  };
   const disciplines = [...new Set(state.data.library.map((e) => e.discipline).filter(Boolean))] as string[];
 
   const basisOpts = [{ value: '', label: `${settings.defaultBasis} (auto)` }, { value: 'RATE', label: 'RATE' }, { value: 'DUR', label: 'DUR' }];
@@ -170,7 +139,7 @@ export function Library({ route }: { route: Route }) {
     { key: 'std', label: 'Std h / instance', value: (r) => r.stdHoursIfRate, num: true, render: (r) => (r.basisEff === 'RATE' ? fmtHours(r.stdHoursIfRate) : <span className="text-[var(--text-subtle)]" title="DUR basis: crew x shift hours x P6 original duration per activity">per P6 days</span>) },
     { key: 'budget', label: 'Budget h', value: (r) => r.budgetHours, num: true, render: (r) => fmtHours(r.budgetHours) },
     { key: 'notes', label: 'Notes', value: (r) => r.entry.notes ?? '', render: (r) => <CellInput value={r.entry.notes ?? ''} onCommit={(v) => edit(r.matchKey, { notes: v.trim() || undefined })} /> },
-    { key: 'act', label: '', value: () => '', render: (r) => <button className="btn-link text-[11px] font-normal" title="Remove this key from pricing. Its activities will resolve through tier 2 (last parenthetical dropped) or show as REVIEW. It is never re-added by import." onClick={() => retire(r.matchKey, true)}>retire</button> },
+    { key: 'act', label: '', value: () => '', render: (r) => <button className="btn-link text-[11px] font-normal" title="Remove this key from pricing. Its activities will show as REVIEW until another key matches them exactly. It is never re-added by import." onClick={() => retire(r.matchKey, true)}>retire</button> },
   ];
 
   return (
@@ -187,31 +156,11 @@ export function Library({ route }: { route: Route }) {
       <div className="mb-3 grid gap-3 lg:grid-cols-2">
         <div className="card">
           <h2 className="card-title">Add a key by hand</h2>
-          <p className="text-[12px] text-[var(--text-muted)]">Keys are normally discovered from the schedule. Add one by hand when you want a shorter, consolidated key for tier 2 matching to find.</p>
+          <p className="text-[12px] text-[var(--text-muted)]">Keys are normally discovered from the schedule. Add one by hand for an activity type you know is coming but which no import has carried yet.</p>
           <div className="mt-2 flex gap-2">
             <input className="input flex-1" placeholder="IXL Sim Mode Test (Adjacent Location)" value={newKey} onChange={(e) => setNewKey(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addKey(newKey)} />
             <button className="btn" onClick={() => addKey(newKey)}>Add</button>
           </div>
-        </div>
-        <div className="card">
-          <h2 className="card-title">Consolidate variant families</h2>
-          {families.length === 0 ? (
-            <p className="text-[12px] text-[var(--text-muted)]">No families found. A family is two or more keys that differ only by their last parenthetical group.</p>
-          ) : (
-            <>
-              <p className="text-[12px] text-[var(--text-muted)]">These keys differ only by their last parenthetical. Consolidating prices them once.</p>
-              <ul className="mt-1 max-h-32 overflow-auto text-[12px]">
-                {families.map((f) => (
-                  <li key={f.stem} className="flex items-center justify-between gap-2 py-0.5">
-                    <span className="truncate" title={f.variants.map((v) => v.matchKey).join('\n')}>
-                      <b>{f.stem}</b> <span className="text-[var(--text-muted)]">({f.variants.length} variants, {f.count} activities, {f.days} P6 days)</span>
-                    </span>
-                    <button className="btn shrink-0 py-0.5 text-[11px]" onClick={() => consolidate(f.stem, f.variants)}>Consolidate</button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
         </div>
       </div>
       {crewFor && (
@@ -241,7 +190,7 @@ export function Library({ route }: { route: Route }) {
           </button>
           {showRetired && (
             <div className="mt-2">
-              <Notice tone="info">Retired keys are not used for pricing and are never re-added by an import. Their activities resolve through tier 2 to a shorter key, or show as REVIEW.</Notice>
+              <Notice tone="info">Retired keys are not used for pricing and are never re-added by an import. Their activities show as REVIEW until a key matches them exactly.</Notice>
               <ul className="mt-2 text-[12px]">
                 {retired.map((e) => (
                   <li key={e.matchKey} className="py-0.5">

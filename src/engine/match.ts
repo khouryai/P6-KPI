@@ -1,4 +1,4 @@
-import type { LibraryEntry, MatchTier } from './types';
+import type { LibraryEntry } from './types';
 import { normKey } from './keys';
 
 export type LibraryIndex = Map<string, LibraryEntry>;
@@ -13,27 +13,21 @@ export function indexLibrary(library: LibraryEntry[]): LibraryIndex {
   return idx;
 }
 
-/** Drop the last parenthetical group: "A (B) (C)" -> "A (B)". Unchanged when there is no "(". */
-export function dropLastParenthetical(type: string): string {
-  const i = type.lastIndexOf('(');
-  return i >= 0 ? type.slice(0, i).trim() : type;
-}
-
-export type MatchResult = { matchKey: string; entry: LibraryEntry | null; tier: MatchTier };
+export type MatchResult = { matchKey: string; entry: LibraryEntry | null };
 
 /**
- * Two tier resolution. Tier 1 is an exact (case-insensitive) match on the activity type.
- * Tier 2 drops the last parenthetical group and retries. Otherwise unresolved: the
- * caller marks the activity REVIEW and it budgets zero.
+ * One rule: an exact, case-insensitive match on the activity type.
+ *
+ * There used to be a second tier that dropped the last bracketed phrase and tried
+ * again, so that "X (Adjacent Location) (DF: W40 -> Y10)" could be priced by an
+ * entry called "X (Adjacent Location)". It is gone deliberately. A key that
+ * silently widens to cover types nobody looked at prices work by guesswork, and the
+ * guess is invisible in every total it feeds. An activity type that is not in the
+ * library is now simply unmatched: it shows as REVIEW, and the answer is to price
+ * that type or to hide the activity — both of which are explicit and both of which
+ * are visible afterwards.
  */
 export function resolveMatchKey(activityType: string, idx: LibraryIndex): MatchResult {
-  const t1 = idx.get(normKey(activityType));
-  if (t1) return { matchKey: t1.matchKey, entry: t1, tier: 1 };
-  const shorter = dropLastParenthetical(activityType);
-  if (shorter !== activityType) {
-    const t2 = idx.get(normKey(shorter));
-    if (t2) return { matchKey: t2.matchKey, entry: t2, tier: 2 };
-    return { matchKey: shorter, entry: null, tier: null };
-  }
-  return { matchKey: activityType, entry: null, tier: null };
+  const hit = idx.get(normKey(activityType));
+  return hit ? { matchKey: hit.matchKey, entry: hit } : { matchKey: activityType, entry: null };
 }

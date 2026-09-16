@@ -11,7 +11,6 @@ export type Settings = {
   defaultCrew: number; // 2
   defaultShiftHours: number; // 8
   defaultComplexity: number; // 1.00
-  loeDurationDays: number; // 60
   dataDate: string; // ISO date, end of the earned curve
   statusDate: string; // ISO date, used when taking a snapshot
 };
@@ -52,7 +51,7 @@ export type LibraryEntry = {
   shiftHours?: number;
   durationShifts?: number;
   notes?: string;
-  /** A key the user consolidated away. Never re-added by import; resolves through tier 2 or REVIEW. */
+  /** A key the user retired. Never re-added by import; its activities show as REVIEW. */
   retired?: boolean;
 };
 
@@ -195,7 +194,6 @@ export type RateStatus = 'SET' | 'DEFAULT' | 'NEEDS SHIFTS' | 'EXCLUDED' | 'NO M
 export type BaselineSource = 'BASELINE' | 'CURRENT' | 'NONE';
 export type PctSource = 'OVERRIDE' | 'TESTS' | 'P6';
 export type EarnWindowSource = 'TEST WINDOW' | 'P6 ACTUAL' | 'IN PROGRESS' | 'NOT STARTED';
-export type MatchTier = 1 | 2 | null;
 
 export type BudgetRow = {
   activity: P6Activity;
@@ -226,12 +224,10 @@ export type BudgetRow = {
   seqCode: string;
   activityType: string;
   matchKey: string; // resolved key, library spelling when matched
-  matchTier: MatchTier;
   rateStatus: RateStatus;
   status: ActivityStatus;
   discipline: string;
   basis: Basis | null;
-  loeFlag: boolean;
   needsShifts: boolean;
   complexity: number | null;
   stdHours: number | null;
@@ -460,9 +456,7 @@ export type Summary = {
   testProgressKeyed: number;
   testProgressNotMatching: number;
   testProgressUsingOverride: number;
-  loeFlags: number;
   rateNeedsShifts: number; // activities in budget whose library entry needs shifts
-  tier2Resolved: number;
   onNoCurve: number; // in-budget activities with hours that appear on neither curve
   latestStatusDate: string | null;
   /** Library entries priced as a crew of named subsystems rather than a headcount. */
@@ -566,7 +560,6 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultCrew: 2,
   defaultShiftHours: 8,
   defaultComplexity: 1.0,
-  loeDurationDays: 60,
   dataDate: '',
   statusDate: '',
 };

@@ -5,6 +5,53 @@ import { fsaSupported } from '../folder';
 export function Setup() {
   const { state, actions } = useApp();
   const canPickFolder = fsaSupported();
+
+  /*
+   * Coming back to a folder that is already chosen is not setting the app up, and
+   * it should not read like it. The folder is remembered; what lapsed is the
+   * browser's permission to touch it, which only a gesture can restore. By the time
+   * this renders the app has already tried silently and a click anywhere is already
+   * wired to try again, so this is a short explanation with one button rather than
+   * the first-run screen.
+   */
+  if (state.status === 'needs-permission') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--surface-3)] p-6">
+        <div className="card max-w-lg">
+          <h1 className="text-xl font-semibold text-[var(--text)]">Reconnecting to “{state.folderName}”</h1>
+          <p className="mt-2 text-[var(--text-muted)]">
+            Your folder is remembered and nothing has been lost. Windows drops the app’s permission to open it each time the app closes, and only a click can give it
+            back — so click below, or anywhere in this window, and the dashboard opens.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button className="btn btn-primary" onClick={() => void actions.grantPermission()}>
+              Open “{state.folderName}”
+            </button>
+          </div>
+          <div className="mt-4">
+            <Notice tone="info">
+              To stop being asked at all: when the browser shows its permission bubble, choose <b>Allow on every visit</b> rather than <b>Allow this time</b>. After that
+              the app opens straight onto the dashboard.
+            </Notice>
+          </div>
+          {state.error && (
+            <div className="mt-3">
+              <Notice tone="error">{state.error}</Notice>
+            </div>
+          )}
+          <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--line-soft)] pt-3">
+            <button className="btn btn-mini" disabled={!canPickFolder} onClick={() => void actions.chooseFolder()}>
+              Choose a different folder…
+            </button>
+            <button className="btn btn-mini" onClick={() => void actions.forgetFolder()} title="Forget this folder and start again">
+              Forget this folder
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--surface-3)] p-6">
       <div className="card max-w-xl">
@@ -14,6 +61,10 @@ export function Setup() {
         </p>
         <p className="mt-2 text-[var(--text-muted)]">
           Suggested location: <code className="rounded bg-[var(--surface-3)] px-1">OneDrive\TC-Budget</code>. After choosing it, right-click the folder in Explorer and pick <b>Always keep on this device</b> so OneDrive never leaves a cloud-only placeholder behind.
+        </p>
+        <p className="mt-2 text-[var(--text-muted)]">
+          When the browser asks whether this app may edit the folder, choose <b>Allow on every visit</b>. Answering <b>Allow this time</b> works, but the app will have to
+          ask again the next time it opens.
         </p>
         {!canPickFolder && (
           <div className="mt-3">
@@ -29,13 +80,8 @@ export function Setup() {
           </div>
         )}
         <div className="mt-4 flex flex-wrap gap-2">
-          {state.status === 'needs-permission' ? (
-            <button className="btn btn-primary" onClick={() => void actions.grantPermission()}>
-              Reconnect to “{state.folderName}”
-            </button>
-          ) : null}
           <button className="btn btn-primary" disabled={!canPickFolder} onClick={() => void actions.chooseFolder()}>
-            {state.status === 'needs-permission' ? 'Choose a different folder' : 'Choose the storage folder…'}
+            Choose the storage folder…
           </button>
           <button className="btn" onClick={() => void actions.useBrowserStorage()} title="Save in this browser profile instead of a folder.">
             Save in this browser instead

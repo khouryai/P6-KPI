@@ -75,8 +75,6 @@ export function Dashboard() {
     { label: 'In-budget activities on no curve', count: s.onNoCurve, to: href('budget', { flag: 'nocurve' }), note: 'A start or finish is missing or unparseable on both schedules.' },
     { label: 'Baseline missing, using current dates', count: s.baselineFallback, to: href('budget', { flag: 'blcurrent' }), note: 'Plan equals forecast for these by default, not by agreement.' },
     { label: 'Percent complete still from P6 duration', count: s.pctFromP6, to: href('budget', { flag: 'pctp6' }), note: 'Add test case counts to move these to earned tests.' },
-    { label: 'LOE flags (DUR basis, long duration)', count: s.loeFlags, to: href('budget', { flag: 'loe' }), note: 'A long P6 duration is usually a hammock, not effort.' },
-    { label: 'Resolved through tier 2 matching', count: s.tier2Resolved, to: href('budget', { flag: 'tier2' }), note: 'Check the consolidated key is not too broad.' },
     { label: 'Test progress rows not matching an activity', count: s.testProgressNotMatching, to: href('progress', { flag: 'unmatched' }), note: 'Open the list: it says what each one is and whether losing it costs anything.' },
     { label: 'Your edits pointing at an activity that is gone', count: s.staleOverrides, to: href('budget'), note: 'Kept in case the Activity ID comes back. Doing nothing until it does.' },
   ];
