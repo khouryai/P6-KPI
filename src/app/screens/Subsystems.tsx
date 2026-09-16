@@ -183,7 +183,7 @@ export function Subsystems() {
         </Panel>
       )}
 
-      <SortableTable rows={stats} columns={columns} rowKey={(r) => r.code || '(unassigned)'} defaultSort={{ key: 'budget', dir: 'desc' }} maxHeight="calc(100vh - 560px)" />
+      <SortableTable tableId="subsystems" rows={stats} columns={columns} rowKey={(r) => r.code || '(unassigned)'} defaultSort={{ key: 'budget', dir: 'desc' }} maxHeight="calc(100vh - 560px)" />
 
       {opened && (
         <Panel

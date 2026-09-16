@@ -304,6 +304,60 @@ curve usually means the rates, dates or test counts changed after it was taken, 
 is worth explaining rather than erasing. Delete is for a snapshot that should never
 have existed — a wrong status date, a duplicate.
 
+## The two-week log
+
+`src/engine/period.ts` answers the question a fortnightly review actually asks —
+*what was planned, what got done* — which is not readable off the S-curve. A curve
+3% short of plan says nothing about **which** activities slipped.
+
+Hours inside a window are measured exactly as the curve measures them: the accrued
+fraction at the end minus the fraction the day before it began. That is the whole
+reason `accruedFraction` is reused rather than reimplemented, and it is pinned by a
+test that sums every consecutive fortnight across eight years and expects the
+project total back. Planned comes back exact; earned comes back to `phasedEarned`,
+short by exactly `unphasedEarned` — the activities with progress but no usable dates,
+which belong to no window at all and which Earned vs Built already reports.
+
+An activity is listed if it did something in the window **or was supposed to**. That
+is what makes NOT STARTED and MISSED mean anything: they are the activities the plan
+was counting on. Outcomes are tested in order and the first that fits wins, so
+COMPLETED beats STARTED for something that did both, and MISSED beats CONTINUED —
+an activity due to finish in the window and still running is late, whatever else it
+also did, and burying that under "still going" would be the screen lying politely.
+
+The chart pair (violet planned, green achieved) was run through a colour-vision
+check rather than chosen by eye. Green is what earned already means on the S-curve;
+blue, the obvious partner, separates from it by ΔE 4 under tritanopia and was
+rejected for it. The outcome tiles carry their own words, so colour is never the
+only thing saying what a group is.
+
+## Choosing columns
+
+`SortableTable` takes an optional `tableId`, and with one it grows a Columns
+popover. The layout — which columns, in what order — lives in `localStorage` and
+emphatically not in the OneDrive store: it is about this person on this machine, and
+putting it in the store would make every colleague inherit it and make "which
+columns I like" something you have to remember to save.
+
+Three lists, and the third is not redundant:
+
+- `order` — left-to-right, by key. Keys the table no longer has are ignored, which
+  is why it stores keys and not indices.
+- `off` — columns switched off by hand.
+- `on` — **optional** columns switched on by hand.
+
+`on` has to exist separately because "not in `off`" cannot mean visible for a column
+that starts hidden, and `order` cannot stand in for "columns this layout knows
+about": reordering or hiding anything writes every key into it. A version that tried
+that had a real bug — hide one column, and five optional columns nobody asked for
+appeared. `tests/column-layout.test.ts` holds that case specifically.
+
+Drift is tolerated in both directions. A column the layout has never heard of is new
+since it was saved: it keeps its declared position, and if it is optional it stays
+off, so shipping a new column cannot rearrange a table somebody had set up. The
+move buttons step *over* hidden columns, because swapping a visible column with one
+that is not on screen moves nothing the person can see and reads as a broken button.
+
 ## Table headings sit over their own data
 
 `.tbl th` sets `text-align: left` and scores (0,1,1); `.num` sets `text-align: right`

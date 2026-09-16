@@ -3,7 +3,7 @@ import { useApp } from '../state';
 import { Page, SortableTable, CellInput, Select, Badge, statusTone, Notice, type Column } from '../components/ui';
 import type { LibraryStat, LibraryEntry, Basis, CrewLine } from '../../engine/types';
 import { assignSubsystem, crewLines, setCrewCount } from '../../engine/compute';
-import { fmtHours, num } from '../format';
+import { fmtHours, fmtPct, num } from '../format';
 import { normKey } from '../../engine/keys';
 import type { Route } from '../router';
 
@@ -138,6 +138,13 @@ export function Library({ route }: { route: Route }) {
     { key: 'shifts', label: 'Duration shifts', value: (r) => r.entry.durationShifts ?? null, num: true, render: (r) => <CellInput type="number" value={r.entry.durationShifts?.toString() ?? ''} placeholder={r.basisEff === 'RATE' ? 'required' : 'n/a'} onCommit={(v) => edit(r.matchKey, { durationShifts: num(v) })} /> },
     { key: 'std', label: 'Std h / instance', value: (r) => r.stdHoursIfRate, num: true, render: (r) => (r.basisEff === 'RATE' ? fmtHours(r.stdHoursIfRate) : <span className="text-[var(--text-subtle)]" title="DUR basis: crew x shift hours x P6 original duration per activity">per P6 days</span>) },
     { key: 'budget', label: 'Budget h', value: (r) => r.budgetHours, num: true, render: (r) => fmtHours(r.budgetHours) },
+    {
+      key: 'share',
+      label: 'Share',
+      value: (r) => r.shareOfBudget,
+      num: true,
+      render: (r) => <span className="tabular-nums text-[var(--text-muted)]">{fmtPct(r.shareOfBudget, 0)}</span>,
+    },
     { key: 'notes', label: 'Notes', value: (r) => r.entry.notes ?? '', render: (r) => <CellInput value={r.entry.notes ?? ''} onCommit={(v) => edit(r.matchKey, { notes: v.trim() || undefined })} /> },
     { key: 'act', label: '', value: () => '', render: (r) => <button className="btn-link text-[11px] font-normal" title="Remove this key from pricing. Its activities will show as REVIEW until another key matches them exactly. It is never re-added by import." onClick={() => retire(r.matchKey, true)}>retire</button> },
   ];
@@ -182,7 +189,7 @@ export function Library({ route }: { route: Route }) {
         <span><Badge tone="muted">EXCLUDED</Badge> not in budget</span>
         <span className="text-[var(--text-muted)]">RATE hours = crew x shift hours x duration shifts. DUR hours = crew x shift hours x P6 original duration. Complexity is applied per location. Type the subsystem straight into its column; use split only when one type draws on two or more groups.</span>
       </div>
-      <SortableTable rows={rows} columns={columns} rowKey={(r) => r.matchKey} defaultSort={{ key: 'days', dir: 'desc' }} rowClass={(r) => (r.rateStatus === 'DEFAULT' ? 'row-warn' : r.rateStatus === 'NEEDS SHIFTS' ? 'row-bad' : r.rateStatus === 'EXCLUDED' ? 'row-muted' : '')} />
+      <SortableTable tableId="library" rows={rows} columns={columns} rowKey={(r) => r.matchKey} defaultSort={{ key: 'days', dir: 'desc' }} rowClass={(r) => (r.rateStatus === 'DEFAULT' ? 'row-warn' : r.rateStatus === 'NEEDS SHIFTS' ? 'row-bad' : r.rateStatus === 'EXCLUDED' ? 'row-muted' : '')} />
       {retired.length > 0 && (
         <div className="mt-4">
           <button className="btn-link" onClick={() => setShowRetired((v) => !v)}>

@@ -68,6 +68,7 @@ export function Rollup() {
     {
       key: 'label',
       label: active.label,
+      locked: true,
       value: (g) => g.label,
       render: (g) => (
         <a className="btn-link" href={drillTo(g)} title={`Open Budget Master filtered to ${g.label}`}>
@@ -77,6 +78,14 @@ export function Rollup() {
     },
     { key: 'inBudget', label: 'In budget', value: (g) => g.inBudget, num: true },
     { key: 'budget', label: 'Budget h', value: (g) => g.budgetHours, num: true, render: (g) => fmtHours(g.budgetHours) },
+    {
+      key: 'share',
+      label: 'Share',
+      value: (g) => g.shareOfBudget,
+      num: true,
+      hint: 'How much of the budget shown above sits in this row. Hours say how big; this says how big next to everything else.',
+      render: (g) => <span className="tabular-nums text-[var(--text-muted)]">{fmtPct(g.shareOfBudget, 0)}</span>,
+    },
     { key: 'earned', label: 'Earned h', value: (g) => g.earnedHours, num: true, render: (g) => fmtHours(g.earnedHours, 1) },
     { key: 'remaining', label: 'Remaining h', value: (g) => g.remainingHours, num: true, render: (g) => fmtHours(g.remainingHours, 1) },
     {
@@ -238,6 +247,7 @@ export function Rollup() {
 
           <div className="mt-4">
             <SortableTable
+              tableId="rollup"
               rows={groups}
               columns={columns}
               rowKey={(g) => g.key || '(none)'}

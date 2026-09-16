@@ -654,6 +654,150 @@ select.cell-input { padding: 3px 22px 3px 6px; }
   box-shadow: var(--shadow-sm);
 }
 
+/* ---------------------------------------------------------------------------
+   Two-Week Log: planned against achieved, and the outcome tiles.
+
+   The two bars share one track width so the second reads as a proportion of the
+   first at a glance — the whole question the screen exists to answer. The tiles
+   are filters, and each carries its own word, so the colour is reinforcement and
+   never the only thing telling you what a group is.
+   --------------------------------------------------------------------------- */
+.plan-bar { display: flex; flex-direction: column; gap: 10px; }
+.plan-bar-row { display: flex; align-items: center; gap: 10px; }
+.plan-bar-key {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 84px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.plan-bar-key i { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.plan-bar-track {
+  flex: 1;
+  height: 16px;
+  min-width: 80px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.plan-bar-track > span { display: block; height: 100%; border-radius: 5px; transition: width var(--dur) var(--easing); }
+.plan-bar-val {
+  width: 84px;
+  flex-shrink: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.outcome-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-soft);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--card-bg);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--dur-fast) var(--easing), background var(--dur-fast) var(--easing);
+}
+.outcome-tile:hover { background: var(--surface-2); }
+.outcome-tile.is-on { background: var(--surface-2); border-color: var(--border-strong); }
+.outcome-tile-n { font-size: 22px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.outcome-tile-l {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.outcome-tile.tone-good { border-left-color: var(--good); }
+.outcome-tile.tone-info { border-left-color: var(--brand-blue); }
+.outcome-tile.tone-warn { border-left-color: var(--warn); }
+.outcome-tile.tone-bad { border-left-color: var(--bad); }
+.outcome-tile.tone-muted { border-left-color: var(--gray-600); }
+.outcome-tile.tone-good .outcome-tile-n { color: var(--good); }
+.outcome-tile.tone-bad .outcome-tile-n { color: var(--bad); }
+
+/* ---------------------------------------------------------------------------
+   Choosing columns. The trigger sits above the table's top-right corner, which
+   keeps it out of the header row: a control living inside a sticky, sortable
+   header competes with sorting for the same click.
+   --------------------------------------------------------------------------- */
+.table-shell { position: relative; }
+.table-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+.table-tools .btn.is-on { border-color: var(--border-strong); color: var(--text); }
+
+/* Catches the click that closes the popover, and sits under it. */
+.col-scrim { position: fixed; inset: 0; z-index: 40; }
+
+.col-pop {
+  position: absolute;
+  right: 0;
+  top: 30px;
+  z-index: 50;
+  width: 260px;
+  background: var(--white);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px -12px rgba(15, 17, 21, 0.28);
+  overflow: hidden;
+}
+.col-pop-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.col-pop-list { max-height: 340px; overflow: auto; padding: 4px; }
+.col-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.col-row:hover { background: var(--surface-2); }
+.col-row-label { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
+.col-row-label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-row-label input:disabled { cursor: not-allowed; }
+.col-row-moves { display: flex; gap: 2px; flex-shrink: 0; }
+.col-move {
+  width: 20px;
+  height: 20px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  line-height: 1;
+}
+.col-move:hover:not(:disabled) { border-color: var(--border-strong); background: var(--white); color: var(--text); }
+.col-move:disabled { opacity: 0.3; cursor: not-allowed; }
+.col-pop-foot {
+  padding: 7px 12px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+
 .mono { font-family: var(--f-mono); font-size: 11.5px; }
 
 /* ===========================================================================

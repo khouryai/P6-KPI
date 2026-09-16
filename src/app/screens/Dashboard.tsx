@@ -236,8 +236,17 @@ export function Dashboard() {
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label={selected === null ? 'Total budget' : `${selectedLabel} budget`} value={`${fmtHours(totals.budgetHours)} h`} sub={`${totals.inBudget} activities in budget`} primary />
-        <Stat label="Earned" value={`${fmtHours(totals.earnedHours)} h`} tone="good" sub={`${totals.pctFromTests} from tests, ${totals.pctFromP6} from P6 duration`} />
-        <Stat label="Remaining" value={`${fmtHours(totals.remainingHours)} h`} sub={`${totals.notStarted} activities not started`} />
+        <Stat
+          label="Earned"
+          value={`${fmtHours(totals.earnedHours)} h`}
+          tone="good"
+          sub={`${fmtPct(totals.pctComplete, 1)} of the budget · ${totals.pctFromTests} from tests, ${totals.pctFromP6} from P6 duration`}
+        />
+        <Stat
+          label="Remaining"
+          value={`${fmtHours(totals.remainingHours)} h`}
+          sub={`${fmtPct(1 - totals.pctComplete, 1)} of the budget still to earn · ${totals.notStarted} activities not started`}
+        />
         <Stat label="Percent complete" value={fmtPct(totals.pctComplete)} sub={`${totals.inProgress} in progress, ${totals.finished} finished`} />
       </div>
 

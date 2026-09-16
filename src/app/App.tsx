@@ -11,6 +11,7 @@ import { TestProgress } from './screens/TestProgress';
 import { Rollup } from './screens/Rollup';
 import { Subsystems } from './screens/Subsystems';
 import { TeamHours } from './screens/TeamHours';
+import { PeriodLog } from './screens/PeriodLog';
 import { Snapshots } from './screens/Snapshots';
 import { Settings } from './screens/Settings';
 
@@ -43,6 +44,9 @@ function Shell() {
       break;
     case 'team':
       screen = <TeamHours />;
+      break;
+    case 'period':
+      screen = <PeriodLog />;
       break;
     case 'snapshots':
       screen = <Snapshots />;

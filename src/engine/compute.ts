@@ -460,7 +460,8 @@ export function computeModel(input: ModelInput): Model {
   /** ACTIVITY rows still in play: the extract minus what the user hid. */
   const visibleActs = current.filter((a) => a.rowType === 'ACTIVITY' && !hiddenIds.has(normKey(a.activityId)));
 
-  // Library stats.
+  // Library stats. The share is of the whole budget, so the keys that matter stand out.
+  const libraryTotal = rows.reduce((s, r) => s + r.budgetHours, 0);
   const libraryStats: LibraryStat[] = input.library.filter((e) => !e.retired).map((entry) => {
     const k = normKey(entry.matchKey);
     // A row whose type did not match anything keeps its raw type as matchKey, so the
@@ -468,6 +469,7 @@ export function computeModel(input: ModelInput): Model {
     const mine = rows.filter((r) => normKey(r.matchKey) === k && r.status !== 'REVIEW');
     // Count and total P6 days follow the workbook: every ACTIVITY row whose raw type equals the key.
     const rawMine = visibleActs.filter((a) => normKey(a.activityType) === k);
+    const mineBudget = mine.reduce((s, r) => s + r.budgetHours, 0);
     const basisEff = effectiveBasis(entry, settings);
     const crewEff = effectiveCrew(entry, settings);
     const shiftEff = effectiveShiftHours(entry, settings);
@@ -482,20 +484,27 @@ export function computeModel(input: ModelInput): Model {
       shiftEff,
       rateStatus: libraryRateStatus(entry, settings),
       stdHoursIfRate: basisEff === 'RATE' ? crewEff * shiftEff * (entry.durationShifts ?? 0) : null,
-      budgetHours: mine.reduce((s, r) => s + r.budgetHours, 0),
+      budgetHours: mineBudget,
+      shareOfBudget: libraryTotal ? mineBudget / libraryTotal : 0,
       entry,
     };
   });
 
   // Location stats.
+  const budgetAllRows = rows.reduce((s, r) => s + r.budgetHours, 0);
   const locationStats: LocationStat[] = input.locations.map((loc) => {
     const k = normKey(loc.code);
     const mine = rows.filter((r) => normKey(r.location) === k);
+    const budgetHours = mine.reduce((s, r) => s + r.budgetHours, 0);
+    const earnedHours = mine.reduce((s, r) => s + r.earnedHours, 0);
     return {
       code: loc.code,
       count: mine.length,
       effectiveFactor: loc.complexityFactor ?? settings.defaultComplexity,
-      budgetHours: mine.reduce((s, r) => s + r.budgetHours, 0),
+      budgetHours,
+      shareOfBudget: budgetAllRows ? budgetHours / budgetAllRows : 0,
+      earnedHours,
+      pctComplete: budgetHours ? earnedHours / budgetHours : 0,
       location: loc,
     };
   });
@@ -786,6 +795,9 @@ export function groupRows(rows: BudgetRow[], dim: GroupDim): GroupStat[] {
     else buckets.set(k, [r]);
   }
   const out: GroupStat[] = [];
+  // The share is of the rows handed in, so a rollup inside one phase reports shares
+  // of that phase rather than of the project. The screen's own total then agrees.
+  const grandTotal = rows.reduce((s, r) => s + r.budgetHours, 0);
   for (const [key, list] of buckets) {
     const inBudgetRows = list.filter((r) => r.status === 'IN BUDGET');
     const budgetHours = list.reduce((s, r) => s + r.budgetHours, 0);
@@ -801,6 +813,7 @@ export function groupRows(rows: BudgetRow[], dim: GroupDim): GroupStat[] {
       budgetHours,
       earnedHours,
       remainingHours: budgetHours - earnedHours,
+      shareOfBudget: grandTotal ? budgetHours / grandTotal : 0,
       pctComplete: budgetHours ? earnedHours / budgetHours : 0,
       notStarted: inBudgetRows.filter((r) => r.earnWindowSource === 'NOT STARTED').length,
       inProgress: inBudgetRows.filter((r) => r.earnWindowSource === 'IN PROGRESS').length,
