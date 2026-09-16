@@ -6,9 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "build": "tsc --noEmit -p tsconfig.json && vite build && node scripts/build-standalone.mjs",
     "build:standalone": "node scripts/build-standalone.mjs",
-    "build:all": "npm run build && npm run build:standalone",
+    "build:all": "npm run build",
     "preview": "vite preview",
     "serve": "node server/serve.mjs",
     "serve:ps": "pwsh -NoProfile -File server/serve.ps1",
@@ -16,7 +16,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "fixture": "node scripts/build-fixture.mjs",
-    "verify:workbook": "node scripts/verify-workbook.mjs"
+    "verify:workbook": "node scripts/verify-workbook.mjs",
+    "build:web": "tsc --noEmit -p tsconfig.json && vite build"
   },
   "dependencies": {
     "react": "^19.2.0",

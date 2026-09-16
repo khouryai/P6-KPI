@@ -5,7 +5,7 @@ import type { Settings as S } from '../../engine/types';
 import { buildWorkbook, workbookBytes, downloadBytes, stamp } from '../export';
 import type { Bundle } from '../state';
 import { num, fmtDateTime } from '../format';
-import { BUILD_COMMIT, BUILD_TIME, IS_STANDALONE } from '../build';
+import { BUILD_COMMIT, BUILD_TIME, IS_STANDALONE, runningFrom } from '../build';
 import { applyUpdate, canSelfUpdate, useUpdateReady } from '../update';
 
 export function Settings() {
@@ -152,7 +152,20 @@ export function Settings() {
               <div className="mono text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Running as</div>
               <div className="text-[12px]">{IS_STANDALONE ? 'Single file' : 'Served from dist'}</div>
             </div>
+            <div className="factlet">
+              <div className="mono text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Loaded from</div>
+              <div className="text-[12px] break-all" title={IS_STANDALONE ? 'The application folder this window was opened from' : 'The address this window was served from'}>
+                {runningFrom()}
+              </div>
+            </div>
           </div>
+          {IS_STANDALONE && (
+            <Notice tone="info">
+              A desktop shortcut keeps pointing at the copy of the folder it was made from. If Update.cmd says it updated a <i>different</i> folder from the one above,
+              that is why this window still shows the old build: run <code>Update.cmd</code> in the folder above, or <code>Create Desktop App.cmd</code> in the updated
+              one to repoint the icon.
+            </Notice>
+          )}
           <p className="text-[12px] text-[var(--text-muted)]">
             To pick up newer application code, run <code>Update.cmd</code> in the app folder. It replaces the program files and leaves your data alone: your data lives in
             your storage folder or this browser, never inside the application. The app itself makes no call to the internet; updating is always something you start.
@@ -169,7 +182,10 @@ export function Settings() {
               <Notice tone="info">This window checks the local server for a newer build when you come back to it. You are on the newest one it has seen.</Notice>
             )
           ) : (
-            <Notice tone="info">This is the single-file version. Close the window and open it again after running <code>Update.cmd</code> and you are on the new build.</Notice>
+            <Notice tone="info">
+              This is the single-file version: there is no server and no cache to clear, so closing this window and opening it again after <code>Update.cmd</code> is all
+              it takes. If it still shows the same build stamp afterwards, check the folder in "Loaded from" is the folder that was updated.
+            </Notice>
           )}
         </div>
         <div className="card lg:col-span-2">

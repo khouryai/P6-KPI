@@ -176,7 +176,10 @@ It fetches the current code from GitHub and replaces the program files in place:
   no cache to clear; the single file is read fresh each time.
 
 The desktop shortcut keeps working either way: it points at a path, and the file at
-that path is simply newer.
+that path is simply newer — **as long as that path is in the folder you updated.** The
+shortcut stores the full path of the folder it was made from, so if you ever unzipped a
+second copy of the app, updating one copy leaves the icon opening the other. The updater
+now reads the shortcut and warns you when the two do not match.
 
 ### What it does not touch
 
@@ -221,6 +224,23 @@ for permission after a restart. One click on **Reconnect** restores it.
 uploading. The app retries five times with a growing delay. Wait a moment and press
 **Save** again; nothing is lost, your edits are still in the window.
 
+**I ran Update.cmd and the desktop icon still shows the old version.** Check the two
+build stamps: the updater prints `Current` and `Now` when it runs, and the app shows
+its own under **Settings → Version**. Then, in that order:
+
+1. *Did the window restart?* The desktop icon keeps the build it was opened with. Close
+   the window — all of them, if you opened several — and click the icon again.
+2. *Is the icon opening the folder you updated?* **Settings → Version → Loaded from**
+   shows the folder that window came from, and the updater prints the folder it wrote
+   to. If they differ, that is the whole problem: run `Update.cmd` in the icon's folder,
+   or run `Create Desktop App.cmd` in the updated folder to repoint the icon.
+3. *Still the same stamp?* Press **Ctrl+Shift+R** in the app window once, which forces
+   the browser to re-read the file from disk rather than its own cache.
+
+`start.cmd` and the icon are two different builds of the same code — `dist\` and
+`standalone\index.html` — and the updater replaces both, so one being older than the
+other means one of the three things above, not a half-finished update.
+
 **A red "conflict copies" banner.** Two machines wrote to the folder at once and
 OneDrive kept both versions. The app never merges them. Open the folder, compare the
 files it names, keep one, delete the other, then **Settings → Reload**.
@@ -233,15 +253,22 @@ files it names, keep one, delete the other, then **Settings → Reload**.
 npm install
 npm test               # engine, storage, rollup and import-format suites
 npm run dev            # dev server with hot reload
-npm run build:all      # rebuilds both dist/ and standalone/ — commit the result
+npm run build          # rebuilds BOTH dist/ and standalone/ — commit them together
 npm run serve          # Node version of the local server
 TC_WORKBOOK=path\to\TC_P6_Budget_SCurve.xlsx npm test   # parity against the real workbook
 ```
 
 `dist/` and `standalone/` are committed on purpose: they are the delivered product for
 a laptop that cannot build them, and they are what `Update.cmd` fetches. **Re-run
-`npm run build:all` and commit the output whenever you change anything under `src/`**
+`npm run build` and commit the output whenever you change anything under `src/`**
 — a source-only commit changes nothing on the laptop.
+
+They are two builds of the same source and must never be shipped apart: `start.cmd`
+serves `dist/`, while the desktop icon opens `standalone/index.html` straight from
+disk. Rebuilding only `dist/` gives a laptop where the served window has the new code
+and the desktop app still has the old one, with nothing on screen to say so.
+`npm run build` makes both in one go, and `tests/shipped-build.test.ts` fails when the
+two stamps drift apart, so a half-built commit does not reach the laptop.
 
 `Update.cmd` reads `server/update.json` for the repo and branch to pull from, so
 moving the app to a different branch is a one-line change that the updater itself

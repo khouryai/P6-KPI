@@ -163,6 +163,39 @@ describe('the updater', () => {
     expect(code).toMatch(/Trim\(\[char\]34\)/);
   });
 
+  it('says how each kind of window picks the new build up', () => {
+    // New files on disk are not new code in an open window, and the desktop icon and
+    // the served window differ in what it takes. Silence there reads as a failed update.
+    expect(code).toMatch(/Desktop icon/);
+    expect(code).toMatch(/close the window, then open it again/);
+    expect(code).toMatch(/Show-HowToPickItUp/);
+  });
+
+  it('checks the desktop icon points at the folder it just updated, and changes nothing', () => {
+    const fn = /function Show-ShortcutTarget \{([\s\S]*?)\n\}/.exec(code);
+    expect(fn, 'the shortcut check must exist').not.toBeNull();
+    const body = fn![1];
+    expect(body).toMatch(/CreateShortcut/);
+    expect(body).toMatch(/standalone/);
+    // Reads the shortcut, never writes one, and never fails an update that worked.
+    expect(/\.Save\(\)|Remove-Item|Set-Content/.test(body)).toBe(false);
+    expect(body).toMatch(/try \{/);
+    expect(body, '$args is an automatic variable inside a function').not.toMatch(/\$args\s*=/);
+  });
+
+  it('keeps every PowerShell string closed', () => {
+    // A "quoted phrase" inside a double-quoted Say ends the string early: PowerShell
+    // has no backslash escape. This caught exactly that before it shipped.
+    const offenders: string[] = [];
+    code.split(/\r?\n/).forEach((line, i) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('Say ')) return;
+      const quotes = (trimmed.match(/"/g) ?? []).length;
+      if (quotes % 2 !== 0 || /\\"/.test(trimmed)) offenders.push(`update.ps1:${i + 1}  ${trimmed}`);
+    });
+    expect(offenders, 'use a single-quoted string to include double quotes').toEqual([]);
+  });
+
   it('points at a real branch of a real repo', () => {
     const cfg = JSON.parse(readFileSync(resolve(ROOT, 'server/update.json'), 'utf8'));
     expect(cfg.repo).toMatch(/^[\w.-]+\/[\w.-]+$/);

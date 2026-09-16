@@ -84,6 +84,52 @@ function Show-Stamp([string]$label, $stamp) {
   else { Say ("  {0,-8} {1}  built {2}" -f $label, $stamp.commit, $stamp.builtAt) }
 }
 
+# New files on disk are not new code in a window that is already open, and the two
+# ways of running this app pick them up differently. Saying so beats leaving someone
+# to wonder why their change is not there: the desktop icon opens
+# standalone\index.html straight from disk, so that window keeps the build it was
+# started with until it is closed and opened again.
+function Show-HowToPickItUp {
+  Say ""
+  Say "  To run the new build:" Cyan
+  Say "    Desktop icon (TC Budget)  close the window, then open it again"
+  Say "    start.cmd window          it offers to reload; or just reopen it"
+  Show-ShortcutTarget
+}
+
+# The desktop shortcut carries the full path of the folder it was made from. Update a
+# second copy of the folder and the icon quietly goes on opening the first one, which
+# looks exactly like "the update did not work". Nothing here changes anything: it reads
+# the shortcut and says whether it points at the folder that was just updated.
+function Show-ShortcutTarget {
+  try {
+    $desktop = [Environment]::GetFolderPath('Desktop')
+    $lnk = P $desktop "TC Budget.lnk"
+    if (-not (Test-Path -LiteralPath $lnk)) { return }
+    $shell = New-Object -ComObject WScript.Shell
+    # Not $args: that is an automatic variable inside a function.
+    $argLine = [string]($shell.CreateShortcut($lnk)).Arguments
+    if ([string]::IsNullOrWhiteSpace($argLine)) { return }
+    $m = [regex]::Match($argLine, 'file:///([^"]+)')
+    if (-not $m.Success) { return }
+    $target = [Uri]::UnescapeDataString($m.Groups[1].Value).Replace('/', '\')
+    $wanted = P $AppDir "standalone" "index.html"
+    if ($target.TrimEnd('\') -ieq $wanted.TrimEnd('\')) {
+      Say "    The desktop icon opens this folder, so it gets this build." Green
+      return
+    }
+    Say ""
+    Say "  WARNING: the desktop icon does NOT open the folder just updated." Yellow
+    Say "    Icon opens  $target" Yellow
+    Say "    Updated     $wanted" Yellow
+    Say "  That is why it can keep showing the old version. Either run Update.cmd in" Yellow
+    Say '  the icon''s folder, or run "Create Desktop App.cmd" here to repoint the icon.' Yellow
+  } catch {
+    # A missing shortcut, a locked Desktop folder or no COM: none of it matters enough
+    # to interrupt an update that already succeeded.
+  }
+}
+
 $before = Get-Stamp $AppDir
 
 Say ""
@@ -115,7 +161,8 @@ if ($hasGitDir -and $gitExe) {
   }
   Show-Stamp "Now" (Get-Stamp $AppDir)
   Say ""
-  Say "  Updated. Reload the app window, or close and reopen it." Green
+  Say "  Updated." Green
+  Show-HowToPickItUp
   exit 0
 }
 
@@ -279,7 +326,7 @@ try {
   Show-Stamp "Now" (Get-Stamp $AppDir)
   Say ""
   Say "  Updated $copied items." Green
-  Say "  If the app window is open it will offer to reload. Otherwise just open it." Green
+  Show-HowToPickItUp
   Say "  Your data was not touched: it lives in your storage folder, not in here." Green
 } finally {
   Remove-Staging

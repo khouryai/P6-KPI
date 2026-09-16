@@ -54,12 +54,15 @@ The workbook never has to be opened again, and neither does Excel:
 npm install
 npm test               # engine, storage and import-format suites
 npm run dev            # dev server on http://localhost:47800
-npm run build:all      # rebuild dist/ and standalone/ — commit the result
+npm run build          # rebuilds BOTH dist/ and standalone/ — commit them together
 TC_WORKBOOK=path/to/TC_P6_Budget_SCurve.xlsx npm test   # parity against the real workbook
 ```
 
 `dist/` and `standalone/` are committed deliberately: the laptop that runs this cannot
-build them. Rebuild and commit both whenever `src/` changes.
+build them. They are two builds of the same source — `dist/` is what `start.cmd` serves,
+`standalone/index.html` is what the desktop icon opens from disk — so they are always
+rebuilt and committed together. `npm run build` makes both, and `tests/shipped-build.test.ts`
+fails if one is left stale.
 
 Real P6 exports and the live workbook are commercially sensitive and are ignored by git.
 The only schedule data in the repo is the anonymised fixture in `fixtures/`, rebuilt with
