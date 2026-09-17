@@ -10,7 +10,7 @@ import { href } from '../router';
 import { useUnit } from '../units';
 import { TERMS } from '../../engine/vocab';
 import { setTestProgress, asFraction } from '../testProgress';
-import { reasonCatalogue, reasonFor, setMissedReason, addReasonToCatalogue, tallyReasons } from '../missedReasons';
+import { reasonCatalogue, reasonFor, setMissedReason, addReasonToCatalogue, removeReasonFromCatalogue, reasonUsage, tallyReasons } from '../missedReasons';
 
 /*
  * Planned against achieved, in the two colours the S-curve already uses for the
@@ -128,6 +128,9 @@ export function PeriodLog() {
 
   const missedReasons = state.data.missedReasons;
   const catalogue = useMemo(() => reasonCatalogue(missedReasons), [missedReasons]);
+  /** How many activities each reason has been given for, across every period. */
+  const usage = useMemo(() => reasonUsage(missedReasons), [missedReasons]);
+  const [editingReasons, setEditingReasons] = useState(false);
   /** Every activity the period counts as missed, whatever the table is filtered to. */
   const missed = useMemo(() => log.activities.filter((a) => a.outcome === 'MISSED'), [log.activities]);
   const reasonTally = useMemo(() => tallyReasons(missedReasons, missed.map((a) => a.activityId), log.to), [missedReasons, missed, log.to]);
@@ -226,6 +229,12 @@ export function PeriodLog() {
       () => actions.notify('ok', 'Two-week log copied. Paste it into your report.'),
       () => actions.notify('error', 'The browser would not give access to the clipboard.'),
     );
+  };
+
+  /** Put a reason on the list from the manage panel, without attaching it to a row. */
+  const addReason = () => {
+    const typed = prompt('A reason activities get missed for. It joins the list and is offered on every missed activity.', '');
+    if (typed?.trim()) addReasonToCatalogue(actions.update, typed);
   };
 
   const columns: Column<PeriodActivity>[] = [
@@ -428,6 +437,9 @@ export function PeriodLog() {
       stats={heroStats}
       actions={
         <>
+          <button className={`btn btn-mini${editingReasons ? ' btn-primary' : ''}`} onClick={() => setEditingReasons((v) => !v)} title="Add reasons to the Why missed list, or take off ones you never use">
+            Reasons ({catalogue.length})
+          </button>
           <button className="btn btn-mini" onClick={asText}>Copy as text</button>
           <a className="btn btn-mini" href={href('budget')}>Budget Master</a>
         </>
@@ -480,6 +492,47 @@ export function PeriodLog() {
             part of the window that has actually happened.
           </Notice>
         </div>
+      )}
+
+      {editingReasons && (
+        <Panel
+          className="mb-3"
+          title="The Why missed list"
+          meta={
+            <span className="flex items-center gap-3">
+              <button className="btn-link" onClick={addReason}>add a reason</button>
+              <button className="btn-link" onClick={() => setEditingReasons(false)}>done</button>
+            </span>
+          }
+        >
+          <p className="mb-2 text-[12px] text-[var(--text-muted)]">
+            What the dropdown offers on every missed activity. A reason nobody has used yet can be taken off — including the ones this app starts with, so a list you
+            never picked can be cut down to the handful this job actually argues about. A reason somebody has already given stays, because deleting it would leave
+            their answer with nothing to say it; the count beside it is how many activities carry it, across every period.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {catalogue.map((r) => {
+              const used = usage.get(normKey(r)) ?? 0;
+              return (
+                <span key={r} className={`reason-chip${used ? ' is-used' : ''}`}>
+                  <span>{r}</span>
+                  {used > 0 ? (
+                    <b className="reason-chip-n" title={`Given for ${used} ${used === 1 ? 'activity' : 'activities'}. In use, so it cannot be taken off the list.`}>{used}</b>
+                  ) : (
+                    <button
+                      className="reason-chip-x"
+                      title="Nobody has used this one. Take it off the list."
+                      onClick={() => removeReasonFromCatalogue(actions.update, r)}
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+              );
+            })}
+            {catalogue.length === 0 && <span className="text-[12px] text-[var(--text-muted)]">The list is empty. Add the reasons this job actually uses.</span>}
+          </div>
+        </Panel>
       )}
 
       {/* --- the answer, before the detail --- */}

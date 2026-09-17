@@ -62,7 +62,7 @@ export function emptyStoreData(): StoreData {
     library: [],
     overrides: [],
     testProgress: [],
-    missedReasons: { reasons: [], entries: [] },
+    missedReasons: { reasons: [], entries: [], removed: [] },
     subsystems: [],
     teamActuals: [],
     importsIndex: [],
@@ -170,7 +170,7 @@ export class Store {
     // was missed. An empty catalogue is the right reading of "nobody has said yet",
     // so a missing file is not a problem to report.
     const missed = parseJson<Partial<MissedReasonLog>>(await a.read(FILES.missedReasons), {}, FILES.missedReasons, problems);
-    data.missedReasons = { reasons: missed.reasons ?? [], entries: missed.entries ?? [] };
+    data.missedReasons = { reasons: missed.reasons ?? [], entries: missed.entries ?? [], removed: missed.removed ?? [] };
     // Absent in every store written before crews could be split by subsystem. An
     // empty list is the correct reading of "this job has not been split yet", so a
     // missing file is not a problem to report.

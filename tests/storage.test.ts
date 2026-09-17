@@ -115,7 +115,7 @@ describe('Store', () => {
     await store.saveFile('settings', { ...DEFAULT_SETTINGS });
     const { data, problems } = await store.loadAll();
     expect(problems).toEqual([]);
-    expect(data.missedReasons).toEqual({ reasons: [], entries: [] });
+    expect(data.missedReasons).toEqual({ reasons: [], entries: [], removed: [] });
   });
 
   it('round-trips the reasons an activity was missed for', async () => {

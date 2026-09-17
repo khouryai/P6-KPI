@@ -51,7 +51,10 @@ export function BudgetMaster({ route }: { route: Route }) {
     if (loc) r = r.filter((x) => x.location === loc);
     if (phase) r = r.filter((x) => x.phase === phase);
     if (work) r = r.filter((x) => x.workType === work);
-    if (disc) r = r.filter((x) => x.discipline === disc);
+    // Matched against the parts rather than the whole string: an activity whose
+    // Subsystem reads "ATS, IXL" is an ATS activity and an IXL one, and drilling in
+    // from the ATS row of a rollup has to find it.
+    if (disc) r = r.filter((x) => x.disciplines.some((d) => normKey(d) === normKey(disc)));
     // An activity can draw on several subsystems, so this narrows to the ones that
     // draw on this group at all rather than to a group that "owns" the activity.
     if (sub) r = r.filter((x) => (x.subsystemHours[sub] ?? 0) > 0);
@@ -208,7 +211,8 @@ export function BudgetMaster({ route }: { route: Route }) {
   const subs = model.subsystems.map((x) => x.code).filter(Boolean);
   const phases = [...new Set(model.rows.map((r) => r.phase))];
   const works = [...new Set(model.rows.map((r) => r.workType))];
-  const discs = [...new Set(model.rows.map((r) => r.discipline))];
+  // One option per subsystem named, not per combination of them.
+  const discs = [...new Set(model.rows.flatMap((r) => r.disciplines))];
   const total = rows.reduce((s, r) => s + r.budgetHours, 0);
   const earned = rows.reduce((s, r) => s + r.earnedHours, 0);
 

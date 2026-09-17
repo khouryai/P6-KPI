@@ -155,8 +155,9 @@ describe.skipIf(!available)('real workbook parity', () => {
     const byPhase = model.groups.phase;
     expect(byPhase.reduce((n, g) => n + g.activities, 0)).toBe(model.rows.length);
     expect(byPhase.reduce((n, g) => n + g.budgetHours, 0)).toBeCloseTo(model.summary.totalBudgetHours, 6);
-    // The live schedule runs two phases plus one systemwide activity.
-    expect(byPhase.map((g) => g.key).sort()).toEqual(['P2', 'P3', 'SW']);
+    // The live schedule runs two phases. Its one SW activity (the Training
+    // Facility) is Phase 2 work and rolls up there rather than standing alone.
+    expect(byPhase.map((g) => g.key).sort()).toEqual(['P2', 'P3']);
     const byLoc = model.groups.location;
     expect(byLoc.reduce((n, g) => n + g.budgetHours, 0)).toBeCloseTo(model.summary.totalBudgetHours, 6);
     expect(byLoc.length).toBe(model.summary.locations);

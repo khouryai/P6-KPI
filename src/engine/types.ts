@@ -172,6 +172,14 @@ export type MissedReason = {
 export type MissedReasonLog = {
   reasons: string[];
   entries: MissedReason[];
+  /**
+   * Reasons taken off the list, including ones that ship with the app. Without
+   * this, deleting a built-in reason would be undeletable — it would come back on
+   * the next render, since the built-in list is in the code rather than the file.
+   * A reason recorded against an activity is never removable, so nothing here can
+   * orphan an answer somebody gave; typing it again puts it straight back.
+   */
+  removed?: string[];
 };
 
 /** The reasons offered before anybody has typed one of their own. */
@@ -300,7 +308,14 @@ export type BudgetRow = {
   matchKey: string; // resolved key, library spelling when matched
   rateStatus: RateStatus;
   status: ActivityStatus;
+  /** The Subsystem text as it was typed, which can name several at once. */
   discipline: string;
+  /**
+   * That text read as a list. "ATS, IXL" is two subsystems, and a rollup by
+   * subsystem splits the activity's hours evenly between them rather than inventing
+   * a group called "ATS, IXL" that is neither. Empty when nothing was set.
+   */
+  disciplines: string[];
   basis: Basis | null;
   needsShifts: boolean;
   complexity: number | null;
@@ -486,6 +501,14 @@ export type GroupStat = {
   key: string;
   label: string;
   activities: number;
+  /**
+   * Activities in this group that are in other groups too, because their Subsystem
+   * names more than one. Their hours are split evenly and so still add back to the
+   * budget exactly; only the activity COUNTS overlap, which is why this is stated
+   * rather than left for somebody to work out from two numbers that disagree.
+   * Always 0 on a dimension an activity can only be in one of.
+   */
+  shared: number;
   inBudget: number;
   budgetHours: number;
   earnedHours: number;

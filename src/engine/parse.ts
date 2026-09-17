@@ -50,14 +50,29 @@ export function locationOf(activityId: string): string {
 }
 
 /**
+ * Segments that are not a phase code but belong to one anyway.
+ *
+ * The 2nd segment is normally P<n>, but the live schedule carries one T&C code that
+ * is not: SW, the Training Facility software work, which is part of Phase 2 and was
+ * being reported as a phase of its own — a one-activity "phase" beside the real
+ * ones, with its own achievement figure that meant nothing. Mapping it here rather
+ * than at each of the four screens that group by phase is the point: the phase an
+ * activity is in is one fact, and it is decided once.
+ */
+const PHASE_ALIASES: Record<string, string> = {
+  SW: 'P2',
+};
+
+/**
  * Phase is the 2nd dash-delimited segment of the Activity ID: "0-P2-TC-W40-FA-0100"
- * is Phase 2. Most programs use P<n>, but the segment also carries non-phase codes
- * (the live schedule has one SW for the Training Facility), so the raw segment is
- * kept and only formatted for display.
+ * is Phase 2. Segments that name a phase by another word are mapped to it (see
+ * PHASE_ALIASES); anything else is kept as it appears and only formatted for
+ * display, so a code nobody has taught the app still groups with its own kind.
  */
 export function phaseOf(activityId: string): string {
   const parts = activityId.trim().split('-');
-  return parts.length >= 2 ? parts[1].trim() : '';
+  const raw = parts.length >= 2 ? parts[1].trim() : '';
+  return PHASE_ALIASES[raw.toUpperCase()] ?? raw;
 }
 
 /** Work type is the 3rd segment: TC for Testing and Commissioning, AC for ATC. */
