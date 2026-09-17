@@ -174,6 +174,18 @@ the four KPI cards, counting activities over budgeted rows only so the cards and
 phase tiles under them agree. Data quality and the summary stay whole-programme, and
 the screen says so.
 
+### A segment that names a phase by another word
+
+The 2nd segment is normally `P<n>`, but the live schedule carries one T&C code that
+is not: `SW`, the Training Facility work, which belongs to Phase 2. Left alone it
+reported as a phase of its own — a one-activity "phase" beside the real ones,
+carrying its own achievement figure on the two-week log that meant nothing. It is
+mapped in `PHASE_ALIASES` in `src/engine/parse.ts`, inside `phaseOf`, and that
+placement is the point: the phase an activity is in is one fact, decided once, and
+the four screens that group by phase all read it from there. A segment nobody has
+taught the app is still kept as it appears, so an unknown code groups with its own
+kind rather than disappearing into a bucket.
+
 ## Test progress is schedule-driven
 
 The Test Progress screen lists **every budgeted activity**, always. There is no list
@@ -366,6 +378,16 @@ two decisions about that file look arbitrary until the second fortnight:
 The KPI states the unexplained count rather than leaving it as the gap between two
 other numbers: it is the one thing on the screen a person can still fix before the
 report goes out.
+
+The list is editable from the log itself (**Reasons**), and what may be deleted is
+decided by use rather than by origin: a reason nothing is recorded against is
+clutter and goes, a reason somebody has already answered with stays, because
+deleting it would leave their answer with nothing to say it. Built-in reasons are
+deletable on the same terms — a list nobody picked is worth cutting down to the
+handful a job actually argues about — which is what `removed` is for: the built-in
+list lives in the code, not in the file, so a deletion has to be remembered or the
+reason returns on the next render. Typing one back, or answering with it, un-removes
+it.
 
 ### Keying test counts from the log
 
@@ -664,6 +686,36 @@ A subsystem rollup is **not a partition**: an activity needing two groups counts
 under both, so the activity counts across groups exceed the number of activities.
 The hours do not overlap, so the hour totals still add back. That is stated on the
 screen rather than left to be discovered.
+
+### One activity, several subsystems
+
+The Subsystem box on an Activity Library key is free text, and people use it to name
+more than one group: "ATS, IXL" is an activity both work. Rolled up as a single
+string that produced a group called "ATS, IXL" which is neither of them, while both
+real groups read smaller than they are. So `splitDisciplines` reads the box as a
+list and `groupRows` shares the activity between the names.
+
+Two decisions inside that:
+
+- **Evenly.** The box says who is on it, not how much each does. An even split is
+  the only reading of that which does not invent a number nobody gave. Where the
+  proportions really are known, the crew breakdown on the same key is the tool for
+  it — that splits by headcount and shift length, and it is what the Resources
+  screen reports.
+- **Hours share, counts do not.** The weights sum to 1, so every rollup still adds
+  back to the budget exactly; but one activity is one whole activity to each group
+  that works it, and reporting "1.5 activities" would be arithmetic nobody can act
+  on. The counts therefore overlap, exactly as they do on the Resources screen, and
+  `GroupStat.shared` says by how many — which is what the rollup screen states
+  rather than leaving somebody to find two numbers that disagree.
+
+Separators are comma, semicolon, slash, pipe and plus. `&` and "and" are
+deliberately not separators: "Test & Commissioning" is one group with an ampersand
+in its name, and cutting it in half would be the app overruling what somebody typed.
+Because the split is what the rollups report, the Activity Library shows a `÷n`
+badge on a key that names several, and the Budget Master subsystem filter matches
+the parts — drilling into the ATS row of a rollup has to find the activity that is
+half ATS.
 
 ## Earned against built
 

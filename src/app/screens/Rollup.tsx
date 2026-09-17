@@ -11,7 +11,11 @@ import { TERMS } from '../../engine/vocab';
 const DIMS: { id: GroupDim; label: string; note: string }[] = [
   { id: 'phase', label: 'Phase', note: 'From the 2nd segment of the Activity ID, so P2 is Phase 2.' },
   { id: 'location', label: 'Location', note: 'From the 4th segment of the Activity ID.' },
-  { id: 'discipline', label: TERMS.discipline, note: `From the ${TERMS.disciplineLower} you set on each Activity Library key.` },
+  {
+    id: 'discipline',
+    label: TERMS.discipline,
+    note: `From the ${TERMS.disciplineLower} you set on each Activity Library key. A key naming more than one — "ATS, IXL" — has its hours shared evenly between them.`,
+  },
   { id: 'workType', label: 'Work type', note: 'From the 3rd segment of the Activity ID, so TC is Testing and Commissioning.' },
 ];
 
@@ -41,6 +45,16 @@ export function Rollup() {
 
   const phases = model.groups.phase;
   const scope = withinPhase ? phases.find((p) => p.key === withinPhase) : null;
+  /**
+   * Activities in view whose Subsystem names more than one group. Counted over the
+   * rows rather than summed off the groups, which would count each such activity
+   * once per group it is in and overstate it.
+   */
+  const shared = useMemo(() => {
+    if (dim !== 'discipline') return 0;
+    const inScope = withinPhase ? model.rows.filter((r) => r.phase === withinPhase) : model.rows;
+    return inScope.filter((r) => r.disciplines.length > 1).length;
+  }, [model.rows, dim, withinPhase]);
   const totalBudget = groups.reduce((s, g) => s + g.budgetHours, 0);
   const totalEarned = groups.reduce((s, g) => s + g.earnedHours, 0);
 
@@ -72,9 +86,19 @@ export function Rollup() {
       locked: true,
       value: (g) => g.label,
       render: (g) => (
-        <a className="btn-link" href={drillTo(g)} title={`Open Budget Master filtered to ${g.label}`}>
-          {g.label}
-        </a>
+        <span className="flex items-baseline gap-1.5">
+          <a className="btn-link" href={drillTo(g)} title={`Open Budget Master filtered to ${g.label}`}>
+            {g.label}
+          </a>
+          {g.shared > 0 && (
+            <span
+              className="text-[10.5px] text-[var(--text-subtle)]"
+              title={`${g.shared} of these activities are worked by more than one ${TERMS.disciplineLower}. Each one's hours are split evenly between them, so the hours here add up; the activity count is of activities this ${TERMS.disciplineLower} touches.`}
+            >
+              {g.shared} shared
+            </span>
+          )}
+        </span>
       ),
     },
     { key: 'inBudget', label: 'In budget', value: (g) => g.inBudget, num: true },
@@ -177,6 +201,17 @@ export function Rollup() {
         </Notice>
       ) : (
         <>
+          {shared > 0 && (
+            <div className="mb-4">
+              <Notice tone="info">
+                <b>{shared} {shared === 1 ? 'activity is' : 'activities are'} worked by more than one {TERMS.disciplineLower}.</b> Their Activity Library key names
+                several — "ATS, IXL" — so each one's hours are <b>split evenly</b> between them and the budget above still adds up exactly. The activity counts do
+                overlap: one activity is one whole activity to each {TERMS.disciplineLower} that works it, and the <i>shared</i> note on a row says how many of its
+                activities it has company on.
+              </Notice>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Stat label="Budget in scope" value={`${fmtHours(totalBudget)} h`} sub={`${groups.reduce((n, g) => n + g.inBudget, 0)} activities`} primary />
             <Stat

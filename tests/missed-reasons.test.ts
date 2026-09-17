@@ -14,7 +14,8 @@
 import { describe, it, expect } from 'vitest';
 import type { MissedReasonLog } from '../src/engine/types';
 import { DEFAULT_MISSED_REASONS } from '../src/engine/types';
-import { addReasonToCatalogue, reasonCatalogue, reasonFor, removeReasonFromCatalogue, setMissedReason, tallyReasons } from '../src/app/missedReasons';
+import { addReasonToCatalogue, isReasonUnused, reasonCatalogue, reasonFor, reasonUsage, removeReasonFromCatalogue, setMissedReason, tallyReasons } from '../src/app/missedReasons';
+import { normKey } from '../src/engine/keys';
 import type { DataUpdater } from '../src/app/state';
 
 /**
@@ -77,6 +78,49 @@ describe('the catalogue', () => {
     removeReasonFromCatalogue(update, 'cable pull late');
     expect(box.log.reasons).toEqual([]);
     expect(box.log.entries[0].reason).toBe('Cable pull late');
+  });
+
+  it('still offers a reason somebody has already answered with, removed or not', () => {
+    // The screen only lets an UNUSED reason be taken off, so this is the file
+    // edited by hand. A row whose own answer is missing from its own dropdown is
+    // worse than a list with one entry too many on it.
+    const { box, update } = harness();
+    setMissedReason(update, 'A-1', '2026-08-31', 'Cable pull late');
+    removeReasonFromCatalogue(update, 'Cable pull late');
+    expect(reasonCatalogue(box.log)).toContain('Cable pull late');
+  });
+
+  it('takes a built-in reason off the list and keeps it off', () => {
+    // The built-in list lives in the code, so "removed" has to be remembered or
+    // the reason would be back on the next render.
+    const { box, update } = harness();
+    removeReasonFromCatalogue(update, 'Weather');
+    expect(reasonCatalogue(box.log)).not.toContain('Weather');
+    expect(reasonCatalogue(box.log)).toContain('Access not available');
+  });
+
+  it('puts a removed reason back when it is typed in again', () => {
+    const { box, update } = harness();
+    removeReasonFromCatalogue(update, 'Weather');
+    addReasonToCatalogue(update, 'weather');
+    expect(reasonCatalogue(box.log).filter((r) => r.toLowerCase() === 'weather')).toHaveLength(1);
+  });
+
+  it('puts a removed reason back when somebody answers with it', () => {
+    const { box, update } = harness();
+    removeReasonFromCatalogue(update, 'Weather');
+    setMissedReason(update, 'A-1', '2026-08-31', 'Weather');
+    expect(reasonCatalogue(box.log)).toContain('Weather');
+  });
+
+  it('counts what each reason is in use for, so the screen knows what it may remove', () => {
+    const { box, update } = harness();
+    setMissedReason(update, 'A-1', '2026-08-31', 'Weather');
+    setMissedReason(update, 'A-2', '2026-08-31', 'weather');
+    setMissedReason(update, 'A-3', '2026-09-14', 'Access not available');
+    expect(reasonUsage(box.log).get(normKey('Weather'))).toBe(2);
+    expect(isReasonUnused(box.log, 'Weather')).toBe(false);
+    expect(isReasonUnused(box.log, 'Re-sequenced by the plan')).toBe(true);
   });
 });
 

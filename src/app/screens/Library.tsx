@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, Select, Badge, statusTone, Notice, type Column } from '../components/ui';
 import type { LibraryStat, LibraryEntry, Basis, CrewLine } from '../../engine/types';
-import { assignSubsystem, crewLines, setCrewCount } from '../../engine/compute';
+import { assignSubsystem, crewLines, setCrewCount, splitDisciplines } from '../../engine/compute';
 import { fmtHours, fmtPct, num } from '../format';
 import { normKey } from '../../engine/keys';
 import type { Route } from '../router';
@@ -63,7 +63,10 @@ export function Library({ route }: { route: Route }) {
     actions.notify('ok', `Added "${key}". Price it below, then Save.`);
   };
 
-  const disciplines = [...new Set(state.data.library.map((e) => e.discipline).filter(Boolean))] as string[];
+  // The suggestions are the individual subsystems already in use, not the strings
+  // they were typed in: a key reading "ATS, IXL" should offer ATS and IXL, since
+  // those are what a rollup will report.
+  const disciplines = [...new Set(state.data.library.flatMap((e) => splitDisciplines(e.discipline)))];
 
   const basisOpts = [{ value: '', label: `${settings.defaultBasis} (auto)` }, { value: 'RATE', label: 'RATE' }, { value: 'DUR', label: 'DUR' }];
   const incOpts = [{ value: '', label: '(auto)' }, { value: 'Y', label: 'Y' }, { value: 'N', label: 'N' }];
@@ -73,7 +76,27 @@ export function Library({ route }: { route: Route }) {
     { key: 'count', label: 'Count', value: (r) => r.count, num: true },
     { key: 'days', label: 'Total P6 days', value: (r) => r.totalP6Days, num: true },
     { key: 'status', label: 'Rate status', value: (r) => r.rateStatus, render: (r) => <Badge tone={statusTone(r.rateStatus)}>{r.rateStatus}</Badge> },
-    { key: 'disc', label: TERMS.discipline, value: (r) => r.entry.discipline ?? '', render: (r) => <CellInput value={r.entry.discipline ?? ''} list="disciplines" onCommit={(v) => edit(r.matchKey, { discipline: v.trim() || undefined })} /> },
+    {
+      key: 'disc',
+      label: TERMS.discipline,
+      value: (r) => r.entry.discipline ?? '',
+      hint: `A grouping you set on this key, which the rollups cut the budget by. Name several — "ATS, IXL" — and the hours of every activity of this type are shared evenly between them.`,
+      render: (r) => {
+        // Saying out loud how the text was read. "ATS, IXL" quietly becoming two
+        // half-shares is a big thing to leave a person to infer from a rollup.
+        const parts = splitDisciplines(r.entry.discipline);
+        return (
+          <span className="flex items-center gap-1.5">
+            <CellInput value={r.entry.discipline ?? ''} list="disciplines" onCommit={(v) => edit(r.matchKey, { discipline: v.trim() || undefined })} />
+            {parts.length > 1 && (
+              <span className="shrink-0" title={`Read as ${parts.length} ${TERMS.disciplineLowerPlural}: ${parts.join(', ')}. Each activity of this type puts an equal share of its hours under each.`}>
+                <Badge tone="purple">÷{parts.length}</Badge>
+              </span>
+            )}
+          </span>
+        );
+      },
+    },
     { key: 'inc', label: 'Include', value: (r) => `${r.entry.includeOverride ?? ''}${r.include}`, render: (r) => <span className="flex items-center gap-1"><Select value={r.entry.includeOverride ?? ''} options={incOpts} onChange={(v) => edit(r.matchKey, { includeOverride: (v || undefined) as 'Y' | 'N' | undefined })} /><Badge tone={r.include === 'Y' ? 'good' : 'muted'}>{r.include}</Badge></span> },
     { key: 'basis', label: 'Basis', value: (r) => r.basisEff, render: (r) => <Select value={r.entry.basis ?? ''} options={basisOpts} onChange={(v) => edit(r.matchKey, { basis: (v || undefined) as Basis | undefined })} /> },
     {

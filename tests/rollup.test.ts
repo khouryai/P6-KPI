@@ -10,8 +10,13 @@ describe('phase and work type derivation', () => {
     expect(workTypeOf('0-P2-TC-W40-FA-0100')).toBe('TC');
     expect(phaseOf('  0-P3-AC-SW-SW-0020  ')).toBe('P3');
     expect(workTypeOf('0-P3-AC-SW-SW-0020')).toBe('AC');
-    // The live schedule carries one non-phase code in that segment.
-    expect(phaseOf('0-SW-TC-TF-FA-0000')).toBe('SW');
+    // The live schedule carries one non-phase code in that segment: SW, the
+    // Training Facility software work, which belongs to Phase 2 and says so here
+    // rather than at each screen that groups by phase.
+    expect(phaseOf('0-SW-TC-TF-FA-0000')).toBe('P2');
+    expect(phaseOf('0-sw-TC-TF-FA-0000')).toBe('P2');
+    // A segment nobody has taught the app is still kept, and groups with its own kind.
+    expect(phaseOf('0-XX-TC-TF-FA-0000')).toBe('XX');
     // Short IDs simply have no segment rather than throwing.
     expect(phaseOf('0-P2-MS-0010')).toBe('P2');
     expect(workTypeOf('0-P2-MS-0010')).toBe('MS');
@@ -31,8 +36,12 @@ describe('rollups', () => {
   const model = computeModel(fixtureModelInput());
 
   it('puts every activity in exactly one group, on every dimension', () => {
+    // Subsystem is the one dimension where that can fail by design — a key naming
+    // two subsystems puts its activities in both, sharing their hours — so the
+    // count is only asserted where nothing is shared, which the fixture is not.
     for (const dim of ['phase', 'location', 'discipline', 'workType'] as GroupDim[]) {
       const groups = model.groups[dim];
+      expect(groups.every((g) => g.shared === 0), dim).toBe(true);
       expect(groups.reduce((n, g) => n + g.activities, 0), dim).toBe(model.rows.length);
       expect(groups.reduce((n, g) => n + g.budgetHours, 0), dim).toBeCloseTo(model.summary.totalBudgetHours, 6);
       expect(groups.reduce((n, g) => n + g.earnedHours, 0), dim).toBeCloseTo(model.summary.earnedHours, 6);
@@ -75,10 +84,12 @@ describe('rollups', () => {
       makeActivity({ activityId: '0-SW-TC-TF-FA-0000', sortOrder: 3 }),
     ];
     const m = computeModel({ settings: { ...DEFAULT_SETTINGS, dataDate: '2026-08-31' }, locations: [], library: lib, overrides: [], testProgress: [], current: acts, baseline: null, snapshots: [] });
-    expect(m.groups.phase.map((g) => g.label).sort()).toEqual(['Phase 2', 'Phase 3', 'SW']);
+    // The SW activity joins Phase 2 rather than standing as a phase of its own.
+    expect(m.groups.phase.map((g) => g.label).sort()).toEqual(['Phase 2', 'Phase 3']);
     const p3 = m.groups.phase.find((g) => g.key === 'P3')!;
     expect(p3.activities).toBe(2);
     expect(p3.budgetHours).toBe(160);
+    expect(m.groups.phase.find((g) => g.key === 'P2')!.activities).toBe(2);
     expect(m.groups.workType.map((g) => g.key).sort()).toEqual(['AC', 'TC']);
   });
 

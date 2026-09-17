@@ -813,6 +813,45 @@ select.cell-input { padding: 3px 22px 3px 6px; }
 .outcome-tile.tone-bad .outcome-tile-n { color: var(--bad); }
 
 /* ---------------------------------------------------------------------------
+   The Why missed list. One chip per reason: the ones in use carry their count
+   and cannot be removed, the rest carry the button that takes them off.
+   --------------------------------------------------------------------------- */
+.reason-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--text);
+}
+.reason-chip.is-used { background: var(--white); border-color: var(--border-strong); }
+.reason-chip-n {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.reason-chip-x {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-subtle);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.reason-chip-x:hover { background: var(--bad-light); color: var(--bad); }
+
+/* ---------------------------------------------------------------------------
    Choosing columns. The trigger sits above the table's top-right corner, which
    keeps it out of the header row: a control living inside a sticky, sortable
    header competes with sorting for the same click.
