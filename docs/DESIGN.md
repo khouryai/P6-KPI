@@ -331,6 +331,52 @@ blue, the obvious partner, separates from it by ΔE 4 under tritanopia and was
 rejected for it. The outcome tiles carry their own words, so colour is never the
 only thing saying what a group is.
 
+### By phase, in the same window
+
+"97% of plan" across a programme routinely hides one phase stalling behind another
+finishing early, and the phase is what the person holding the review actually runs.
+So `periodLog` also cuts the window by phase: planned, achieved, achievement, and
+the phase's own percent complete at each end of the window. Two rules keep it
+honest. The phases come from every in-budget activity rather than from the rows in
+the log, so a phase that planned nothing is still listed — "Phase 3 did nothing" is
+an answer, and a phase vanishing would read as the log having lost it. And a phase's
+completeness is measured against **that phase's** budget, never as a share of the
+programme, which is what makes two phases of very different sizes both readable as
+"half done". `tests/period-phases.test.ts` pins that the parts add back to the whole.
+
+### Why an activity was missed
+
+The log could always say what slipped, to the hour. It could never say why, which is
+the only half anybody acts on: "eleven missed" is a number, "seven waiting on access"
+is a decision. Each MISSED activity carries a reason, in `missed-reasons.json`, and
+two decisions about that file look arbitrary until the second fortnight:
+
+- **The catalogue is kept, not derived.** A reason typed into the dropdown joins a
+  stored list, rather than the list being read back off the reasons in use — or it
+  would shrink every time somebody fixed something. It is extended from the dropdown
+  itself, because the person who needs a category that does not exist yet is holding
+  it in their head right then, and a trip to a settings screen is how it ends up
+  recorded as "other".
+- **A reason belongs to a period as well as an activity.** The same activity missed
+  three fortnights running usually has three different stories, and the third
+  overwriting the first would leave the first review unable to explain itself. The
+  entries are therefore keyed on Activity ID *and* the window's end date, which is
+  also what lets the period's KPI count only this period's answers.
+
+The KPI states the unexplained count rather than leaving it as the gap between two
+other numbers: it is the one thing on the screen a person can still fix before the
+report goes out.
+
+### Keying test counts from the log
+
+The Test Progress screen owns the test counts, but it is not where somebody is
+holding them at four o'clock on a Friday — they are being read out activity by
+activity in the review. So the log's Tests, Done and % override cells write through
+`src/app/testProgress.ts`, the same upsert both screens use: one file, one set of
+rules about when a row is created and when it is dropped. There is no copy and
+nothing to reconcile — the percent complete, the earned hours and the curve all move
+on the next render.
+
 ## Forcing in has to allocate something
 
 Creating the library key was only half of it. A forced-in activity can reach IN
@@ -458,6 +504,38 @@ since it was saved: it keeps its declared position, and if it is optional it sta
 off, so shipping a new column cannot rearrange a table somebody had set up. The
 move buttons step *over* hidden columns, because swapping a visible column with one
 that is not on screen moves nothing the person can see and reads as a broken button.
+
+### Widths, wrapping, and seeing the whole cell
+
+Three related things, because "I cannot read that" has three different causes:
+
+- **Wrap text** shows every cell in full over as many lines as it takes. Off by
+  default: a table of one-line rows is far quicker to scan.
+- **Dragging a heading's right edge** sets a width, kept in the same layout.
+  The grip has to swallow its own click, or every resize would also sort the column.
+- **Fit columns** widens each column to its own content, and has to measure in two
+  passes. A column that is cut off is cut off *because* it is holding a width, so
+  measuring it where it stands reads that width back and pins the truncation in
+  place — which is exactly what the first version did. The table is rendered once
+  with every width dropped (`.tbl.is-measuring`), the widths are read off that, and
+  then applied.
+
+Screens must not bake a `max-width` into a cell's own markup: the column decides the
+width, and a clamp inside the cell is one nothing on the toolbar can undo. Long text
+uses `.cell-text`, which clips to whatever the column currently is and opens up in
+wrap mode.
+
+### Exporting what is on screen
+
+Every table with a `tableId` has an **Excel** button, and the promise is that the
+sheet matches the screen: the showing columns, in the showing order, carrying the
+rows as filtered and sorted. Somebody who has picked columns and filtered to one
+phase has already said what they want; an export that dumped every field would be a
+different document they then have to edit down. Cells come from `value()` — the raw
+figure the column sorts on — rather than the badge or input drawn over it, and a
+column can override that with `exportValue`. This is not a replacement for
+**Settings → Export workbook**, which is the whole model in one file for project
+controls; it is the answer to "send me that table".
 
 ## Table headings sit over their own data
 

@@ -35,6 +35,7 @@ import type {
   TestProgressCheck,
   ActivityVisibility,
   StaleOverride,
+  ResourceAllocation,
 } from './types';
 import { normKey, containsCI } from './keys';
 import { indexLibrary, resolveMatchKey } from './match';
@@ -140,6 +141,49 @@ export function crewWeights(entry: LibraryEntry, settings: Settings): { key: str
     byCode.set(code, (byCode.get(code) ?? 0) + l.count * (l.shiftHours ?? shift));
   }
   return [...byCode].map(([key, weight]) => ({ key, weight }));
+}
+
+/**
+ * What one activity is crewed with: the resource groups, their headcounts, and the
+ * hours each one carries.
+ *
+ * The counts come from the library entry and the hours from the split that was
+ * already made of THIS activity's budget, so the two can never drift: read the
+ * hours off `subsystemHours` rather than recomputing them and an override or a
+ * rounding residue lands on the resource lines exactly as it landed on the split.
+ * An entry priced as a plain headcount yields one unnamed line, which is the
+ * truthful answer — that many people, nobody has said who.
+ */
+export function resourceLines(
+  entry: LibraryEntry,
+  settings: Settings,
+  budgetBy: Record<string, number>,
+  pctComplete: number,
+): ResourceAllocation[] {
+  const shift = effectiveShiftHours(entry, settings);
+  const lines = crewLines(entry);
+  const byCode = new Map<string, { count: number; shiftHours: number }>();
+  if (lines.length) {
+    for (const l of lines) {
+      const code = l.subsystem.trim();
+      const prev = byCode.get(code);
+      if (prev) prev.count += l.count;
+      else byCode.set(code, { count: l.count, shiftHours: l.shiftHours ?? shift });
+    }
+  } else {
+    byCode.set(UNASSIGNED, { count: entry.crewSize ?? settings.defaultCrew, shiftHours: shift });
+  }
+  return [...byCode].map(([code, l]) => {
+    const budgetHours = budgetBy[code] ?? 0;
+    return {
+      code,
+      label: code || 'Unassigned',
+      count: l.count,
+      shiftHours: l.shiftHours,
+      budgetHours,
+      earnedHours: budgetHours * pctComplete,
+    };
+  });
 }
 
 /**
@@ -393,6 +437,7 @@ export function computeModel(input: ModelInput): Model {
     // The split is of the FINAL budget figure, not of the standard hours, so an
     // override or the rounding both carry through to every subsystem proportionally.
     const subsystemHours = inBudget && entry ? allocate(budgetHours, crewWeights(entry, settings)) : { [UNASSIGNED]: 0 };
+    const resources = inBudget && entry ? resourceLines(entry, settings, subsystemHours, pctComplete) : [];
 
     // Earn window.
     const testStart = tp?.testStartOverride && isValidISO(tp.testStartOverride) ? tp.testStartOverride : null;
@@ -451,6 +496,8 @@ export function computeModel(input: ModelInput): Model {
       onForecastCurve: budgetHours > 0 && !!a.startDate && !!a.finishDate,
       subsystemHours,
       subsystemEarned: scaleRecord(subsystemHours, pctComplete),
+      resources,
+      crewSize: resources.reduce((s, x) => s + x.count, 0),
     });
   }
 

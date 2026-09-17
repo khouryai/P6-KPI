@@ -8,6 +8,7 @@ import { parseDelimitedText } from '../../engine/parse';
 import { readWorkbook, pickSheet, workbookGrid } from '../../engine/workbook';
 import { parseP6Date, isValidISO } from '../../engine/dates';
 import { href, type Route } from '../router';
+import { setTestProgress, clearTestProgress, tidyTestProgress as tidy, asFraction } from '../testProgress';
 
 /** What the user is looking for when they open this screen. */
 type StateFilter = 'all' | 'missing' | 'keyed' | 'started' | 'done' | 'nowindow';
@@ -95,30 +96,14 @@ export function TestProgress({ route }: { route: Route }) {
 
   const now = () => new Date().toISOString();
 
-  /**
-   * One upsert path for every edit. An entry is created when the first field is
-   * filled and removed again when the last one is cleared, so the stored file only
-   * ever holds activities someone actually keyed something against.
+  /*
+   * Both of these go through `src/app/testProgress.ts`, which is also what the
+   * Two-Week Log writes with. One upsert path, so a count keyed in a review and a
+   * count keyed here are the same act on the same file.
    */
-  const setField = (activityId: string, patch: Partial<TP>) => {
-    actions.update('testProgress', (tps) => {
-      const i = tps.findIndex((t) => normKey(t.activityId) === normKey(activityId));
-      const base: TP = i >= 0 ? tps[i] : { activityId, updatedAt: now() };
-      const next = tidy({ ...base, ...patch, updatedAt: now() });
-      const empty =
-        next.testsTotal === undefined &&
-        next.testsComplete === undefined &&
-        next.pctOverride === undefined &&
-        next.testStartOverride === undefined &&
-        next.testEndOverride === undefined;
-      if (empty) return i >= 0 ? tps.filter((_, j) => j !== i) : tps;
-      if (i >= 0) return tps.map((t, j) => (j === i ? next : t));
-      return [...tps, next];
-    });
-  };
+  const setField = (activityId: string, patch: Partial<TP>) => setTestProgress(actions.update, activityId, patch);
 
-  const clearRow = (activityId: string) =>
-    actions.update('testProgress', (tps) => tps.filter((t) => normKey(t.activityId) !== normKey(activityId)));
+  const clearRow = (activityId: string) => clearTestProgress(actions.update, activityId);
 
   const markComplete = (r: Row) => {
     if (r.testsTotal && r.testsTotal > 0) setField(r.activityId, { testsComplete: r.testsTotal });
@@ -154,8 +139,7 @@ export function TestProgress({ route }: { route: Route }) {
       if (!id || /^(p6_)?activity[ _]?id$/i.test(id)) continue;
       const tot = num(String(cells[1] ?? ''));
       const comp = num(String(cells[2] ?? ''));
-      let pct = num(String(cells[3] ?? ''));
-      if (pct !== undefined && pct > 1) pct = pct / 100;
+      const pct = asFraction(num(String(cells[3] ?? '')));
       const ts = parseP6Date(cells[4] ?? '').iso ?? undefined;
       const te = parseP6Date(cells[5] ?? '').iso ?? undefined;
       if (!budgetedIds.has(normKey(id))) unknown += 1;
@@ -207,7 +191,7 @@ export function TestProgress({ route }: { route: Route }) {
       render: (c) => (
         <div className="min-w-0">
           <div className="mono text-[var(--text-muted)]">{c.activityId}</div>
-          <div className="max-w-[26rem] truncate font-semibold" title={c.p6Name ? `Renamed by you. P6 calls this:\n${c.p6Name}` : (c.activityName ?? '')}>
+          <div className="cell-text font-semibold" title={c.p6Name ? `Renamed by you. P6 calls this:\n${c.p6Name}` : (c.activityName ?? '')}>
             {c.activityName ?? <span className="font-normal text-[var(--text-subtle)]">no activity with this ID</span>}
           </div>
         </div>
@@ -220,7 +204,7 @@ export function TestProgress({ route }: { route: Route }) {
       key: 'type',
       label: 'Type',
       value: (c) => c.activityType,
-      render: (c) => <span className="block max-w-[16rem] truncate" title={c.activityType}>{c.activityType || <span className="text-[var(--text-subtle)]">—</span>}</span>,
+      render: (c) => <span className="cell-text" title={c.activityType}>{c.activityType || <span className="text-[var(--text-subtle)]">—</span>}</span>,
     },
     { key: 'budget', label: 'Budget h', value: (c) => c.budgetHours, num: true, render: (c) => (c.budgetHours === null ? <span className="text-[var(--text-subtle)]">—</span> : fmtHours(c.budgetHours)) },
     {
@@ -283,7 +267,7 @@ export function TestProgress({ route }: { route: Route }) {
       render: (r) => (
         <div className="min-w-0">
           <div className="mono text-[var(--text-muted)]">{r.activityId}</div>
-          <div className="max-w-[26rem] truncate font-semibold" title={r.renamed ? `Renamed by you. P6 calls this:\n${r.activity.activityName}` : r.activityName}>
+          <div className="cell-text font-semibold" title={r.renamed ? `Renamed by you. P6 calls this:\n${r.activity.activityName}` : r.activityName}>
             {r.activityName}
           </div>
         </div>
@@ -384,11 +368,7 @@ export function TestProgress({ route }: { route: Route }) {
           value={r.entry?.pctOverride?.toString() ?? ''}
           placeholder="—"
           title="Beats the test counts. 0 to 1, or a percentage."
-          onCommit={(v) => {
-            let n = num(v);
-            if (n !== undefined && n > 1) n = n / 100;
-            setField(r.activityId, { pctOverride: n });
-          }}
+          onCommit={(v) => setField(r.activityId, { pctOverride: asFraction(num(v)) })}
         />
       ),
     },
@@ -641,6 +621,7 @@ export function TestProgress({ route }: { route: Route }) {
 
       <SortableTable
         tableId="test-progress"
+        exportName="test-progress"
         rows={rows}
         columns={columns}
         rowKey={(r) => r.activityId}
@@ -665,14 +646,4 @@ function P6Date({ iso, raw, actual }: { iso: string | null; raw: string; actual:
       {actual && <b className="ml-1 text-[var(--good)]" title="P6 records this as an actual date">A</b>}
     </span>
   );
-}
-
-/** Drop undefined and empty fields so the stored JSON stays tidy. */
-function tidy(t: TP): TP {
-  const out: TP = { activityId: t.activityId.trim(), updatedAt: t.updatedAt };
-  for (const k of ['testsTotal', 'testsComplete', 'pctOverride', 'testStartOverride', 'testEndOverride'] as const) {
-    const v = t[k];
-    if (v !== undefined && v !== null && v !== '') (out as Record<string, unknown>)[k] = v;
-  }
-  return out;
 }

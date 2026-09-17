@@ -424,6 +424,17 @@ body {
 .kpi-value.tone-good { color: var(--good); }
 .kpi-value.tone-warn { color: var(--warn); }
 .kpi-value.tone-bad { color: var(--bad); }
+/* A tone as a plain text colour, for a figure that is good or bad on its own: the
+   variance under the two-week log's plan bar, a days-late count, a phase's
+   achievement. Deliberately limited to the two inline elements that carry such a
+   figure — the tone classes are also worn by `.ph-stat`, `.kpi-value` and
+   `.outcome-tile`, which style themselves and their own children, and a bare
+   `.tone-good { color }` would reach into all three and repaint them. */
+b.tone-good, span.tone-good { color: var(--good); }
+b.tone-warn, span.tone-warn { color: var(--warn); }
+b.tone-bad, span.tone-bad { color: var(--bad); }
+b.tone-muted, span.tone-muted { color: var(--text-muted); }
+
 .kpi-sub { font-size: 12px; color: var(--text-muted); }
 .kpi-sub strong { color: var(--text); font-weight: 600; }
 
@@ -612,6 +623,53 @@ select.cell-input { padding: 3px 22px 3px 6px; }
 .tbl tbody tr:hover td { background: var(--surface-2); }
 .tbl tbody tr:last-child td { border-bottom: 0; }
 
+/* A cell given an explicit width has to keep it: with `table-layout: auto` a long
+   word would otherwise push the column back out and undo the drag. Hiding the
+   overflow is also what makes "fit columns" measurable — `scrollWidth` on a clipped
+   cell is exactly the width its content is asking for. */
+.tbl th, .tbl td { overflow: hidden; text-overflow: ellipsis; }
+
+/* The measuring pass behind "Fit columns": every width dropped, so the browser
+   lays each column out to its own content and the result can be read off it. It is
+   on screen for a single frame. */
+.tbl.is-measuring th, .tbl.is-measuring td { width: auto !important; min-width: 0 !important; max-width: none !important; white-space: nowrap; overflow: visible; }
+
+/* Wrap mode: every cell shows in full, over as many lines as it takes. The heading
+   stays on one line, because a heading is a label rather than the text being read,
+   and `vertical-align: top` already lines the wrapped rows up. */
+.tbl.is-wrap td { white-space: normal; overflow-wrap: anywhere; }
+.tbl.is-wrap td .cell-text { white-space: normal; overflow: visible; }
+
+/* Text in a cell that may be longer than its column. It is the column that decides
+   the width — never a max-width baked into the screen, which nothing can widen. */
+.cell-text { display: block; overflow: hidden; text-overflow: ellipsis; }
+
+/* The drag handle on a heading's right-hand edge. It is invisible until the pointer
+   is near it, so a row of headings does not read as a row of controls. */
+.col-grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 9px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.col-grip::after {
+  content: '';
+  position: absolute;
+  top: 18%;
+  right: 3px;
+  width: 2px;
+  height: 64%;
+  border-radius: 1px;
+  background: transparent;
+  transition: background var(--dur-fast) var(--easing);
+}
+.tbl th:hover .col-grip::after { background: var(--border-strong); }
+.col-grip:hover::after, .col-grip:active::after { background: var(--hitachi-red); }
+
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* A numeric heading has to be right-aligned to sit over its numbers, and `.tbl th`
@@ -763,6 +821,7 @@ select.cell-input { padding: 3px 22px 3px 6px; }
 .table-tools {
   display: flex;
   justify-content: flex-end;
+  gap: 6px;
   margin-bottom: 6px;
 }
 .table-tools .btn.is-on { border-color: var(--border-strong); color: var(--text); }
@@ -794,6 +853,16 @@ select.cell-input { padding: 3px 22px 3px 6px; }
   text-transform: uppercase;
   color: var(--text-muted);
 }
+.col-wrap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.col-wrap-row:hover { background: var(--surface-2); }
 .col-pop-list { max-height: 340px; overflow: auto; padding: 4px; }
 .col-row {
   display: flex;

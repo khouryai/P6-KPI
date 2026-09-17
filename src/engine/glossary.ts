@@ -27,6 +27,7 @@ export const GLOSSARY: Record<string, string> = {
   RATE: 'A fixed number of shifts you set. The budget does not change when the schedule does.',
   DUR: 'Driven by the P6 original duration. The budget changes when the schedule does.',
   Crew: 'How many people the activity takes. Split it by subsystem to see the workload each group carries.',
+  [TERMS.subsystemPlural]: 'Who this activity is crewed with and how many of each, from the crew on its Activity Library key. One activity can call on several groups at once.',
   [TERMS.subsystem]: 'The group actually doing the work: ATS, IXL, COMMS and so on. An activity can need several at once, and its hours are split between them.',
   Shift: 'Hours in one shift for this activity type. A crew line can override it where one group works a shorter shift.',
   'Shift hours': 'Hours in one shift for this activity type.',
@@ -80,6 +81,11 @@ export const GLOSSARY: Record<string, string> = {
   'Actual start': 'When the activity really began: your test window start, or P6\u2019s actual start date.',
   'Actual finish': 'When the activity really finished. Blank until it reaches 100%.',
   'Days late': 'Actual finish minus baseline finish, in calendar days. Negative is early, blank until it finishes.',
+  'Phase achieved': 'The achieved-against-planned figure for this activity\u2019s whole phase over this period. The same for every activity of the phase: it judges the phase, not the row.',
+  'Phase complete': 'How complete this activity\u2019s phase is at the end of the period, measured against that phase\u2019s own budget rather than the whole job\u2019s.',
+  'Why missed': 'Why this activity did not finish when the baseline said it would. Recorded against this period, so each review keeps its own answer.',
+  'Missed explained': 'How many of the period\u2019s missed activities have a reason recorded against them. The rest are the ones the review has not asked about yet.',
+  Done: 'Test cases passed. Keyed here or on Test Progress \u2014 it is the same field, and it drives the activity\u2019s percent complete.',
 
   // --- progress ------------------------------------------------------------
   '%': 'Percent complete. Taken from your override first, then test case counts, then P6 duration.',

@@ -1,13 +1,16 @@
 import { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useApp } from '../state';
-import { Page, SortableTable, Panel, Notice, Badge, type Column, type HeroStat } from '../components/ui';
+import { Page, SortableTable, CellInput, Panel, Notice, Badge, type Column, type HeroStat } from '../components/ui';
 import { periodLog, addDays, OUTCOMES, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
-import { fmtHours, fmtPct, fmtDate, todayISO } from '../format';
+import { fmtHours, fmtPct, fmtDate, todayISO, num } from '../format';
 import { isValidISO } from '../../engine/dates';
+import { normKey } from '../../engine/keys';
 import { href } from '../router';
 import { useUnit } from '../units';
 import { TERMS } from '../../engine/vocab';
+import { setTestProgress, asFraction } from '../testProgress';
+import { reasonCatalogue, reasonFor, setMissedReason, addReasonToCatalogue, tallyReasons } from '../missedReasons';
 
 /*
  * Planned against achieved, in the two colours the S-curve already uses for the
@@ -44,6 +47,57 @@ function ChartKey() {
   );
 }
 
+/** The option that opens the box for a reason the list does not have yet. */
+const ADD_REASON = '__add-a-reason__';
+
+/**
+ * The reason one activity was missed, and the way a new reason gets onto the list.
+ *
+ * The dropdown carries the catalogue plus one last entry that asks for a new one:
+ * the person in a review who needs a category that does not exist yet is holding
+ * the reason in their head right then, and sending them to a settings screen to
+ * define it first is how it ends up recorded as "other".
+ */
+function MissedReasonCell({
+  value,
+  options,
+  onChange,
+  onAdd,
+}: {
+  value: string;
+  options: string[];
+  onChange: (reason: string) => void;
+  onAdd: (reason: string) => void;
+}) {
+  return (
+    <select
+      className="cell-input"
+      value={value}
+      title={value || 'Say why this activity did not finish. Pick a reason, or add one of your own.'}
+      onChange={(e) => {
+        if (e.target.value !== ADD_REASON) return onChange(e.target.value);
+        const typed = prompt('A reason activities get missed for. It joins the list and is offered on every activity from now on.', '');
+        const reason = typed?.trim();
+        if (!reason) return;
+        onAdd(reason);
+        onChange(reason);
+      }}
+    >
+      <option value="">— why? —</option>
+      {options.map((o) => (
+        <option key={o} value={o}>{o}</option>
+      ))}
+      <option value={ADD_REASON}>＋ Add a reason…</option>
+    </select>
+  );
+}
+
+/** How an achievement figure reads: at or over plan, near it, or short of it. */
+function achievedTone(achievement: number | null): string {
+  if (achievement === null) return 'tone-muted';
+  return achievement >= 1 ? 'tone-good' : achievement >= 0.8 ? 'tone-warn' : 'tone-bad';
+}
+
 /** A fortnight ending on the data date is the review everybody actually holds. */
 function defaultEnd(dataDate: string): string {
   return isValidISO(dataDate) ? dataDate : todayISO();
@@ -63,6 +117,28 @@ export function PeriodLog() {
     () => (outcome ? log.activities.filter((a) => a.outcome === outcome) : log.activities),
     [log.activities, outcome],
   );
+
+  /** The phase figures, by phase key, so a row can report its own phase's window. */
+  const phaseBy = useMemo(() => new Map(log.phases.map((p) => [p.key, p])), [log.phases]);
+  /** Only the phases with something to say this window, for the line under the chart. */
+  const activePhases = useMemo(
+    () => log.phases.filter((p) => p.plannedHours > 1e-9 || p.earnedHours > 1e-9 || Object.values(p.counts).some((n) => n > 0)),
+    [log.phases],
+  );
+
+  const missedReasons = state.data.missedReasons;
+  const catalogue = useMemo(() => reasonCatalogue(missedReasons), [missedReasons]);
+  /** Every activity the period counts as missed, whatever the table is filtered to. */
+  const missed = useMemo(() => log.activities.filter((a) => a.outcome === 'MISSED'), [log.activities]);
+  const reasonTally = useMemo(() => tallyReasons(missedReasons, missed.map((a) => a.activityId), log.to), [missedReasons, missed, log.to]);
+
+  /** Test counts as they are keyed right now, for the two editable columns. */
+  const testEntries = useMemo(() => {
+    const m = new Map<string, { testsTotal?: number; testsComplete?: number; pctOverride?: number }>();
+    for (const t of state.data.testProgress) if (!m.has(normKey(t.activityId))) m.set(normKey(t.activityId), t);
+    return m;
+  }, [state.data.testProgress]);
+  const keyed = (id: string) => testEntries.get(normKey(id));
 
   /**
    * Hours, or the same hours as a share of the whole job. Every figure on the
@@ -91,6 +167,16 @@ export function PeriodLog() {
     },
     { label: 'Project', value: fmtPct(log.pctAtEnd, 1), tone: 'blue' },
   ];
+  // Only worth a chip when there is something to explain, and it reports the half
+  // that is missing rather than the half that is done: an unexplained miss is the
+  // one thing on this screen that a person can still fix before the report goes out.
+  if (missed.length > 0) {
+    heroStats.push({
+      label: 'Missed explained',
+      value: `${missed.length - reasonTally.unexplained}/${missed.length}`,
+      tone: reasonTally.unexplained === 0 ? 'good' : 'amber',
+    });
+  }
 
   /**
    * The log as text, for the person who has to paste this into an email on Friday.
@@ -107,12 +193,31 @@ export function PeriodLog() {
       `Due to finish in the period: ${log.dueToFinish}; actually finished: ${log.finishedOnTime}`,
       '',
     ];
+    if (activePhases.length) {
+      lines.push('By phase');
+      for (const p of activePhases) {
+        lines.push(
+          `  ${p.label.padEnd(10)} ${p.achievement === null ? 'nothing planned'.padEnd(16) : `${fmtPct(p.achievement, 0)} of plan`.padEnd(16)}` +
+            ` ${fmtPct(p.pctAtStart, 1)} -> ${fmtPct(p.pctAtEnd, 1)} complete`,
+        );
+      }
+      lines.push('');
+    }
+    if (missed.length) {
+      lines.push(`Why ${missed.length} missed`);
+      for (const t of reasonTally.given) lines.push(`  ${String(t.count).padStart(3)}  ${t.reason}`);
+      if (reasonTally.unexplained) lines.push(`  ${String(reasonTally.unexplained).padStart(3)}  no reason given yet`);
+      lines.push('');
+    }
     for (const o of OUTCOMES) {
       const list = log.activities.filter((a) => a.outcome === o);
       if (!list.length) continue;
       lines.push(`${o} (${list.length})`);
       for (const a of list) {
-        lines.push(`  ${a.activityId}  ${a.activityName}  ${fmtPct(a.pctComplete, 0)} complete${percent ? '' : `  ${fmtHours(a.earnedHours, 1)} h earned`}`);
+        const why = o === 'MISSED' ? reasonFor(missedReasons, a.activityId, log.to)?.reason : undefined;
+        lines.push(
+          `  ${a.activityId}  ${a.activityName}  ${fmtPct(a.pctComplete, 0)} complete${percent ? '' : `  ${fmtHours(a.earnedHours, 1)} h earned`}${why ? `  [${why}]` : ''}`,
+        );
       }
       lines.push('');
     }
@@ -132,7 +237,7 @@ export function PeriodLog() {
       render: (a) => (
         <div className="min-w-0">
           <div className="mono text-[var(--text-muted)]">{a.activityId}</div>
-          <div className="max-w-[24rem] truncate font-semibold" title={a.activityName}>{a.activityName}</div>
+          <div className="cell-text font-semibold" title={a.activityName}>{a.activityName}</div>
         </div>
       ),
     },
@@ -143,7 +248,56 @@ export function PeriodLog() {
       hint: 'What became of this activity inside the period, judged against the baseline dates.',
       render: (a) => <Badge tone={OUTCOME_META[a.outcome].tone}>{a.outcome}</Badge>,
     },
-    { key: 'phase', label: 'Phase', value: (a) => a.phaseName, optional: true },
+    {
+      key: 'reason',
+      label: 'Why missed',
+      value: (a) => reasonFor(missedReasons, a.activityId, log.to)?.reason ?? '',
+      hint: 'Why this activity did not finish when the baseline said it would. Kept against this period, so each fortnight keeps its own answer, and counted in the Missed breakdown above.',
+      render: (a) =>
+        a.outcome === 'MISSED' ? (
+          <MissedReasonCell
+            value={reasonFor(missedReasons, a.activityId, log.to)?.reason ?? ''}
+            options={catalogue}
+            onChange={(reason) => setMissedReason(actions.update, a.activityId, log.to, reason)}
+            onAdd={(reason) => addReasonToCatalogue(actions.update, reason)}
+          />
+        ) : (
+          <span className="text-[var(--text-subtle)]">—</span>
+        ),
+    },
+    { key: 'phase', label: 'Phase', value: (a) => a.phaseName },
+    {
+      key: 'phasepct',
+      label: 'Phase achieved',
+      value: (a) => phaseBy.get(a.phase)?.achievement ?? null,
+      num: true,
+      width: '130px',
+      hint: 'How this activity’s whole phase did in this window: the phase’s achieved hours over its planned hours. The same figure for every activity of the phase — it judges the phase, not the row.',
+      render: (a) => {
+        const p = phaseBy.get(a.phase);
+        if (!p || p.achievement === null) return <span className="text-[var(--text-subtle)]">—</span>;
+        return (
+          <span
+            className={`font-semibold ${achievedTone(p.achievement)}`}
+            title={`${p.label}: ${val(p.earnedHours, 1)} achieved against ${val(p.plannedHours, 1)} planned in this window. The phase itself moved ${fmtPct(p.pctAtStart, 1)} → ${fmtPct(p.pctAtEnd, 1)}.`}
+          >
+            {fmtPct(p.achievement, 0)}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'phasemoved',
+      label: 'Phase complete',
+      value: (a) => phaseBy.get(a.phase)?.pctAtEnd ?? null,
+      num: true,
+      optional: true,
+      hint: 'How complete this activity’s phase is at the end of the window, against that phase’s own budget.',
+      render: (a) => {
+        const p = phaseBy.get(a.phase);
+        return p ? <span title={`${p.label} moved ${fmtPct(p.pctAtStart, 1)} → ${fmtPct(p.pctAtEnd, 1)} in this window`}>{fmtPct(p.pctAtEnd, 1)}</span> : <span className="text-[var(--text-subtle)]">—</span>;
+      },
+    },
     { key: 'loc', label: 'Loc', value: (a) => a.location },
     {
       key: 'planned',
@@ -196,13 +350,66 @@ export function PeriodLog() {
           </span>
         ),
     },
+    /*
+     * Test progress, keyed here rather than on the screen that owns it.
+     *
+     * These write to `test-progress.json` through exactly the path the Test Progress
+     * screen writes through, so a count keyed during a review IS the count on that
+     * screen — the percent complete, the earned hours, the curve and this very log
+     * all move on the next render. There is no copy of this data and nothing to
+     * reconcile afterwards.
+     */
     {
-      key: 'tests',
+      key: 'ttot',
       label: 'Tests',
       value: (a) => a.testsTotal,
       num: true,
+      hint: 'Test cases in this activity’s pack. Keyed here, stored on Test Progress: this is the same field, not a copy of it.',
+      render: (a) => (
+        <CellInput
+          type="number"
+          className="cell-input text-right"
+          value={keyed(a.activityId)?.testsTotal?.toString() ?? ''}
+          placeholder="—"
+          title="Test cases in the pack. Writes straight to Test Progress."
+          onCommit={(v) => setTestProgress(actions.update, a.activityId, { testsTotal: num(v) })}
+        />
+      ),
+    },
+    {
+      key: 'tdone',
+      label: 'Done',
+      value: (a) => a.testsComplete,
+      num: true,
+      hint: 'Test cases passed. With a total keyed, this is what the activity’s percent complete is worked out from.',
+      render: (a) => (
+        <CellInput
+          type="number"
+          className="cell-input text-right"
+          value={keyed(a.activityId)?.testsComplete?.toString() ?? ''}
+          placeholder="—"
+          title="Test cases passed. Writes straight to Test Progress."
+          onCommit={(v) => setTestProgress(actions.update, a.activityId, { testsComplete: num(v) })}
+        />
+      ),
+    },
+    {
+      key: 'tov',
+      label: '% override',
+      value: (a) => keyed(a.activityId)?.pctOverride ?? null,
+      num: true,
       optional: true,
-      render: (a) => (a.testsTotal ? `${a.testsComplete ?? 0}/${a.testsTotal}` : <span className="text-[var(--text-subtle)]">—</span>),
+      hint: 'A percent complete keyed by hand. It beats the test counts. 0 to 1, or a percentage.',
+      render: (a) => (
+        <CellInput
+          type="number"
+          className="cell-input text-right"
+          value={keyed(a.activityId)?.pctOverride?.toString() ?? ''}
+          placeholder="—"
+          title="Beats the test counts. 0 to 1, or a percentage. Writes straight to Test Progress."
+          onCommit={(v) => setTestProgress(actions.update, a.activityId, { pctOverride: asFraction(num(v)) })}
+        />
+      ),
     },
   ];
 
@@ -311,6 +518,59 @@ export function PeriodLog() {
                 {log.dueToFinish > 0 && <> (<b className="text-[var(--text)]">{fmtPct(log.finishedOnTime / log.dueToFinish, 0)}</b>)</>}
               </span>
             </div>
+
+            {/*
+              * The same two answers per phase. A program at 97% of plan routinely
+              * hides one phase stalling behind another finishing early, and the
+              * phase is what the person reading this actually runs — so it gets
+              * the whole sentence the project gets, not a share of the project's.
+              */}
+            {activePhases.length > 0 && (
+              <div className="mt-3 border-t border-[var(--line-soft)] pt-3">
+                <div className="eyebrow mb-1.5">By phase</div>
+                <div className="grid gap-x-6 gap-y-1 text-[12px] sm:grid-cols-2">
+                  {activePhases.map((p) => (
+                    <div key={p.key || '#'} className="flex flex-wrap items-baseline gap-x-2">
+                      <b className="text-[var(--text)]">{p.label}</b>
+                      <span className={`font-semibold ${achievedTone(p.achievement)}`} title={`${val(p.earnedHours, 1)} achieved against ${val(p.plannedHours, 1)} planned in this window`}>
+                        {p.achievement === null ? 'nothing planned' : `${fmtPct(p.achievement, 0)} of plan`}
+                      </span>
+                      <span className="text-[var(--text-muted)]">
+                        moved <b className="text-[var(--text)]">{fmtPct(p.pctAtStart, 1)}</b> → <b className="text-[var(--text)]">{fmtPct(p.pctAtEnd, 1)}</b>
+                        {' '}(<b className="text-[var(--text)]">{fmtPct(p.pctAtEnd - p.pctAtStart, 2)}</b> of the phase)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Why the missed ones were missed. The count nobody has answered for is
+                the one that says whether the review actually happened, so it is
+                stated rather than left as the gap between two other numbers. */}
+            {missed.length > 0 && (
+              <div className="mt-3 border-t border-[var(--line-soft)] pt-3">
+                <div className="eyebrow mb-1.5">Why {missed.length} {missed.length === 1 ? 'activity was' : 'activities were'} missed</div>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
+                  {reasonTally.given.map((t) => (
+                    <span key={t.reason}>
+                      <b className="text-[var(--text)]">{t.count}</b>
+                      <span className="ml-1.5 text-[var(--text-muted)]">{t.reason}</span>
+                    </span>
+                  ))}
+                  {reasonTally.unexplained > 0 && (
+                    <span title="Set the Why missed column on each of these. It is remembered against this period.">
+                      <b className="tone-bad">{reasonTally.unexplained}</b>
+                      <span className="ml-1.5 text-[var(--text-muted)]">no reason given yet</span>
+                      {outcome !== 'MISSED' && (
+                        <button className="btn-link ml-2" onClick={() => setOutcome('MISSED')}>show them</button>
+                      )}
+                    </span>
+                  )}
+                  {reasonTally.given.length === 0 && reasonTally.unexplained === 0 && <span className="text-[var(--text-muted)]">—</span>}
+                </div>
+              </div>
+            )}
           </div>
 
           <div style={{ height: 150 }}>
@@ -379,6 +639,7 @@ export function PeriodLog() {
       ) : (
         <SortableTable
           tableId="period-log"
+          exportName="two-week-log"
           rows={shown}
           columns={columns}
           rowKey={(a) => a.activityId}

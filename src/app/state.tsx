@@ -467,6 +467,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     for (const key of ['settings', 'locations', 'library', 'overrides', 'testProgress', 'subsystems', 'teamActuals'] as const) {
       await store.saveFile(key, b[key] ?? (key === 'settings' ? b.settings : []));
     }
+    // Its own line: unlike every other file this one is an object, so the empty
+    // fallback above would write a bare array over it for a backup taken before
+    // missed reasons existed.
+    await store.saveFile('missedReasons', b.missedReasons ?? { reasons: [], entries: [] });
     let index = stateRef.current.data.importsIndex;
     for (const kind of ['current', 'baseline'] as const) {
       const imp = b[kind];

@@ -43,6 +43,8 @@ export type PeriodActivity = {
   activityId: string;
   activityName: string;
   location: string;
+  /** The raw phase key, e.g. "P2". Joins this row to its phase's figures. */
+  phase: string;
   phaseName: string;
   outcome: PeriodOutcome;
   /** Budget hours the baseline said would accrue inside the window. */
@@ -60,6 +62,34 @@ export type PeriodActivity = {
   finishVarianceDays: number | null;
   testsTotal: number | null;
   testsComplete: number | null;
+};
+
+/**
+ * The same log, for one phase of the job.
+ *
+ * "97% of plan" across a program says nothing about whether the phase somebody is
+ * actually running had a good fortnight: one phase finishing early routinely hides
+ * another stalling. Every figure here is measured exactly as the project-wide one
+ * is, over the same window, against that phase's own budget — so a phase's
+ * achievement is answerable on its own terms rather than as a share of the whole.
+ */
+export type PeriodPhase = {
+  /** The raw phase key, e.g. "P2". '' when the Activity ID carries no phase. */
+  key: string;
+  label: string;
+  /** In-budget activities in this phase, whether or not they moved in the window. */
+  activities: number;
+  /** The phase's whole budget, which its percent complete is taken against. */
+  budgetHours: number;
+  plannedHours: number;
+  earnedHours: number;
+  /** Earned ÷ planned for this phase. null when the phase planned nothing. */
+  achievement: number | null;
+  /** The phase's own percent complete at each end of the window. */
+  pctAtStart: number;
+  pctAtEnd: number;
+  /** Activities of this phase appearing in the log, by outcome. */
+  counts: Record<PeriodOutcome, number>;
 };
 
 /** One slice of the window, for the chart. A fortnight splits into two weeks. */
@@ -94,6 +124,13 @@ export type PeriodLog = {
   finishedOnTime: number;
   activities: PeriodActivity[];
   slices: PeriodSlice[];
+  /**
+   * The same window cut by phase, in phase order. Every phase carrying budget is
+   * here, including one that did nothing in the window — "Phase 3 planned nothing
+   * and did nothing" is an answer, and a phase vanishing from the list would read
+   * as the log having lost it.
+   */
+  phases: PeriodPhase[];
 };
 
 export const OUTCOMES: PeriodOutcome[] = ['COMPLETED', 'STARTED', 'CONTINUED', 'MISSED', 'NOT STARTED'];
@@ -191,6 +228,7 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
       activityId: r.activityId,
       activityName: r.activityName,
       location: r.location,
+      phase: r.phase,
       phaseName: r.phaseName,
       outcome,
       plannedHours,
@@ -220,7 +258,41 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
   const finishedOnTime = inBudget.filter((r) => within(r.baselineFinish, lo, hi) && r.pctComplete >= 1 && within(r.earnEnd, lo, hi)).length;
 
   const totalBudget = inBudget.reduce((s, r) => s + r.budgetHours, 0);
-  const earnedBy = (date: string) => inBudget.reduce((s, r) => s + r.earnedHours * accruedFraction(date, r.earnStart, r.earnEnd), 0);
+  const earnedBy = (rs: BudgetRow[], date: string) => rs.reduce((s, r) => s + r.earnedHours * accruedFraction(date, r.earnStart, r.earnEnd), 0);
+
+  /*
+   * By phase, over the same window. The phases come from every in-budget activity
+   * rather than from the rows in the log, so a phase that planned nothing is still
+   * listed; the outcome counts come from the log, since an outcome is something
+   * that happened in the window.
+   */
+  const phaseRows = new Map<string, BudgetRow[]>();
+  for (const r of inBudget) {
+    const list = phaseRows.get(r.phase);
+    if (list) list.push(r);
+    else phaseRows.set(r.phase, [r]);
+  }
+  const phases: PeriodPhase[] = [...phaseRows]
+    .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+    .map(([key, rs]) => {
+      const budgetHours = rs.reduce((s, r) => s + r.budgetHours, 0);
+      const planned = rs.reduce((s, r) => s + accruedIn(r.budgetHours, r.baselineStart, r.baselineFinish, lo, hi), 0);
+      const earned = rs.reduce((s, r) => s + accruedIn(r.earnedHours, r.earnStart, r.earnEnd, lo, hi), 0);
+      const c = Object.fromEntries(OUTCOMES.map((o) => [o, 0])) as Record<PeriodOutcome, number>;
+      for (const a of activities) if (a.phase === key) c[a.outcome] += 1;
+      return {
+        key,
+        label: rs[0].phaseName,
+        activities: rs.length,
+        budgetHours,
+        plannedHours: planned,
+        earnedHours: earned,
+        achievement: Math.abs(planned) > 1e-9 ? earned / planned : null,
+        pctAtStart: budgetHours ? earnedBy(rs, before) / budgetHours : 0,
+        pctAtEnd: budgetHours ? earnedBy(rs, hi) / budgetHours : 0,
+        counts: c,
+      };
+    });
 
   return {
     from: lo,
@@ -232,8 +304,8 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
     shareOfBudget: totalBudget ? earnedHours / totalBudget : 0,
     plannedShareOfBudget: totalBudget ? plannedHours / totalBudget : 0,
     projectBudgetHours: totalBudget,
-    pctAtStart: totalBudget ? earnedBy(before) / totalBudget : 0,
-    pctAtEnd: totalBudget ? earnedBy(hi) / totalBudget : 0,
+    pctAtStart: totalBudget ? earnedBy(inBudget, before) / totalBudget : 0,
+    pctAtEnd: totalBudget ? earnedBy(inBudget, hi) / totalBudget : 0,
     counts,
     dueToFinish,
     finishedOnTime,
@@ -243,5 +315,6 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
       planned: inBudget.reduce((sum, r) => sum + accruedIn(r.budgetHours, r.baselineStart, r.baselineFinish, s.from, s.to), 0),
       earned: inBudget.reduce((sum, r) => sum + accruedIn(r.earnedHours, r.earnStart, r.earnEnd, s.from, s.to), 0),
     })),
+    phases,
   };
 }

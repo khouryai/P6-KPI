@@ -191,6 +191,18 @@ export function BudgetMaster({ route }: { route: Route }) {
     actions.notify('ok', `Removed ${ids.size} edits pointing at activities that are gone. Save to write.`);
   };
 
+  /**
+   * Every resource code any budgeted activity asks for, so the table can carry one
+   * headcount column per resource. They are read off the rows rather than off the
+   * subsystems file: a crew line can name a code nobody has registered, and a
+   * column that silently omitted it would be a headcount that does not add up.
+   */
+  const resourceCodes = useMemo(() => {
+    const codes = new Set<string>();
+    for (const r of model.rows) for (const x of r.resources) if (x.code) codes.add(x.code);
+    return [...codes].sort();
+  }, [model.rows]);
+
   const opts = (vals: string[]) => [{ value: '', label: 'All' }, ...vals.filter(Boolean).sort().map((v) => ({ value: v, label: v }))];
   const locs = [...new Set(model.rows.map((r) => r.location))];
   const subs = model.subsystems.map((x) => x.code).filter(Boolean);
@@ -255,7 +267,7 @@ export function BudgetMaster({ route }: { route: Route }) {
       label: 'Match key',
       value: (r) => r.matchKey,
       render: (r) => (
-        <span className="block max-w-xs truncate" title={r.matchKey}>
+        <span className="cell-text" title={r.matchKey}>
           {r.matchKey}
         </span>
       ),
@@ -288,6 +300,50 @@ export function BudgetMaster({ route }: { route: Route }) {
         />
       ),
     },
+    {
+      key: 'res',
+      label: TERMS.subsystemPlural,
+      value: (r) => r.resources.map((x) => `${x.label} x${x.count}`).join(', '),
+      hint: `Who this activity is crewed with and how many of each, from the crew on its Activity Library key. Hours are that ${TERMS.subsystemLower}'s share of this activity's budget.`,
+      render: (r) =>
+        r.resources.length === 0 ? (
+          <span className="text-[var(--text-subtle)]">—</span>
+        ) : (
+          <span className="cell-text" title={r.resources.map((x) => `${x.count} x ${x.label} — ${fmtHours(x.budgetHours)} h of ${fmtHours(r.budgetHours)} h`).join('\n')}>
+            {r.resources.map((x, i) => (
+              <span key={x.code || '#'} className="whitespace-nowrap">
+                {i > 0 && <span className="text-[var(--text-subtle)]"> · </span>}
+                {x.label} <b className="tabular-nums">×{x.count}</b>
+              </span>
+            ))}
+          </span>
+        ),
+    },
+    {
+      key: 'crew',
+      label: 'Crew',
+      value: (r) => r.crewSize,
+      num: true,
+      hint: 'Heads on this activity, across every resource line. It is what the hours were priced from, not a roster.',
+      render: (r) => (r.crewSize ? r.crewSize : <span className="text-[var(--text-subtle)]">—</span>),
+    },
+    /*
+     * One column per resource code, off until asked for. Ticking the two you run and
+     * exporting gives the allocation matrix — activity down the side, heads across
+     * the top — which is the question this screen gets asked and could not answer.
+     */
+    ...resourceCodes.map<Column<BudgetRow>>((code) => ({
+      key: `res:${code}`,
+      label: code,
+      optional: true,
+      num: true,
+      hint: `Heads of ${code} on this activity.`,
+      value: (r) => r.resources.find((x) => x.code === code)?.count ?? '',
+      render: (r) => {
+        const x = r.resources.find((y) => y.code === code);
+        return x ? <span title={`${fmtHours(x.budgetHours)} h of this activity's ${fmtHours(r.budgetHours)} h`}>{x.count}</span> : <span className="text-[var(--text-subtle)]">—</span>;
+      },
+    })),
     { key: 'basis', label: 'Basis', value: (r) => r.basis ?? '' },
     { key: 'od', label: 'OD', value: (r) => r.activity.originalDuration, num: true, hint: 'Original Duration in days, straight from P6 and never editable here. Change it in P6 and re-import.' },
     { key: 'cx', label: 'Cx', value: (r) => r.complexity, num: true, render: (r) => (r.complexity === null ? '' : r.complexity.toFixed(2)) },
@@ -510,6 +566,7 @@ export function BudgetMaster({ route }: { route: Route }) {
         rows={rows}
         columns={columns}
         tableId="budget-master"
+        exportName="budget-master"
         rowKey={(r) => `${r.activityId}#${r.activity.sortOrder}`}
         maxHeight="calc(100vh - 240px)"
         rowClass={(r) => (r.status === 'REVIEW' ? 'row-bad' : r.baselineSource === 'NONE' ? 'row-bad' : r.status !== 'IN BUDGET' ? 'row-muted' : '')}

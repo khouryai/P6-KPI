@@ -41,11 +41,11 @@ The workbook never has to be opened again, and neither does Excel:
 | Load a schedule | **Import**: drop an `.xer`, `.xlsx` or `.csv`, paste rows, or pick a file already in the folder. Columns are matched by header name and can be corrected by hand before importing. |
 | Price activity types | **Activity Library**: inline editing, plus adding keys by hand. An activity type is priced by an exact match on its library key; anything unmatched shows as REVIEW. |
 | Per-location complexity | **Locations** |
-| Edit one activity | **Budget Master**: rename it, set its discipline, override its hours, note why, or take it out of the budget or out of the program entirely. Everything you edit is keyed on the Activity ID and survives every import; everything P6 owns is read-only. |
+| Edit one activity | **Budget Master**: rename it, set its discipline, override its hours, note why, or take it out of the budget or out of the program entirely. It also says which resources the activity is crewed with and how many of each. Everything you edit is keyed on the Activity ID and survives every import; everything P6 owns is read-only. |
 | Get rid of REVIEW rows you will never price | **Budget Master**: filter to *Needing REVIEW*, then **Hide**. Hidden activities leave every total, curve and export, nothing is deleted, and the Hidden view brings them back. |
 | Test case counts | **Test Progress**: every budgeted activity is already listed. Key counts inline, bulk-fill across a filter, or drop a spreadsheet. Keyed rows that earn nothing are listed with the name, the type and a sentence on why — and on whether deleting one costs you anything. |
 | Progress per phase or location | **By Phase & Location**: rollups by phase, location, discipline or work type, with drill-through into a filtered Budget Master. |
-| A fortnightly review | **Two-Week Log**: what the baseline planned for the period, what was actually achieved, and every activity behind it — completed, started, continued, missed or never started. Steps period by period, and copies as text for a report. |
+| A fortnightly review | **Two-Week Log**: what the baseline planned for the period, what was actually achieved, and every activity behind it — completed, started, continued, missed or never started. Achievement is reported for each phase as well as for the whole job. Every missed activity gets a **why**, picked from a list you extend from the dropdown itself, and the reasons are totalled on the screen. Test counts can be keyed straight from a row. Steps period by period, and copies as text for a report. |
 | Status snapshots | **Snapshots**: take one, take it off the S-curve while keeping the record, or delete one that should never have been written. |
 | Defaults, dates, storage, backups | **Settings** |
 | Hand a spreadsheet to project controls | **Settings → Export workbook**, plus curve CSV and chart PNG on the Dashboard. |
@@ -79,6 +79,19 @@ Most tables have a **Columns** button: tick what you want to see, move what matt
 to the front. Some detail columns start switched off. The choice is remembered per
 table, in this browser on this machine only — it is not written to the shared folder,
 so it never becomes something a colleague inherits.
+
+Beside it are three more, and they are remembered the same way. **Wrap text** shows
+every cell in full instead of cutting it off at the column edge; **Fit columns**
+widens each column to its own content; and dragging the right-hand edge of any
+heading sets that column's width by hand (double-click the edge to put it back).
+
+## Sending somebody one table
+
+Every one of those tables also has an **Excel** button, and what it writes is what
+you are looking at: the columns you have chosen, in the order you have put them,
+with the rows as you have filtered and sorted them. It is the answer to "send me
+that list". **Settings → Export workbook** is the other thing — the whole model in
+one file, every sheet, for project controls.
 
 ## Development
 

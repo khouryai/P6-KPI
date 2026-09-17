@@ -18,7 +18,7 @@ export function Settings() {
   const exportXlsx = async () => {
     setBusy(true);
     try {
-      const wb = buildWorkbook(model, s, state.data.current?.activities ?? [], state.data.baseline?.activities ?? [], state.data.testProgress, state.data.snapshots);
+      const wb = buildWorkbook(model, s, state.data.current?.activities ?? [], state.data.baseline?.activities ?? [], state.data.testProgress, state.data.snapshots, state.data.missedReasons);
       const bytes = workbookBytes(wb);
       const name = `TC_Budget_${stamp()}.xlsx`;
       if (state.adapterKind === 'filesystem') actions.notify('ok', `Workbook written to ${await actions.writeExport(name, bytes)}`);
