@@ -3,6 +3,7 @@ import type {
   ImportIndexEntry,
   LibraryEntry,
   Location,
+  MissedReasonLog,
   ScheduleImport,
   Settings,
   Snapshot,
@@ -21,6 +22,7 @@ export const FILES = {
   library: 'activity-library.json',
   overrides: 'activity-overrides.json',
   testProgress: 'test-progress.json',
+  missedReasons: 'missed-reasons.json',
   subsystems: 'subsystems.json',
   teamActuals: 'team-actuals.json',
   importsIndex: 'imports/index.json',
@@ -39,6 +41,8 @@ export type StoreData = {
   library: LibraryEntry[];
   overrides: ActivityOverride[];
   testProgress: TestProgress[];
+  /** Why activities were missed, plus the catalogue of reasons on offer. */
+  missedReasons: MissedReasonLog;
   subsystems: Subsystem[];
   teamActuals: TeamActual[];
   importsIndex: ImportIndexEntry[];
@@ -58,6 +62,7 @@ export function emptyStoreData(): StoreData {
     library: [],
     overrides: [],
     testProgress: [],
+    missedReasons: { reasons: [], entries: [] },
     subsystems: [],
     teamActuals: [],
     importsIndex: [],
@@ -89,11 +94,12 @@ const CANONICAL: RegExp[] = [
   /^activity-library\.json$/,
   /^activity-overrides\.json$/,
   /^test-progress\.json$/,
+  /^missed-reasons\.json$/,
   /^subsystems\.json$/,
   /^team-actuals\.json$/,
   /^\.lock$/,
 ];
-const STEMS = ['settings', 'locations', 'activity-library', 'activity-overrides', 'test-progress', 'subsystems', 'team-actuals'];
+const STEMS = ['settings', 'locations', 'activity-library', 'activity-overrides', 'test-progress', 'missed-reasons', 'subsystems', 'team-actuals'];
 const CANONICAL_IMPORT = /^(index|\d{4}-\d{2}-\d{2}T\d{4,6}-(current|baseline))\.json$/;
 const CANONICAL_SNAPSHOT = /^\d{4}-\d{2}-\d{2}(-\d+)?\.json$/;
 
@@ -160,6 +166,11 @@ export class Store {
     data.library = parseJson<LibraryEntry[]>(await a.read(FILES.library), [], FILES.library, problems);
     data.overrides = parseJson<ActivityOverride[]>(await a.read(FILES.overrides), [], FILES.overrides, problems);
     data.testProgress = parseJson<TestProgress[]>(await a.read(FILES.testProgress), [], FILES.testProgress, problems);
+    // Absent in every store written before the two-week log asked why an activity
+    // was missed. An empty catalogue is the right reading of "nobody has said yet",
+    // so a missing file is not a problem to report.
+    const missed = parseJson<Partial<MissedReasonLog>>(await a.read(FILES.missedReasons), {}, FILES.missedReasons, problems);
+    data.missedReasons = { reasons: missed.reasons ?? [], entries: missed.entries ?? [] };
     // Absent in every store written before crews could be split by subsystem. An
     // empty list is the correct reading of "this job has not been split yet", so a
     // missing file is not a problem to report.

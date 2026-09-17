@@ -106,6 +106,30 @@ describe('Store', () => {
     expect(existsSync(join(root, 'imports', '2026-09-01T0900-current.json'))).toBe(true);
   });
 
+  it('reads a folder written before missed reasons existed without inventing a problem', async () => {
+    // Every store in the field predates this file. An empty catalogue is the right
+    // reading of "nobody has been asked yet", so a missing file is not a fault to
+    // report — and the shape has to come back whole, since it is an object rather
+    // than the list every other file holds.
+    const store = new Store(new FileSystemAdapter(new NodeDirectory(root), 'tmp', { sleep: noSleep }), owner);
+    await store.saveFile('settings', { ...DEFAULT_SETTINGS });
+    const { data, problems } = await store.loadAll();
+    expect(problems).toEqual([]);
+    expect(data.missedReasons).toEqual({ reasons: [], entries: [] });
+  });
+
+  it('round-trips the reasons an activity was missed for', async () => {
+    const store = new Store(new FileSystemAdapter(new NodeDirectory(root), 'tmp', { sleep: noSleep }), owner);
+    await store.saveFile('missedReasons', {
+      reasons: ['Cable pull late'],
+      entries: [{ activityId: 'A-1', periodEnd: '2026-08-31', reason: 'Cable pull late', updatedAt: '2026-09-01T00:00:00Z' }],
+    });
+    const { data } = await store.loadAll();
+    expect(data.missedReasons.reasons).toEqual(['Cable pull late']);
+    expect(data.missedReasons.entries[0].activityId).toBe('A-1');
+    expect(existsSync(join(root, 'missed-reasons.json'))).toBe(true);
+  });
+
   it('detects OneDrive conflict copies and reports them without merging', async () => {
     const store = new Store(new FileSystemAdapter(new NodeDirectory(root), 'tmp', { sleep: noSleep }), owner);
     await store.saveFile('settings', { ...DEFAULT_SETTINGS, defaultCrew: 2 });

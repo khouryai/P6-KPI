@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { CurvePoint, Model, Settings, P6Activity, TestProgress, Snapshot } from '../engine/types';
+import type { CurvePoint, Model, Settings, P6Activity, TestProgress, Snapshot, MissedReasonLog } from '../engine/types';
 import { p6PctComplete } from '../engine/compute';
 import { fmtHours } from './format';
 
@@ -20,7 +20,15 @@ function extractSheet(acts: P6Activity[], withDerived: boolean): XLSX.WorkSheet 
 }
 
 /** Build the export workbook with the same sheet names and column layouts as the source workbook. Values only, no formulas. */
-export function buildWorkbook(model: Model, settings: Settings, current: P6Activity[], baseline: P6Activity[], testProgress: TestProgress[], snapshots: Snapshot[]): XLSX.WorkBook {
+export function buildWorkbook(
+  model: Model,
+  settings: Settings,
+  current: P6Activity[],
+  baseline: P6Activity[],
+  testProgress: TestProgress[],
+  snapshots: Snapshot[],
+  missedReasons: MissedReasonLog = { reasons: [], entries: [] },
+): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
   const s = model.summary;
   XLSX.utils.book_append_sheet(wb, wsFrom([
@@ -55,8 +63,8 @@ export function buildWorkbook(model: Model, settings: Settings, current: P6Activ
   ]), 'Test_Progress');
   XLSX.utils.book_append_sheet(wb, extractSheet(baseline, false), 'Baseline_Extract');
   XLSX.utils.book_append_sheet(wb, wsFrom([
-    ['Row', 'P6_Activity_ID', 'Location', 'Seq_Code', 'Match_Key', 'Rate_Status', 'Status', 'Basis', 'Complexity', 'Std_Hours', 'Override_Hours', 'Budget_Hours', 'Baseline_Start', 'Baseline_Finish', 'Baseline_Source', 'Current_Start', 'Current_Finish', 'Pct_Complete', 'Pct_Source', 'Earned_Hours', 'Remaining_Hours', 'Phase', 'Work_Type', 'Activity_Name', 'Activity_Type', 'Subsystem', 'Earn_Start', 'Earn_End', 'Earn_Window_Source', 'P6_Activity_Name', 'Renamed_By_User', 'Visibility_Override'],
-    ...model.rows.map((r, i) => [i + 2, r.activity.rawActivityId, r.location, r.seqCode, r.matchKey, r.rateStatus, r.status, r.basis ?? '', r.complexity ?? '', r.stdHours ?? '', r.overrideHours ?? '', r.budgetHours, d(r.baselineStart), d(r.baselineFinish), r.baselineSource, d(r.currentStart), d(r.currentFinish), r.pctComplete, r.pctSource, r.earnedHours, r.remainingHours, r.phaseName, r.workType, r.activityName, r.activityType, r.discipline, d(r.earnStart), d(r.earnEnd), r.earnWindowSource, r.activity.activityName, r.renamed ? 'Y' : '', r.visibility ?? '']),
+    ['Row', 'P6_Activity_ID', 'Location', 'Seq_Code', 'Match_Key', 'Rate_Status', 'Status', 'Basis', 'Complexity', 'Std_Hours', 'Override_Hours', 'Budget_Hours', 'Baseline_Start', 'Baseline_Finish', 'Baseline_Source', 'Current_Start', 'Current_Finish', 'Pct_Complete', 'Pct_Source', 'Earned_Hours', 'Remaining_Hours', 'Phase', 'Work_Type', 'Activity_Name', 'Activity_Type', 'Subsystem', 'Earn_Start', 'Earn_End', 'Earn_Window_Source', 'P6_Activity_Name', 'Renamed_By_User', 'Visibility_Override', 'Crew_Size', 'Resources'],
+    ...model.rows.map((r, i) => [i + 2, r.activity.rawActivityId, r.location, r.seqCode, r.matchKey, r.rateStatus, r.status, r.basis ?? '', r.complexity ?? '', r.stdHours ?? '', r.overrideHours ?? '', r.budgetHours, d(r.baselineStart), d(r.baselineFinish), r.baselineSource, d(r.currentStart), d(r.currentFinish), r.pctComplete, r.pctSource, r.earnedHours, r.remainingHours, r.phaseName, r.workType, r.activityName, r.activityType, r.discipline, d(r.earnStart), d(r.earnEnd), r.earnWindowSource, r.activity.activityName, r.renamed ? 'Y' : '', r.visibility ?? '', r.crewSize, r.resources.map((x) => `${x.label} x${x.count}`).join(', ')]),
   ]), 'Budget_Master');
   XLSX.utils.book_append_sheet(wb, wsFrom([
     // Hidden snapshots are exported too. They are off the curve, not off the record,
@@ -64,6 +72,23 @@ export function buildWorkbook(model: Model, settings: Settings, current: P6Activ
     ['Status_Date', 'P6_Activity_ID', 'Pct_Complete', 'Budget_Hours', 'Earned_Hours', 'Taken_At', 'Note', 'On_Curve'],
     ...snapshots.flatMap((sn) => sn.lines.map((l) => [d(sn.statusDate), l.activityId, l.pctComplete, l.budgetHours, l.earnedHours, sn.takenAt, sn.note ?? '', sn.hidden ? 'HIDDEN' : 'Y'])),
   ]), 'Status_History');
+  /*
+   * Why activities were missed, one row per activity per review period, with the
+   * name and the phase carried alongside so the sheet can be read on its own. The
+   * whole point of recording a reason is that somebody totals them up later, and a
+   * workbook that held the misses but not the reasons would send them back to the
+   * app to do it by hand.
+   */
+  const byId = new Map(model.rows.map((r) => [r.activityId, r]));
+  XLSX.utils.book_append_sheet(wb, wsFrom([
+    ['Period_End', 'P6_Activity_ID', 'Activity_Name', 'Phase', 'Location', 'Reason', 'Note', 'Recorded_At'],
+    ...[...missedReasons.entries]
+      .sort((a, b) => b.periodEnd.localeCompare(a.periodEnd) || a.activityId.localeCompare(b.activityId))
+      .map((e) => {
+        const r = byId.get(e.activityId);
+        return [d(e.periodEnd), e.activityId, r?.activityName ?? '', r?.phaseName ?? '', r?.location ?? '', e.reason, e.note ?? '', e.updatedAt];
+      }),
+  ]), 'Missed_Reasons');
   XLSX.utils.book_append_sheet(wb, wsFrom([
     ['Status_Date', 'P6_Activity_ID', 'Pct_Complete', 'Source'],
     ...model.rows.filter((r) => r.status === 'IN BUDGET').map((r) => [d(settings.statusDate), r.activityId, r.pctComplete, r.pctSource]),

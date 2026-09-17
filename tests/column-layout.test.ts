@@ -85,6 +85,22 @@ describe('ordering', () => {
   });
 });
 
+describe('widths and wrapping', () => {
+  it('leave which columns are shown, and their order, entirely alone', () => {
+    // They are settings ABOUT the visible columns, not a further filter on them.
+    // A layout carrying a width for a hidden column must not resurrect it.
+    const l = layout({ off: ['loc'], widths: { loc: 300, name: 240 }, wrap: true });
+    expect(keys(applyLayout(columns, l))).toEqual(['id', 'name']);
+    expect(isVisible(col('loc'), l)).toBe(false);
+  });
+
+  it('are optional, so a layout saved before columns could be resized still reads', () => {
+    const old = layout({ order: ['loc', 'id'], off: [], on: [] });
+    expect(old.widths).toBeUndefined();
+    expect(keys(applyLayout(columns, old))).toEqual(['loc', 'id', 'name']);
+  });
+});
+
 describe('a reset', () => {
   it('goes back to exactly what a fresh table shows', () => {
     expect(keys(applyLayout(columns, layout()))).toEqual(keys(applyLayout(columns, null)));

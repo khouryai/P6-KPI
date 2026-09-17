@@ -395,7 +395,7 @@ export function Import() {
                     <tr key={a.sortOrder}>
                       <td><pre className="m-0 font-mono text-[11px]">{a.rawActivityId}</pre></td>
                       <td><Badge tone={a.rowType === 'WBS' ? 'muted' : 'good'}>{a.rowType}</Badge></td>
-                      <td className="max-w-md truncate" title={a.activityName}>{a.activityName}</td>
+                      <td className="cell-text" title={a.activityName}>{a.activityName}</td>
                       <td className="num">{a.originalDuration ?? ''}</td>
                       <td className="num">{a.remainingDuration ?? ''}</td>
                       <td>{fmtDate(a.startDate)}{a.actualStart ? ' A' : ''}{!a.startDate && a.startRaw ? <span className="text-[var(--bad)]"> ({a.startRaw})</span> : ''}</td>

@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { define } from '../../engine/glossary';
+import { downloadBytes, stamp } from '../export';
 
 export type Tone = 'good' | 'warn' | 'bad' | 'info' | 'purple' | 'muted';
 
@@ -166,6 +168,12 @@ export type Column<T> = {
   num?: boolean;
   width?: string;
   /**
+   * What this column is worth in a spreadsheet, when the figure on screen is not it.
+   * Left out, the export writes `value(row)` — which is what the column sorts on and
+   * so is nearly always the right answer.
+   */
+  exportValue?: (row: T) => string | number | null | undefined;
+  /**
    * What the column means. Left out, the glossary is consulted for the label, so
    * a column called "OD" explains itself without every screen repeating the text.
    * Pass an empty string to say deliberately that there is nothing to explain.
@@ -203,6 +211,18 @@ export type TableLayout = {
    * asked for appeared.
    */
   on: string[];
+  /**
+   * Column widths in pixels, as set by dragging a heading's right-hand edge.
+   * Optional: a layout saved before columns could be resized has none, and a
+   * column with no entry sizes itself as it always did.
+   */
+  widths?: Record<string, number>;
+  /**
+   * Show every cell in full by wrapping it over as many lines as it takes, instead
+   * of cutting it off at the column edge. Off by default: a table of one-line rows
+   * is far quicker to scan, and the whole text is only sometimes the point.
+   */
+  wrap?: boolean;
 };
 
 const LAYOUT_PREFIX = 'tc-cols-';
@@ -213,7 +233,11 @@ function readLayout(tableId: string): TableLayout | null {
     if (!raw) return null;
     const v = JSON.parse(raw) as Partial<TableLayout>;
     const arr = (x: unknown) => (Array.isArray(x) ? (x as string[]) : []);
-    return { order: arr(v.order), off: arr(v.off), on: arr(v.on) };
+    const widths: Record<string, number> = {};
+    if (v.widths && typeof v.widths === 'object') {
+      for (const [k, w] of Object.entries(v.widths)) if (typeof w === 'number' && Number.isFinite(w) && w > 0) widths[k] = w;
+    }
+    return { order: arr(v.order), off: arr(v.off), on: arr(v.on), widths, wrap: !!v.wrap };
   } catch {
     return null;
   }
@@ -227,7 +251,7 @@ export function isVisible<T>(c: Column<T>, layout: TableLayout | null): boolean 
 }
 
 function isEmptyLayout(l: TableLayout): boolean {
-  return l.order.length === 0 && l.off.length === 0 && l.on.length === 0;
+  return l.order.length === 0 && l.off.length === 0 && l.on.length === 0 && Object.keys(l.widths ?? {}).length === 0 && !l.wrap;
 }
 
 function writeLayout(tableId: string, layout: TableLayout | null): void {
@@ -325,8 +349,12 @@ function ColumnPicker<T>({
       <div className="col-pop" role="dialog" aria-label="Choose columns">
         <div className="col-pop-head">
           <span>Columns</span>
-          <button className="btn-link" onClick={() => onChange({ order: [], off: [], on: [] })}>reset</button>
+          <button className="btn-link" onClick={() => onChange({ order: [], off: [], on: [], widths: {}, wrap: false })}>reset</button>
         </div>
+        <label className="col-wrap-row" title="Show every cell in full, over as many lines as it takes. Off, a cell that does not fit is cut off at the column edge and its whole text is in the tooltip.">
+          <input type="checkbox" checked={!!layout.wrap} onChange={() => onChange({ ...layout, wrap: !layout.wrap })} />
+          <span>Wrap text — show whole cells</span>
+        </label>
         <div className="col-pop-list">
           {order.map((c) => (
             <div key={c.key} className="col-row">
@@ -341,10 +369,35 @@ function ColumnPicker<T>({
             </div>
           ))}
         </div>
-        <div className="col-pop-foot">Kept on this machine only. Order here is left-to-right in the table.</div>
+        <div className="col-pop-foot">
+          Kept on this machine only. Order here is left-to-right in the table. Drag the edge of a heading to widen a column; double-click that edge to put it back.
+        </div>
       </div>
     </>
   );
+}
+
+/**
+ * Everything on screen, as a spreadsheet: the columns that are showing, in the
+ * order they are showing, carrying the rows as filtered and sorted.
+ *
+ * The point is that it matches the screen. A person who has spent a minute picking
+ * columns, moving two to the front and filtering to one phase has already said what
+ * they want out of the table; an export that ignores all of that and dumps every
+ * field is a different document they then have to edit down. So the cells come from
+ * `value` — the same raw figure the column sorts on, not the badge or the input
+ * drawn over it — and nothing that is switched off is written.
+ */
+export function tableToSheet<T>(rows: T[], columns: Column<T>[]): XLSX.WorkSheet {
+  const header = columns.map((c) => c.label || 'Actions');
+  const body = rows.map((r) => columns.map((c) => (c.exportValue ? c.exportValue(r) : c.value(r)) ?? ''));
+  const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
+  // Column widths, so the text a person went to the trouble of widening on screen
+  // is not cut off again the moment it lands in Excel.
+  ws['!cols'] = columns.map((c, i) => ({
+    wch: Math.min(60, Math.max(10, c.label.length + 2, ...body.slice(0, 400).map((r) => String(r[i] ?? '').length + 1))),
+  }));
+  return ws;
 }
 
 /** A sortable table. Sorting is by the column's raw value. */
@@ -356,6 +409,7 @@ export function SortableTable<T>({
   maxHeight = 'calc(100vh - 290px)',
   rowClass,
   tableId,
+  exportName,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -368,9 +422,16 @@ export function SortableTable<T>({
    * what order, remembered per browser. Without one it behaves exactly as before.
    */
   tableId?: string;
+  /** What the exported workbook is called. Defaults to the table id. */
+  exportName?: string;
 }) {
   const [layout, setLayout] = useState<TableLayout | null>(() => (tableId ? readLayout(tableId) : null));
   const [picking, setPicking] = useState(false);
+  /** The width being dragged right now, before it is committed to the layout. */
+  const [dragging, setDragging] = useState<{ key: string; width: number } | null>(null);
+  /** One render with every width dropped, so `Fit columns` can measure the content. */
+  const [measuring, setMeasuring] = useState(false);
+  const headRef = useRef<HTMLTableRowElement | null>(null);
   const columns = useMemo(() => (tableId ? applyLayout(declared, layout) : declared), [declared, layout, tableId]);
   const changeLayout = (next: TableLayout) => {
     const stored = isEmptyLayout(next) ? null : next;
@@ -378,6 +439,97 @@ export function SortableTable<T>({
     if (tableId) writeLayout(tableId, stored);
   };
   const hiddenCount = tableId ? declared.length - columns.length : 0;
+  const wrap = !!layout?.wrap;
+
+  /** The width in force for a column: the drag in progress, then the saved one. */
+  const widthOf = (key: string): number | undefined => (dragging?.key === key ? dragging.width : layout?.widths?.[key]);
+
+  /**
+   * Widen a column by dragging the right-hand edge of its heading.
+   *
+   * The pointer is captured, so the drag survives leaving the 5px grip — without
+   * that, a quick pull drops the column halfway. The width is held in state while
+   * the pointer is down and written to the layout once on release, which keeps a
+   * drag from putting a hundred entries through localStorage.
+   */
+  const startResize = (e: React.PointerEvent, key: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = (e.currentTarget as HTMLElement).closest('th');
+    const from = e.clientX;
+    const startWidth = Math.round(th?.getBoundingClientRect().width ?? 120);
+    const grip = e.currentTarget as HTMLElement;
+    grip.setPointerCapture(e.pointerId);
+    let latest = startWidth;
+    const move = (ev: PointerEvent) => {
+      latest = Math.max(48, Math.round(startWidth + (ev.clientX - from)));
+      setDragging({ key, width: latest });
+    };
+    const done = () => {
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', done);
+      grip.removeEventListener('pointercancel', done);
+      setDragging(null);
+      const base = layout ?? { order: [], off: [], on: [] };
+      changeLayout({ ...base, widths: { ...(base.widths ?? {}), [key]: latest } });
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', done);
+    grip.addEventListener('pointercancel', done);
+  };
+
+  /** Double-clicking the grip gives the column back to the browser to size. */
+  const clearWidth = (key: string) => {
+    if (!layout?.widths?.[key]) return;
+    const widths = { ...layout.widths };
+    delete widths[key];
+    changeLayout({ ...layout, widths });
+  };
+
+  /**
+   * Widen every column to the widest thing in it.
+   *
+   * This has to be measured in two passes, and the reason is the whole trick: a
+   * column that is cut off is cut off BECAUSE it is holding a width, so measuring
+   * it where it stands just reads that width back and pins the truncation in place
+   * — which is exactly what the first version of this did. So the table is first
+   * rendered with every width removed, where the browser lays each column out to
+   * its content, and the widths are read off that and then applied.
+   */
+  const fitAll = () => setMeasuring(true);
+
+  useEffect(() => {
+    if (!measuring) return;
+    const head = headRef.current;
+    const widths: Record<string, number> = {};
+    // Laid out unconstrained, a column IS its widest cell, so the headings carry
+    // the answer for the whole column.
+    [...(head?.children ?? [])].forEach((th, i) => {
+      const key = columns[i]?.key;
+      if (key) widths[key] = Math.min(640, Math.max(56, Math.ceil((th as HTMLElement).getBoundingClientRect().width)));
+    });
+    setMeasuring(false);
+    if (Object.keys(widths).length) changeLayout({ ...(layout ?? { order: [], off: [], on: [] }), widths, wrap: false });
+    // Deliberately only on the measuring flag: this runs once per Fit, against the
+    // unconstrained table that flag just rendered.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measuring]);
+
+  /** The width to render a column at. While measuring, none: that is the point. */
+  const renderWidth = (c: Column<T>): string | number | undefined => (measuring ? undefined : widthOf(c.key) ?? c.width);
+  const cellStyle = (c: Column<T>): React.CSSProperties | undefined => {
+    const w = renderWidth(c);
+    return w === undefined ? undefined : typeof w === 'number' ? { width: w, minWidth: w, maxWidth: w } : { width: w };
+  };
+
+  /** The visible table, as a workbook. */
+  const exportSheet = () => {
+    const name = exportName ?? tableId ?? 'table';
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, tableToSheet(sorted, columns), name.slice(0, 28).replace(/[[\]:*?/\\]/g, '-'));
+    const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
+    downloadBytes(`${name}-${stamp()}.xlsx`, bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  };
 
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(defaultSort ?? null);
   const sorted = useMemo(() => {
@@ -400,6 +552,15 @@ export function SortableTable<T>({
     <div className="table-shell">
       {tableId && (
         <div className="table-tools">
+          <button className={`btn btn-mini${wrap ? ' is-on' : ''}`} onClick={() => changeLayout({ ...(layout ?? { order: [], off: [], on: [] }), wrap: !wrap })} title="Show every cell in full, over as many lines as it takes">
+            Wrap text
+          </button>
+          <button className="btn btn-mini" onClick={fitAll} title="Widen every column to fit the longest thing in it. Double-click the edge of one heading to put that column back.">
+            Fit columns
+          </button>
+          <button className="btn btn-mini" onClick={exportSheet} title="Download what is on screen as an .xlsx: these columns, in this order, these rows.">
+            Excel
+          </button>
           <button className={`btn btn-mini${hiddenCount > 0 ? ' is-on' : ''}`} onClick={() => setPicking((v) => !v)} title="Choose which columns to show, and their order">
             Columns{hiddenCount > 0 ? ` (${columns.length}/${declared.length})` : ''}
           </button>
@@ -414,14 +575,14 @@ export function SortableTable<T>({
         </div>
       )}
     <div className="table-wrap" style={{ maxHeight }}>
-      <table className="tbl">
+      <table className={`tbl${wrap ? ' is-wrap' : ''}${measuring ? ' is-measuring' : ''}`}>
         <thead>
-          <tr>
+          <tr ref={headRef}>
             {columns.map((c) => (
               <th
                 key={c.key}
                 className={`cursor-pointer select-none${c.num ? ' num' : ''}`}
-                style={c.width ? { width: c.width } : undefined}
+                style={cellStyle(c)}
                 onClick={() => toggle(c.key)}
               >
                 {/*
@@ -433,6 +594,20 @@ export function SortableTable<T>({
                 {c.num && <span className="th-sort">{sort?.key === c.key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>}
                 <Term text={c.label} hint={c.hint} />
                 {!c.num && <span className="th-sort">{sort?.key === c.key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>}
+                {tableId && (
+                  /* The grip lives in the heading, so it has to swallow the click
+                     that would otherwise sort the column out from under the drag. */
+                  <span
+                    className="col-grip"
+                    title="Drag to set this column's width. Double-click to size it automatically again."
+                    onPointerDown={(e) => startResize(e, c.key)}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      clearWidth(c.key);
+                    }}
+                  />
+                )}
               </th>
             ))}
           </tr>
@@ -441,7 +616,11 @@ export function SortableTable<T>({
           {sorted.map((r) => (
             <tr key={rowKey(r)} className={rowClass?.(r)}>
               {columns.map((c) => (
-                <td key={c.key} className={c.num ? 'num' : ''}>
+                <td
+                  key={c.key}
+                  className={c.num ? 'num' : ''}
+                  style={cellStyle(c)}
+                >
                   {c.render ? c.render(r) : c.value(r) ?? ''}
                 </td>
               ))}

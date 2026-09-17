@@ -142,6 +142,51 @@ export type ActivityOverride = {
   updatedAt?: string;
 };
 
+/**
+ * Why an activity the baseline had finishing in a period did not finish.
+ *
+ * Keyed on the Activity ID AND the period it was written against, so a fortnightly
+ * review keeps its own answer: an activity missed in three consecutive periods
+ * usually has three different stories, and overwriting the first with the third
+ * would leave the earlier review unable to explain itself.
+ */
+export type MissedReason = {
+  activityId: string;
+  /** The ISO end date of the window the log was showing when this was recorded. */
+  periodEnd: string;
+  /** One of the catalogue's reasons. Free text, because the catalogue is free text. */
+  reason: string;
+  /** Anything the reason itself cannot say. */
+  note?: string;
+  updatedAt: string;
+};
+
+/**
+ * The reasons an activity can be missed for, and every reason given so far.
+ *
+ * The catalogue is a plain list of strings the user extends from the dropdown
+ * itself — there is no fixed taxonomy, because every project argues about its own.
+ * It is kept explicitly rather than derived from the entries so that a reason stays
+ * on offer after the last activity carrying it is re-dated or completed.
+ */
+export type MissedReasonLog = {
+  reasons: string[];
+  entries: MissedReason[];
+};
+
+/** The reasons offered before anybody has typed one of their own. */
+export const DEFAULT_MISSED_REASONS: string[] = [
+  'Access not available',
+  'Predecessor work not complete',
+  'Design or documentation not issued',
+  'Materials or equipment not delivered',
+  'Resource not available',
+  'Testing failed, retest required',
+  'Client or third party hold',
+  'Weather',
+  'Re-sequenced by the plan',
+];
+
 export type TestProgress = {
   activityId: string;
   testsTotal?: number;
@@ -200,6 +245,29 @@ export type RateStatus = 'SET' | 'DEFAULT' | 'NEEDS SHIFTS' | 'EXCLUDED' | 'NO M
 export type BaselineSource = 'BASELINE' | 'CURRENT' | 'NONE';
 export type PctSource = 'OVERRIDE' | 'TESTS' | 'P6';
 export type EarnWindowSource = 'TEST WINDOW' | 'P6 ACTUAL' | 'IN PROGRESS' | 'NOT STARTED';
+
+/**
+ * One resource group on ONE activity: who works on it, how many of them, and what
+ * share of the activity's hours they carry.
+ *
+ * The counts come from the crew on the activity's Activity Library key, so they
+ * answer "how many ATS engineers does this activity ask for" without anybody
+ * opening the library and reading a rate. The hours are the same figures
+ * `subsystemHours` carries, so a resource's hours here and on the Resources screen
+ * can never disagree.
+ */
+export type ResourceAllocation = {
+  /** The resource code, '' when the type is priced as a plain headcount. */
+  code: string;
+  /** The code, or 'Unassigned' when there is none. For reading, never for joining. */
+  label: string;
+  /** Heads of this resource on the activity. */
+  count: number;
+  /** The shift length this line works, when it differs from the entry's. */
+  shiftHours: number;
+  budgetHours: number;
+  earnedHours: number;
+};
 
 export type BudgetRow = {
   activity: P6Activity;
@@ -266,6 +334,13 @@ export type BudgetRow = {
   subsystemHours: Record<string, number>;
   /** The same split applied to earned hours: each part times pctComplete. */
   subsystemEarned: Record<string, number>;
+  /**
+   * What this activity is crewed with, one line per resource group. Empty for an
+   * activity carrying no budget, since an unpriced activity asks for nobody.
+   */
+  resources: ResourceAllocation[];
+  /** Heads across every resource line. 0 when the activity is not in the budget. */
+  crewSize: number;
 };
 
 export type LibraryStat = {
