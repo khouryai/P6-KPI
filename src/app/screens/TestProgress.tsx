@@ -142,8 +142,9 @@ export function TestProgress({ route }: { route: Route }) {
       const pct = asFraction(num(String(cells[3] ?? '')));
       const ts = parseP6Date(cells[4] ?? '').iso ?? undefined;
       const te = parseP6Date(cells[5] ?? '').iso ?? undefined;
+      const note = String(cells[6] ?? '').trim() || undefined;
       if (!budgetedIds.has(normKey(id))) unknown += 1;
-      const patch = tidy({ activityId: id, testsTotal: tot, testsComplete: comp, pctOverride: pct, testStartOverride: ts, testEndOverride: te, updatedAt: now() });
+      const patch = tidy({ activityId: id, testsTotal: tot, testsComplete: comp, pctOverride: pct, testStartOverride: ts, testEndOverride: te, note, updatedAt: now() });
       const i = next.findIndex((t) => normKey(t.activityId) === normKey(id));
       if (i >= 0) {
         next[i] = { ...next[i], ...patch };
@@ -211,14 +212,15 @@ export function TestProgress({ route }: { route: Route }) {
       key: 'keyed',
       label: 'Keyed',
       value: (c) => c.testsTotal ?? c.pctOverride ?? 0,
-      hint: 'What you would lose by deleting this row: the test counts, the percent override and the window dates keyed against it.',
+      hint: 'What you would lose by deleting this row: the test counts, the percent override, the window dates and the progress note keyed against it.',
       render: (c) => (
         <span className="text-[12px]">
           {c.testsTotal !== null && <>{c.testsComplete ?? 0}/{c.testsTotal} tests</>}
           {c.pctOverride !== null && <>{c.testsTotal !== null ? ', ' : ''}{fmtPct(c.pctOverride, 0)} override</>}
           {c.testStartOverride && <>, from {c.testStartOverride}</>}
           {c.testEndOverride && <> to {c.testEndOverride}</>}
-          {c.testsTotal === null && c.pctOverride === null && !c.testStartOverride && !c.testEndOverride && <span className="text-[var(--text-subtle)]">nothing</span>}
+          {c.note && <>, a note: <span title={c.note}>“{c.note.length > 40 ? `${c.note.slice(0, 40)}…` : c.note}”</span></>}
+          {c.testsTotal === null && c.pctOverride === null && !c.testStartOverride && !c.testEndOverride && !c.note && <span className="text-[var(--text-subtle)]">nothing</span>}
         </span>
       ),
     },
@@ -392,6 +394,26 @@ export function TestProgress({ route }: { route: Route }) {
         <CellInput type="date" value={r.entry?.testEndOverride ?? ''} onCommit={(v) => setField(r.activityId, { testEndOverride: isValidISO(v) ? v : undefined })} />
       ),
     },
+    /*
+     * The same note the Two-Week Log keys, not a copy of it. Both screens write
+     * through `setTestProgress`, so whichever one a person happens to be on when
+     * they have the answer in their head is the right one to write it on.
+     */
+    {
+      key: 'note',
+      label: 'Progress note',
+      value: (r) => r.entry?.note ?? '',
+      hint: 'Anything about this activity worth saying at a review. The same field the Two-Week Log shows — write it in either place. Not the Budget Master note, which explains a pricing or visibility decision.',
+      render: (r) => (
+        <CellInput
+          className="cell-input cell-wide"
+          value={r.entry?.note ?? ''}
+          placeholder="—"
+          title={r.entry?.note || 'Your own words on this activity. The Two-Week Log shows and edits the same note.'}
+          onCommit={(v) => setField(r.activityId, { note: v })}
+        />
+      ),
+    },
     { key: 'es', label: 'Earn start', value: (r) => r.earnStart, optional: true, render: (r) => fmtDate(r.earnStart) },
     { key: 'ee', label: 'Earn end', value: (r) => r.earnEnd, optional: true, render: (r) => fmtDate(r.earnEnd) },
     { key: 'win', label: 'Window', value: (r) => r.earnWindowSource, render: (r) => <Badge tone={statusTone(r.earnWindowSource)}>{r.earnWindowSource}</Badge> },
@@ -552,7 +574,7 @@ export function TestProgress({ route }: { route: Route }) {
             }}
           >
             <p className="text-[11.5px] text-[var(--text-subtle)]">
-              Columns: Activity ID, tests total, tests complete, then optional % override, test start, test end. Drop an .xlsx or .csv here, or paste below.
+              Columns: Activity ID, tests total, tests complete, then optional % override, test start, test end, progress note. Drop an .xlsx or .csv here, or paste below.
             </p>
             <input className="mt-2 block text-[12px]" type="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void applyFile(f); }} />
             <textarea

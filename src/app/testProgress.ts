@@ -16,8 +16,8 @@ import type { DataUpdater } from './state';
 /** Drop undefined and empty fields so the stored JSON stays tidy. */
 export function tidyTestProgress(t: TestProgress): TestProgress {
   const out: TestProgress = { activityId: t.activityId.trim(), updatedAt: t.updatedAt };
-  for (const k of ['testsTotal', 'testsComplete', 'pctOverride', 'testStartOverride', 'testEndOverride'] as const) {
-    const v = t[k];
+  for (const k of ['testsTotal', 'testsComplete', 'pctOverride', 'testStartOverride', 'testEndOverride', 'note'] as const) {
+    const v = typeof t[k] === 'string' ? (t[k] as string).trim() : t[k];
     if (v !== undefined && v !== null && v !== '') (out as Record<string, unknown>)[k] = v;
   }
   return out;
@@ -30,7 +30,8 @@ function isEmpty(t: TestProgress): boolean {
     t.testsComplete === undefined &&
     t.pctOverride === undefined &&
     t.testStartOverride === undefined &&
-    t.testEndOverride === undefined
+    t.testEndOverride === undefined &&
+    t.note === undefined
   );
 }
 

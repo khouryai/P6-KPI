@@ -13,10 +13,13 @@
  *   obvious ones, and anything typed into the dropdown joins it permanently — kept
  *   explicitly rather than derived from the reasons in use, so a reason stays on
  *   offer after the last activity carrying it is re-dated or finished.
- * - A reason belongs to a period as well as an activity. An activity missed in
- *   three consecutive fortnights usually has three different stories, and the
- *   second review overwriting the first would leave the first unable to explain
- *   itself.
+ * - A reason belongs to an activity first and to a period second. An activity
+ *   missed in three consecutive fortnights usually has three different stories, so
+ *   each answer is stamped with the period it was given for and the second review
+ *   never overwrites the first. But the answer is still the ACTIVITY's: shifting the
+ *   window's end date by a day is the same activity with the same story, so the
+ *   nearest answer it has is what shows, marked as carried when it came from another
+ *   period. Writing one always stamps the period on screen.
  */
 import type { MissedReason, MissedReasonLog } from '../engine/types';
 import { DEFAULT_MISSED_REASONS } from '../engine/types';
@@ -68,9 +71,45 @@ export function isReasonUnused(log: MissedReasonLog, reason: string): boolean {
   return !reasonUsage(log).get(normKey(reason));
 }
 
-/** What was said about this activity, for this period. */
+/** What was said about this activity, for exactly this period and no other. */
 export function reasonFor(log: MissedReasonLog, activityId: string, periodEnd: string): MissedReason | undefined {
   return log.entries.find((e) => normKey(e.activityId) === normKey(activityId) && e.periodEnd === periodEnd);
+}
+
+/** Whole days between two ISO dates, however they are ordered. */
+function daysApart(a: string, b: string): number {
+  return Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000;
+}
+
+/**
+ * The answer that stands for this activity when the log is showing this period.
+ *
+ * The reason belongs to the ACTIVITY first and to the period second. A reason keyed
+ * against the fortnight to 9 Sep is still the reason that activity is late when the
+ * window is nudged to the 8th or the 10th — the same activity, the same story, one
+ * day of arithmetic apart — and the first version of this looked for an exact
+ * periodEnd and so blanked every answer the moment somebody moved the end date by a
+ * day. Answers still live per period, and writing one always stamps the period on
+ * screen, so a fortnight that gets its own story keeps it and every earlier review
+ * stays able to explain itself. What changed is only the reading: the nearest answer
+ * that activity has wins, and `carried` says when it came from another period, so a
+ * story being reused is visible rather than silently presented as this week's.
+ */
+export type EffectiveReason = { entry: MissedReason; carried: boolean };
+
+export function effectiveReasonFor(log: MissedReasonLog, activityId: string, periodEnd: string): EffectiveReason | undefined {
+  const mine = log.entries.filter((e) => normKey(e.activityId) === normKey(activityId));
+  if (mine.length === 0) return undefined;
+  const exact = mine.find((e) => e.periodEnd === periodEnd);
+  if (exact) return { entry: exact, carried: false };
+  // The nearest period, and the later one when two sit equally far off: of two
+  // stories the same distance away, the more recent is the likelier to still hold.
+  const best = mine.reduce((a, b) => {
+    const da = daysApart(a.periodEnd, periodEnd);
+    const db = daysApart(b.periodEnd, periodEnd);
+    return db < da || (db === da && b.periodEnd > a.periodEnd) ? b : a;
+  });
+  return { entry: best, carried: true };
 }
 
 /**
@@ -144,14 +183,18 @@ export type ReasonTally = { reason: string; count: number };
  * with the ones nobody has answered for counted last under a name of their own.
  * That last figure is the one that says whether the review actually happened.
  */
-export function tallyReasons(log: MissedReasonLog, activityIds: string[], periodEnd: string): { given: ReasonTally[]; unexplained: number } {
+export function tallyReasons(log: MissedReasonLog, activityIds: string[], periodEnd: string): { given: ReasonTally[]; unexplained: number; carried: number } {
   const counts = new Map<string, number>();
   let unexplained = 0;
+  let carried = 0;
   for (const id of activityIds) {
-    const r = reasonFor(log, id, periodEnd)?.reason;
-    if (!r) unexplained += 1;
-    else counts.set(r, (counts.get(r) ?? 0) + 1);
+    const eff = effectiveReasonFor(log, id, periodEnd);
+    if (!eff) unexplained += 1;
+    else {
+      counts.set(eff.entry.reason, (counts.get(eff.entry.reason) ?? 0) + 1);
+      if (eff.carried) carried += 1;
+    }
   }
   const given = [...counts].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
-  return { given, unexplained };
+  return { given, unexplained, carried };
 }

@@ -468,14 +468,32 @@ export function computeModel(input: ModelInput): Model {
     const subsystemHours = inBudget && entry ? allocate(budgetHours, crewWeights(entry, settings)) : { [UNASSIGNED]: 0 };
     const resources = inBudget && entry ? resourceLines(entry, settings, subsystemHours, pctComplete) : [];
 
-    // Earn window.
+    /*
+     * When the work really happened, and the window its hours accrue over.
+     *
+     * These are two different facts and only the first of them is ever a guess-free
+     * answer. `actualStart` and `actualFinish` are what somebody would point at on a
+     * calendar: the test window dates if they were typed, otherwise P6's dates but
+     * ONLY where P6 flags them actual — a planned finish is a forecast, not a fact,
+     * and a screen that read one as the other would report work as done because the
+     * plan said it would be. Either may be null; an activity that has started and
+     * not finished genuinely has no actual finish.
+     *
+     * The earn window is the same pair with the open end closed off at the data
+     * date, because hours have to accrue somewhere for an activity still running.
+     * That substitution is why the two are kept apart: `earnEnd` on a running
+     * activity is the data date, which is not a finish and must never be read as one.
+     */
     const testStart = tp?.testStartOverride && isValidISO(tp.testStartOverride) ? tp.testStartOverride : null;
     const testEnd = tp?.testEndOverride && isValidISO(tp.testEndOverride) ? tp.testEndOverride : null;
-    const earnStart = testStart ?? (a.actualStart ? a.startDate : null);
+    const actualStart = testStart ?? (a.actualStart ? a.startDate : null);
+    const rawFinish = testEnd ?? (a.actualFinish ? a.finishDate : null);
+    const actualFinish = rawFinish && actualStart ? maxISO(actualStart, rawFinish) : rawFinish;
+    const earnStart = actualStart;
     let earnEnd: string | null = null;
     let earnWindowSource: EarnWindowSource = 'NOT STARTED';
     if (earnStart) {
-      const end = testEnd ?? (a.actualFinish ? a.finishDate : dataDate);
+      const end = actualFinish ?? dataDate;
       earnEnd = end ? maxISO(earnStart, end) : earnStart;
       earnWindowSource = testStart ? 'TEST WINDOW' : a.actualFinish ? 'P6 ACTUAL' : 'IN PROGRESS';
     }
@@ -520,6 +538,8 @@ export function computeModel(input: ModelInput): Model {
       hasTestCounts: !!tp && tp.testsTotal !== undefined && tp.testsTotal !== null && tp.testsTotal > 0,
       earnedHours,
       remainingHours: budgetHours - earnedHours,
+      actualStart,
+      actualFinish,
       earnStart,
       earnEnd,
       earnWindowSource,
@@ -639,6 +659,7 @@ export function computeModel(input: ModelInput): Model {
       pctOverride: t.pctOverride ?? null,
       testStartOverride: t.testStartOverride ?? null,
       testEndOverride: t.testEndOverride ?? null,
+      note: t.note ?? '',
       updatedAt: t.updatedAt,
       pctEffective: testPctEffective(t)?.pct ?? null,
       reason: checkReason(status, a, row, inBudget),

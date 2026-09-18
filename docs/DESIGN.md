@@ -337,6 +337,58 @@ COMPLETED beats STARTED for something that did both, and MISSED beats CONTINUED 
 an activity due to finish in the window and still running is late, whatever else it
 also did, and burying that under "still going" would be the screen lying politely.
 
+### Finished is finished
+
+An outcome is read off the **actual** dates — the test window where one was keyed,
+otherwise P6's dates but only where P6 flags them actual — and never off a planned
+date. `BudgetRow.actualStart` / `actualFinish` carry exactly that pair and are
+deliberately not `earnStart` / `earnEnd`: the earn window closes a running activity
+off at the data date so its hours have somewhere to accrue, which makes `earnEnd` a
+placeholder rather than a finish, and reading one as the other is how an activity
+gets reported as done because the plan said it would be.
+
+The case that forced the split: baseline 31 Aug to 10 Sep, actually run 24 Aug to
+2 Sep. The fortnight to 9 Sep signs it off. The fortnight to 23 Sep lists it again —
+correctly, its baseline hours accrue into that window — and the old test, *did it
+finish inside this window*, sent it to CONTINUED. The log was telling a review that
+an activity it had already signed off was still running. COMPLETED now means
+finished on or before the end of the window, so something finished stays finished,
+and `finishedOnTime` counts finishing **by** the end of the window rather than
+inside it, or beating the baseline would have read as a miss.
+
+### What a row put into its phase
+
+`Phase achieved` used to repeat the phase's achieved-against-planned figure on every
+row of that phase, which made it a heading pretending to be data: sorting by it
+sorted nothing and a row could not say what it had personally contributed. It is now
+`phaseContribution` — the row's earned hours over its phase's **whole** budget, read
+as percentage points of the phase. The denominator is the entire phase budget rather
+than the part falling in the window, which is what makes the rows of a phase sum to
+exactly the movement the phase line reports (`pctAtEnd − pctAtStart`), pinned by a
+test. The old phase-level figure is still available as the optional `Phase of plan`
+column, and `Achieved` was renamed `Project achieved` so the pair reads as what it
+is: the same calculation against two different budgets.
+
+### A reason belongs to the activity
+
+Answers are still stored per period — three consecutive misses usually have three
+different stories and the third must not overwrite the first — but they are now
+*read* per activity: `effectiveReasonFor` takes the exact period's answer if there is
+one, otherwise the nearest period that activity has, flagged `carried`. Before that,
+nudging the window's end date by a day blanked every reason on the screen, because an
+exact `periodEnd` match was the only lookup. Writing an answer always stamps the
+period on screen, so a fortnight that gets its own story keeps it; a carried one is
+marked, on the row and in the tally, so a reused story is never passed off as this
+week's.
+
+### One progress note, two screens
+
+`TestProgress.note` is the reviewer's own words on an activity, keyed from the
+Two-Week Log or from Test Progress through the same upsert — one field, not a copy on
+each screen. It is deliberately not `ActivityOverride.note`, which explains why an
+activity was renamed, hidden or re-priced: a pricing justification and "waiting on the
+CTC cutover" are different sentences and neither should overwrite the other.
+
 The chart pair (violet planned, green achieved) was run through a colour-vision
 check rather than chosen by eye. Green is what earned already means on the S-curve;
 blue, the obvious partner, separates from it by ΔE 4 under tritanopia and was
