@@ -6,7 +6,7 @@ import { fmtPct, fmtHours, fmtDate, num } from '../format';
 import { normKey } from '../../engine/keys';
 import { parseDelimitedText } from '../../engine/parse';
 import { readWorkbook, pickSheet, workbookGrid } from '../../engine/workbook';
-import { parseP6Date } from '../../engine/dates';
+import { parseP6Date, isValidISO } from '../../engine/dates';
 import { href, type Route } from '../router';
 import { setTestProgress, clearTestProgress, tidyTestProgress as tidy, asFraction } from '../testProgress';
 
@@ -143,8 +143,9 @@ export function TestProgress({ route }: { route: Route }) {
       const ts = parseP6Date(cells[4] ?? '').iso ?? undefined;
       const te = parseP6Date(cells[5] ?? '').iso ?? undefined;
       const note = String(cells[6] ?? '').trim() || undefined;
+      const asOf = parseP6Date(cells[7] ?? '').iso ?? undefined;
       if (!budgetedIds.has(normKey(id))) unknown += 1;
-      const patch = tidy({ activityId: id, testsTotal: tot, testsComplete: comp, pctOverride: pct, testStartOverride: ts, testEndOverride: te, note, updatedAt: now() });
+      const patch = tidy({ activityId: id, testsTotal: tot, testsComplete: comp, pctOverride: pct, testStartOverride: ts, testEndOverride: te, note, progressAsOf: asOf, updatedAt: now() });
       const i = next.findIndex((t) => normKey(t.activityId) === normKey(id));
       if (i >= 0) {
         next[i] = { ...next[i], ...patch };
@@ -219,8 +220,11 @@ export function TestProgress({ route }: { route: Route }) {
           {c.pctOverride !== null && <>{c.testsTotal !== null ? ', ' : ''}{fmtPct(c.pctOverride, 0)} override</>}
           {c.testStartOverride && <>, from {c.testStartOverride}</>}
           {c.testEndOverride && <> to {c.testEndOverride}</>}
+          {c.progressAsOf && <>, progress as at {c.progressAsOf}</>}
           {c.note && <>, a note: <span title={c.note}>“{c.note.length > 40 ? `${c.note.slice(0, 40)}…` : c.note}”</span></>}
-          {c.testsTotal === null && c.pctOverride === null && !c.testStartOverride && !c.testEndOverride && !c.note && <span className="text-[var(--text-subtle)]">nothing</span>}
+          {c.testsTotal === null && c.pctOverride === null && !c.testStartOverride && !c.testEndOverride && !c.progressAsOf && !c.note && (
+            <span className="text-[var(--text-subtle)]">nothing</span>
+          )}
         </span>
       ),
     },
@@ -435,6 +439,35 @@ export function TestProgress({ route }: { route: Route }) {
         />
       ),
     },
+    /*
+     * When the progress happened, for an activity that has not finished.
+     *
+     * Without it the earn window runs to the data date, on the assumption the work
+     * is still going on — so a stale half-done activity keeps dribbling hours into
+     * every month and every fortnightly review. This closes the window where the
+     * work really stopped. It is not a finish: the activity is still open.
+     */
+    {
+      key: 'pasof',
+      label: 'Progress as at',
+      value: (r) => r.progressAsOf ?? '',
+      hint: 'The date this percent complete was true as at. Until it is set, an unfinished activity’s hours spread all the way to the data date, so it shows movement in every month and every two-week log since it started.',
+      render: (r) =>
+        r.actualFinish ? (
+          <span className="text-[var(--text-subtle)]" title="It has an actual finish, so the window ends there.">—</span>
+        ) : (
+          <CellInput
+            type="date"
+            value={r.entry?.progressAsOf ?? ''}
+            title={
+              r.progressAsOf
+                ? `Its hours accrue up to ${fmtDate(r.progressAsOf)} and no further.`
+                : 'Nothing says when this progress happened, so its hours spread evenly to the data date. Type the date the work actually reached this percent.'
+            }
+            onCommit={(v) => setField(r.activityId, { progressAsOf: isValidISO(v) ? v : undefined })}
+          />
+        ),
+    },
     { key: 'es', label: 'Earn start', value: (r) => r.earnStart, optional: true, render: (r) => fmtDate(r.earnStart) },
     { key: 'ee', label: 'Earn end', value: (r) => r.earnEnd, optional: true, render: (r) => fmtDate(r.earnEnd) },
     { key: 'win', label: 'Window', value: (r) => r.earnWindowSource, render: (r) => <Badge tone={statusTone(r.earnWindowSource)}>{r.earnWindowSource}</Badge> },
@@ -514,7 +547,8 @@ export function TestProgress({ route }: { route: Route }) {
             <ul className="mt-1 list-disc pl-4">
               <li><b>TEST WINDOW</b> — a date you keyed at either end. Yours beats P6, end for end.</li>
               <li><b>P6 ACTUAL</b> — P6's actual start to its actual finish. Both must be actual dates (the <span className="mono">A</span> flag), not planned ones.</li>
-              <li><b>IN PROGRESS</b> — P6 has an actual start but no actual finish, so the window runs from that start to the <b>data date</b> in Settings.</li>
+              <li><b>PROGRESS AS AT</b> — started, not finished, and you have said when the progress got to where it is. The window ends there, so nothing accrues after it.</li>
+              <li><b>IN PROGRESS</b> — an actual start, no actual finish and no progress date, so the window runs from that start to the <b>data date</b> in Settings and the hours spread across every month in between.</li>
               <li><b>NOT STARTED</b> — no actual start and no test start. There is no window, so the hours belong to no month.</li>
             </ul>
           </div>
@@ -596,7 +630,7 @@ export function TestProgress({ route }: { route: Route }) {
             }}
           >
             <p className="text-[11.5px] text-[var(--text-subtle)]">
-              Columns: Activity ID, tests total, tests complete, then optional % override, test start, test end, progress note. Drop an .xlsx or .csv here, or paste below.
+              Columns: Activity ID, tests total, tests complete, then optional % override, actual start, actual finish, progress note, progress as at. Drop an .xlsx or .csv here, or paste below.
             </p>
             <input className="mt-2 block text-[12px]" type="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void applyFile(f); }} />
             <textarea

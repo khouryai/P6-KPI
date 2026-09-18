@@ -486,6 +486,7 @@ export function computeModel(input: ModelInput): Model {
      */
     const testStart = tp?.testStartOverride && isValidISO(tp.testStartOverride) ? tp.testStartOverride : null;
     const testEnd = tp?.testEndOverride && isValidISO(tp.testEndOverride) ? tp.testEndOverride : null;
+    const progressAsOf = tp?.progressAsOf && isValidISO(tp.progressAsOf) ? tp.progressAsOf : null;
     const actualStart = testStart ?? (a.actualStart ? a.startDate : null);
     const rawFinish = testEnd ?? (a.actualFinish ? a.finishDate : null);
     const actualFinish = rawFinish && actualStart ? maxISO(actualStart, rawFinish) : rawFinish;
@@ -493,12 +494,19 @@ export function computeModel(input: ModelInput): Model {
     let earnEnd: string | null = null;
     let earnWindowSource: EarnWindowSource = 'NOT STARTED';
     if (earnStart) {
-      const end = actualFinish ?? dataDate;
+      /*
+       * The open end. A finish closes the window; failing that, the date somebody
+       * said the progress was true as at; failing that, the data date, which is the
+       * app admitting it does not know and assuming the work is still going on.
+       * That last assumption is the one that quietly spreads a stale activity's
+       * hours across every fortnight since it started.
+       */
+      const end = actualFinish ?? progressAsOf ?? dataDate;
       earnEnd = end ? maxISO(earnStart, end) : earnStart;
       // Either end being yours makes it your window: a keyed test end closes the
       // window on that date, so calling it IN PROGRESS — which means "running to the
       // data date" — would name the wrong end of it.
-      earnWindowSource = testStart || testEnd ? 'TEST WINDOW' : a.actualFinish ? 'P6 ACTUAL' : 'IN PROGRESS';
+      earnWindowSource = testStart || testEnd ? 'TEST WINDOW' : a.actualFinish ? 'P6 ACTUAL' : progressAsOf ? 'PROGRESS AS AT' : 'IN PROGRESS';
     }
 
     const renamed = !!ov?.nameOverride?.trim();
@@ -543,6 +551,7 @@ export function computeModel(input: ModelInput): Model {
       remainingHours: budgetHours - earnedHours,
       actualStart,
       actualFinish,
+      progressAsOf,
       earnStart,
       earnEnd,
       earnWindowSource,
@@ -662,6 +671,7 @@ export function computeModel(input: ModelInput): Model {
       pctOverride: t.pctOverride ?? null,
       testStartOverride: t.testStartOverride ?? null,
       testEndOverride: t.testEndOverride ?? null,
+      progressAsOf: t.progressAsOf ?? null,
       note: t.note ?? '',
       updatedAt: t.updatedAt,
       pctEffective: testPctEffective(t)?.pct ?? null,

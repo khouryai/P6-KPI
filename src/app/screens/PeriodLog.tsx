@@ -8,6 +8,7 @@ import { isValidISO } from '../../engine/dates';
 import { normKey } from '../../engine/keys';
 import { href } from '../router';
 import { useUnit } from '../units';
+import { usePeriodWindow } from '../periodWindow';
 import { TERMS } from '../../engine/vocab';
 import { setTestProgress, asFraction } from '../testProgress';
 import { reasonCatalogue, effectiveReasonFor, setMissedReason, addReasonToCatalogue, removeReasonFromCatalogue, reasonUsage, tallyReasons } from '../missedReasons';
@@ -61,6 +62,7 @@ type TestProgressEntry = {
   pctOverride?: number;
   testStartOverride?: string;
   testEndOverride?: string;
+  progressAsOf?: string;
   note?: string;
 };
 
@@ -127,8 +129,15 @@ function defaultEnd(dataDate: string): string {
 export function PeriodLog() {
   const { state, model, actions } = useApp();
   const { percent, setUnit } = useUnit();
-  const [end, setEnd] = useState(() => defaultEnd(state.data.settings.dataDate));
-  const [span, setSpan] = useState(14);
+  /*
+   * The window is remembered between visits rather than held in this screen's own
+   * state: stepping back three fortnights, opening Budget Master to check something
+   * and coming back used to land on a different period than the one just left.
+   * `chosenEnd` is null until somebody picks one, which keeps an untouched log
+   * following the data date as imports move it.
+   */
+  const { end: chosenEnd, span, setEnd, setSpan } = usePeriodWindow();
+  const end = chosenEnd ?? defaultEnd(state.data.settings.dataDate);
   const [outcome, setOutcome] = useState<PeriodOutcome | ''>('');
 
   const from = addDays(end, -(span - 1));
@@ -154,6 +163,14 @@ export function PeriodLog() {
   const [editingReasons, setEditingReasons] = useState(false);
   /** Every activity the period counts as missed, whatever the table is filtered to. */
   const missed = useMemo(() => log.activities.filter((a) => a.outcome === 'MISSED'), [log.activities]);
+  /*
+   * Rows whose achieved hours in this window are a share of an open-ended spread
+   * rather than work anybody did in these two weeks. Worth naming at the top of the
+   * screen and not only in a column, because the figure they inflate is the
+   * headline one: "achieved" and every phase percentage under it.
+   */
+  const spread = useMemo(() => log.activities.filter((a) => a.spreadToDataDate), [log.activities]);
+  const spreadHours = spread.reduce((s2, a) => s2 + a.earnedHours, 0);
   const reasonTally = useMemo(() => tallyReasons(missedReasons, missed.map((a) => a.activityId), log.to), [missedReasons, missed, log.to]);
 
   /** What is keyed against each activity right now, for the editable columns. */
@@ -406,8 +423,12 @@ export function PeriodLog() {
       label: percent ? 'Project achieved' : 'Project achieved h',
       value: (a) => a.earnedHours,
       num: true,
-      hint: 'What this activity actually got through inside the period, against the whole job: hours, or the share of the project budget they are. Phase achieved is the same figure taken against its phase.',
-      render: (a) => <b>{val(a.earnedHours, 1)}</b>,
+      hint: 'What this activity actually got through inside the period, against the whole job: hours, or the share of the project budget they are. Phase achieved is the same figure taken against its phase. A ~ means the figure is a share of an open-ended spread rather than measured progress.',
+      render: (a) => (
+        <b className={a.spreadToDataDate ? 'tone-muted' : undefined} title={a.spreadToDataDate ? 'This activity has no finish and no progress date, so its hours are spread from its actual start to the data date and this window gets a share. Set Progress as at to say when the work really happened.' : undefined}>
+          {val(a.earnedHours, 1)}{a.spreadToDataDate ? ' ~' : ''}
+        </b>
+      ),
     },
     {
       key: 'pct',
@@ -466,6 +487,43 @@ export function PeriodLog() {
           onCommit={(iso) => setTestProgress(actions.update, a.activityId, { testEndOverride: iso })}
         />
       ),
+    },
+    /*
+     * The date that stops a half-finished activity earning forever.
+     *
+     * An activity with an actual start and no finish has an open window, so its
+     * earned hours are spread from that start to the DATA DATE — and every window in
+     * between gets a share of them. For work genuinely ticking along that is right.
+     * For one that reached 50% in its first week and has not moved since, it
+     * manufactures progress in every review from then on, and the further the data
+     * date advances the more of it there is. This is the one box that fixes it:
+     * where the progress really stopped.
+     */
+    {
+      key: 'pasof',
+      label: 'Progress as at',
+      value: (a) => a.progressAsOf ?? '',
+      hint: 'The date this percent complete was true as at. Until it is set, an unfinished activity’s hours spread all the way to the data date and every period since it started gets a slice of them. Set it and the hours land in the weeks the work was really done.',
+      render: (a) =>
+        a.actualFinish ? (
+          <span className="text-[var(--text-subtle)]" title="It has an actual finish, so the window ends there. This only matters while an activity is still open.">—</span>
+        ) : (
+          <span className="flex items-center gap-1">
+            <CellInput
+              type="date"
+              value={keyed(a.activityId)?.progressAsOf ?? ''}
+              title={
+                a.progressAsOf
+                  ? `Its hours accrue up to ${fmtDate(a.progressAsOf)} and no further. Clear the box to let them spread to the data date again.`
+                  : 'Nothing says when this progress happened, so its hours spread evenly to the data date and every period gets a share. Type the date the work actually reached this point.'
+              }
+              onCommit={(v) => setTestProgress(actions.update, a.activityId, { progressAsOf: isValidISO(v) ? v : undefined })}
+            />
+            {a.spreadToDataDate && (
+              <b className="date-src" title="These hours are a share of an open-ended spread, not measured progress in this window.">~</b>
+            )}
+          </span>
+        ),
     },
     {
       key: 'var',
@@ -545,7 +603,7 @@ export function PeriodLog() {
     },
   ];
 
-  const step = (n: number) => setEnd((e) => addDays(e, n * span));
+  const step = (n: number) => setEnd(addDays(end, n * span));
   const achievedPctWidth = log.achievement === null ? 0 : Math.min(100, Math.round(log.achievement * 100));
 
   return (
@@ -587,7 +645,13 @@ export function PeriodLog() {
             <option value={28}>4 weeks</option>
           </select>
           {isValidISO(state.data.settings.dataDate) && end !== state.data.settings.dataDate && (
-            <button className="btn btn-mini" onClick={() => setEnd(state.data.settings.dataDate)}>Back to the data date</button>
+            <button
+              className="btn btn-mini"
+              title="Go back to the current review, and follow the data date again as imports move it"
+              onClick={() => setEnd(null)}
+            >
+              Back to the data date
+            </button>
           )}
           <select className="input" value={outcome} onChange={(e) => setOutcome(e.target.value as PeriodOutcome | '')}>
             <option value="">All outcomes</option>
@@ -613,6 +677,19 @@ export function PeriodLog() {
           <Notice tone="info">
             This period runs past the data date ({fmtDate(state.data.settings.dataDate)}). Nothing can be earned after that date, so the achieved figure covers only the
             part of the window that has actually happened.
+          </Notice>
+        </div>
+      )}
+
+      {spread.length > 0 && (
+        <div className="mb-3">
+          <Notice tone="warn">
+            <b>{spread.length} {spread.length === 1 ? 'activity has' : 'activities have'} progress but no date saying when it happened</b>, and between them they account for{' '}
+            <b>{val(spreadHours)}</b> of this period's achieved figure
+            {log.earnedHours > 1e-9 && <> ({fmtPct(spreadHours / log.earnedHours, 0)} of it)</>}. They have started and not finished, so their hours are spread evenly from
+            their actual start to the data date — which hands a share to <i>every</i> period in between, whether or not anything moved in it. An activity that reached 50%
+            in its first week and has sat there since will still show movement here. Put the date the work actually reached its current percent into{' '}
+            <b>Progress as at</b> on the row, and its hours land in the weeks they were earned; every later period then correctly reports nothing.
           </Notice>
         </div>
       )}
@@ -849,6 +926,12 @@ export function PeriodLog() {
           stays finished, without inflating what this fortnight actually got done. <b>Actual start</b> and <b>Actual finish</b> are editable here — typing one writes the
           test window date on <a href={href('progress')}>Test Progress</a>, which is the same field, so the earn window, the month those hours land in and this row's own
           outcome all move with it; clearing the box hands the date back to P6. A green <b>✎</b> means you keyed the date, a grey <b>A</b> means it is P6's.
+        </p>
+        <p className="mt-1 text-[12px] text-[var(--text-muted)]">
+          An activity that has started and not finished has an <b>open window</b>: nothing says when its progress happened, so its hours are spread from its actual start
+          to the data date and every period in between takes a share — marked <b>~</b> here. That is the app assuming the work is still going on, which is all it can do
+          until somebody says otherwise. Put the date the work really reached its current percent into <b>Progress as at</b> and the hours land in those weeks instead;
+          every later period then correctly reports nothing for it. The total earned never changes — only which weeks it belongs to.
         </p>
         <p className="mt-1 text-[12px] text-[var(--text-muted)]">
           <b>Phase achieved</b> is this row's own contribution to its phase, the same way <b>{percent ? 'Project achieved' : 'Project achieved h'}</b> is its contribution to

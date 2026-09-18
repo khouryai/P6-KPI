@@ -203,6 +203,24 @@ export type TestProgress = {
   testStartOverride?: string; // ISO
   testEndOverride?: string; // ISO
   /**
+   * The date this percent complete was true as at: when the progress actually
+   * happened, for an activity that has started and not finished.
+   *
+   * Without it the app has to guess, and its guess is that the work is still going
+   * on right now — so an unfinished activity's earned hours spread from its actual
+   * start all the way to the data date, and every fortnightly window in between
+   * gets a slice of them. For work that genuinely is ticking along that is the
+   * right reading. For an activity that got to 50% in its first week and has not
+   * moved since, it invents progress in every review from then on, and the further
+   * the data date advances the more of it there is.
+   *
+   * One date fixes that: the earn window ends here instead of at the data date, so
+   * the hours land in the weeks the work was really done and every window after it
+   * correctly reports nothing. It is not a finish — the activity is still open, and
+   * `actualFinish` stays empty — which is exactly why it cannot be the same field.
+   */
+  progressAsOf?: string; // ISO
+  /**
    * What is going on with this activity, in the reviewer's own words. Keyed from
    * the Two-Week Log or from Test Progress; it is one field, not a copy on each
    * screen, so the note written at a review is the note the next one reads.
@@ -264,7 +282,7 @@ export type ActivityStatus = 'IN BUDGET' | 'EXCLUDED' | 'REVIEW' | 'DELETED' | '
 export type RateStatus = 'SET' | 'DEFAULT' | 'NEEDS SHIFTS' | 'EXCLUDED' | 'NO MATCH';
 export type BaselineSource = 'BASELINE' | 'CURRENT' | 'NONE';
 export type PctSource = 'OVERRIDE' | 'TESTS' | 'P6';
-export type EarnWindowSource = 'TEST WINDOW' | 'P6 ACTUAL' | 'IN PROGRESS' | 'NOT STARTED';
+export type EarnWindowSource = 'TEST WINDOW' | 'P6 ACTUAL' | 'PROGRESS AS AT' | 'IN PROGRESS' | 'NOT STARTED';
 
 /**
  * One resource group on ONE activity: who works on it, how many of them, and what
@@ -356,6 +374,12 @@ export type BudgetRow = {
    */
   actualStart: string | null;
   actualFinish: string | null;
+  /**
+   * For an activity still running, the date its percent complete was true as at.
+   * It closes the earn window where the progress really stopped, instead of leaving
+   * it open to the data date and dribbling the same hours into every window since.
+   */
+  progressAsOf: string | null;
   /**
    * The same pair with the open end closed off at the data date, because hours have
    * to accrue somewhere for an activity that has started and not finished. `earnEnd`
@@ -651,6 +675,7 @@ export type TestProgressCheck = {
   pctOverride: number | null;
   testStartOverride: string | null;
   testEndOverride: string | null;
+  progressAsOf: string | null;
   /** The progress note keyed against it, which deleting the row would also lose. */
   note: string;
   updatedAt: string;
