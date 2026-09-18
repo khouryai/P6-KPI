@@ -98,6 +98,16 @@ export type PeriodActivity = {
    */
   p6ActualStart: string | null;
   p6ActualFinish: string | null;
+  /** The date this row's progress was reported true as at, when somebody said. */
+  progressAsOf: string | null;
+  /**
+   * Nobody has said when this activity's progress happened, so its hours are being
+   * spread from its actual start all the way to the data date — which hands a slice
+   * of them to every window in between, this one included. The share is real
+   * arithmetic but it is not evidence of work done in these two weeks, and a review
+   * reading it as such is exactly the mistake the flag exists to prevent.
+   */
+  spreadToDataDate: boolean;
   /** Calendar days between the baseline finish and the actual one. Negative is early. */
   finishVarianceDays: number | null;
   testsTotal: number | null;
@@ -326,6 +336,8 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
       actualFinish,
       p6ActualStart: r.activity.actualStart ? r.activity.startDate : null,
       p6ActualFinish: r.activity.actualFinish ? r.activity.finishDate : null,
+      progressAsOf: r.progressAsOf,
+      spreadToDataDate: r.earnWindowSource === 'IN PROGRESS' && Math.abs(earnedHours) > 1e-9,
       finishVarianceDays: r.baselineFinish && actualFinish ? daysBetween(r.baselineFinish, actualFinish) : null,
       testsTotal: r.testsTotal,
       testsComplete: r.testsComplete,

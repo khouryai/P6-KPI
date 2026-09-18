@@ -27,6 +27,8 @@ export function statusTone(s: string): Tone {
     case 'IN PROGRESS':
     case 'P6':
       return 'warn';
+    case 'PROGRESS AS AT':
+      return 'good';
     case 'REVIEW':
     case 'NEEDS SHIFTS':
     case 'NO MATCH':

@@ -55,16 +55,16 @@ export function buildWorkbook(
   ]), 'Activity_Library');
   const checks = new Map(model.testProgressChecks.map((c) => [c.activityId, c]));
   XLSX.utils.book_append_sheet(wb, wsFrom([
-    ['P6_Activity_ID', 'Tests_Total', 'Tests_Complete', 'Pct_Override', 'Pct_Effective', 'Activity_Name_Check', 'Budget_Status_Check', 'Test_Start_Override', 'Test_End_Override', 'Progress_Note'],
+    ['P6_Activity_ID', 'Tests_Total', 'Tests_Complete', 'Pct_Override', 'Pct_Effective', 'Activity_Name_Check', 'Budget_Status_Check', 'Test_Start_Override', 'Test_End_Override', 'Progress_As_At', 'Progress_Note'],
     ...testProgress.map((t) => {
       const c = checks.get(t.activityId);
-      return [t.activityId, t.testsTotal ?? '', t.testsComplete ?? '', t.pctOverride ?? '', c?.pctEffective ?? '', c?.activityName ?? 'ID NOT IN EXTRACT', c?.status ?? '', d(t.testStartOverride), d(t.testEndOverride), t.note ?? ''];
+      return [t.activityId, t.testsTotal ?? '', t.testsComplete ?? '', t.pctOverride ?? '', c?.pctEffective ?? '', c?.activityName ?? 'ID NOT IN EXTRACT', c?.status ?? '', d(t.testStartOverride), d(t.testEndOverride), d(t.progressAsOf), t.note ?? ''];
     }),
   ]), 'Test_Progress');
   XLSX.utils.book_append_sheet(wb, extractSheet(baseline, false), 'Baseline_Extract');
   XLSX.utils.book_append_sheet(wb, wsFrom([
-    ['Row', 'P6_Activity_ID', 'Location', 'Seq_Code', 'Match_Key', 'Rate_Status', 'Status', 'Basis', 'Complexity', 'Std_Hours', 'Override_Hours', 'Budget_Hours', 'Baseline_Start', 'Baseline_Finish', 'Baseline_Source', 'Current_Start', 'Current_Finish', 'Actual_Start', 'Actual_Finish', 'Pct_Complete', 'Pct_Source', 'Earned_Hours', 'Remaining_Hours', 'Phase', 'Work_Type', 'Activity_Name', 'Activity_Type', 'Subsystem', 'Earn_Start', 'Earn_End', 'Earn_Window_Source', 'P6_Activity_Name', 'Renamed_By_User', 'Visibility_Override', 'Crew_Size', 'Resources'],
-    ...model.rows.map((r, i) => [i + 2, r.activity.rawActivityId, r.location, r.seqCode, r.matchKey, r.rateStatus, r.status, r.basis ?? '', r.complexity ?? '', r.stdHours ?? '', r.overrideHours ?? '', r.budgetHours, d(r.baselineStart), d(r.baselineFinish), r.baselineSource, d(r.currentStart), d(r.currentFinish), d(r.actualStart), d(r.actualFinish), r.pctComplete, r.pctSource, r.earnedHours, r.remainingHours, r.phaseName, r.workType, r.activityName, r.activityType, r.discipline, d(r.earnStart), d(r.earnEnd), r.earnWindowSource, r.activity.activityName, r.renamed ? 'Y' : '', r.visibility ?? '', r.crewSize, r.resources.map((x) => `${x.label} x${x.count}`).join(', ')]),
+    ['Row', 'P6_Activity_ID', 'Location', 'Seq_Code', 'Match_Key', 'Rate_Status', 'Status', 'Basis', 'Complexity', 'Std_Hours', 'Override_Hours', 'Budget_Hours', 'Baseline_Start', 'Baseline_Finish', 'Baseline_Source', 'Current_Start', 'Current_Finish', 'Actual_Start', 'Actual_Finish', 'Progress_As_At', 'Pct_Complete', 'Pct_Source', 'Earned_Hours', 'Remaining_Hours', 'Phase', 'Work_Type', 'Activity_Name', 'Activity_Type', 'Subsystem', 'Earn_Start', 'Earn_End', 'Earn_Window_Source', 'P6_Activity_Name', 'Renamed_By_User', 'Visibility_Override', 'Crew_Size', 'Resources'],
+    ...model.rows.map((r, i) => [i + 2, r.activity.rawActivityId, r.location, r.seqCode, r.matchKey, r.rateStatus, r.status, r.basis ?? '', r.complexity ?? '', r.stdHours ?? '', r.overrideHours ?? '', r.budgetHours, d(r.baselineStart), d(r.baselineFinish), r.baselineSource, d(r.currentStart), d(r.currentFinish), d(r.actualStart), d(r.actualFinish), d(r.progressAsOf), r.pctComplete, r.pctSource, r.earnedHours, r.remainingHours, r.phaseName, r.workType, r.activityName, r.activityType, r.discipline, d(r.earnStart), d(r.earnEnd), r.earnWindowSource, r.activity.activityName, r.renamed ? 'Y' : '', r.visibility ?? '', r.crewSize, r.resources.map((x) => `${x.label} x${x.count}`).join(', ')]),
   ]), 'Budget_Master');
   XLSX.utils.book_append_sheet(wb, wsFrom([
     // Hidden snapshots are exported too. They are off the curve, not off the record,

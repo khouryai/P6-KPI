@@ -76,3 +76,23 @@ describe('the progress note', () => {
     expect(noteOf(box, 'A-1')).toBe('Waiting on the CTC cutover');
   });
 });
+
+describe('the progress-as-at date', () => {
+  it('is kept and tidied like any other keyed field', () => {
+    const { box, update } = harness();
+    setTestProgress(update, 'A-1', { progressAsOf: ' 2026-08-02 ' });
+    expect(box.testProgress[0].progressAsOf).toBe('2026-08-02');
+    // The bug this guards: a field missing from the tidy list is silently dropped
+    // on the next write, so the date would vanish the moment a note was typed.
+    setTestProgress(update, 'A-1', { note: 'Held for access' });
+    expect(box.testProgress[0].progressAsOf).toBe('2026-08-02');
+    expect(box.testProgress[0].note).toBe('Held for access');
+  });
+
+  it('is cleared on its own, and takes the row with it when it was all there was', () => {
+    const { box, update } = harness();
+    setTestProgress(update, 'A-1', { progressAsOf: '2026-08-02' });
+    setTestProgress(update, 'A-1', { progressAsOf: undefined });
+    expect(box.testProgress).toEqual([]);
+  });
+});

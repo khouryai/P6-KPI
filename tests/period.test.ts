@@ -287,6 +287,98 @@ describe('keying an actual date', () => {
   });
 });
 
+/**
+ * The stale half-done activity.
+ *
+ * Baseline 24 Jul to 14 Aug. P6 records an actual start and no finish, and it has
+ * sat at 50% ever since. With nothing saying WHEN that 50% was reached, its earned
+ * hours spread from the actual start to the data date — so every fortnight between
+ * the two gets a slice of them and reports movement that never happened.
+ */
+function stalled(progressAsOf?: string): ModelInput {
+  const library: LibraryEntry[] = [{ matchKey: 'Test Type', basis: 'RATE', crewSize: 1, shiftHours: 10, durationShifts: 10 }];
+  const id = 'A-P2-TC-X10-FA-0200';
+  const act = (start: string, finish: string, actualStart: boolean): P6Activity =>
+    makeActivity({ activityId: id, startDate: start, finishDate: finish, actualStart, actualFinish: false, sortOrder: 0 });
+  return {
+    settings: { ...DEFAULT_SETTINGS, dataDate: '2026-10-07', defaultComplexity: 1 },
+    locations: [{ code: 'X10' }],
+    library,
+    overrides: [],
+    testProgress: [{ activityId: id, pctOverride: 0.5, ...(progressAsOf ? { progressAsOf } : {}), updatedAt: 'x' }],
+    current: [act('2026-07-24', '2026-11-30', true)],
+    baseline: [act('2026-07-24', '2026-08-14', false)],
+    snapshots: [],
+  };
+}
+
+describe('an activity that has not moved since it started', () => {
+  const id = 'A-P2-TC-X10-FA-0200';
+  const earnedIn = (m2: ReturnType<typeof computeModel>, from: string, to: string) =>
+    periodLog(m2.rows, from, to).activities.find((a) => a.activityId === id)?.earnedHours ?? 0;
+
+  it('dribbles its hours into every window while nothing says when the work happened', () => {
+    // Not a bug in the arithmetic — it is the app assuming the work is still going
+    // on, which is all it can do until somebody tells it otherwise.
+    const m2 = computeModel(stalled());
+    expect(earnedIn(m2, '2026-09-09', '2026-09-22')).toBeGreaterThan(0);
+    expect(earnedIn(m2, '2026-09-23', '2026-10-07')).toBeGreaterThan(0);
+    const a = periodLog(m2.rows, '2026-09-09', '2026-10-07').activities.find((x) => x.activityId === id)!;
+    expect(a.spreadToDataDate).toBe(true);
+    expect(a.progressAsOf).toBeNull();
+  });
+
+  it('stops dead once the progress is dated, and reports nothing afterwards', () => {
+    const m2 = computeModel(stalled('2026-08-02'));
+    expect(m2.rows.find((r) => r.activityId === id)!.earnEnd).toBe('2026-08-02');
+    expect(m2.rows.find((r) => r.activityId === id)!.earnWindowSource).toBe('PROGRESS AS AT');
+    // The window it was really earned in still has the hours ...
+    expect(earnedIn(m2, '2026-07-24', '2026-08-06')).toBeGreaterThan(0);
+    // ... and every window after it reports exactly nothing.
+    expect(earnedIn(m2, '2026-09-09', '2026-09-22')).toBe(0);
+    expect(earnedIn(m2, '2026-09-23', '2026-10-07')).toBe(0);
+    const a = periodLog(m2.rows, '2026-09-09', '2026-10-07').activities.find((x) => x.activityId === id);
+    if (a) expect(a.spreadToDataDate).toBe(false);
+  });
+
+  it('moves the hours rather than losing them', () => {
+    // Whatever the window says, the same 50% is earned in total: this is about WHEN
+    // the hours land, never how many there are.
+    const sum = (m2: ReturnType<typeof computeModel>) => {
+      let total = 0;
+      for (let i = 0; i < 40; i += 1) {
+        const from = addDays('2026-07-01', i * 14);
+        total += earnedIn(m2, from, addDays(from, 13));
+      }
+      return total;
+    };
+    const open = computeModel(stalled());
+    const dated = computeModel(stalled('2026-08-02'));
+    const half = open.rows.find((r) => r.activityId === id)!.budgetHours * 0.5;
+    expect(sum(open)).toBeCloseTo(half, 6);
+    expect(sum(dated)).toBeCloseTo(half, 6);
+  });
+
+  it('is still flagged as unfinished: a progress date is not a finish', () => {
+    const m2 = computeModel(stalled('2026-08-02'));
+    const row = m2.rows.find((r) => r.activityId === id)!;
+    expect(row.actualFinish).toBeNull();
+    expect(row.pctComplete).toBe(0.5);
+    // It was due to finish on 14 Aug and did not, so that fortnight still says so.
+    expect(periodLog(m2.rows, '2026-08-07', '2026-08-20').activities.find((a) => a.activityId === id)!.outcome).toBe('MISSED');
+  });
+
+  it('gives way to a real finish, which is the better answer', () => {
+    const m2 = computeModel({
+      ...stalled('2026-08-02'),
+      testProgress: [{ activityId: id, pctOverride: 1, progressAsOf: '2026-08-02', testEndOverride: '2026-08-20', updatedAt: 'x' }],
+    });
+    const row = m2.rows.find((r) => r.activityId === id)!;
+    expect(row.earnEnd).toBe('2026-08-20');
+    expect(row.earnWindowSource).toBe('TEST WINDOW');
+  });
+});
+
 describe('what a row put into its own phase', () => {
   const m = computeModel(scenario());
   const log = periodLog(m.rows, '2026-08-18', '2026-08-31');

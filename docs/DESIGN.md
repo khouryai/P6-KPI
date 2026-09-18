@@ -21,8 +21,10 @@ Order of resolution per activity:
    max(0, original duration). Rounded after the location's complexity factor. An
    override replaces the rounded figure and bypasses the factor.
 8. Percent complete: direct override, else tests complete / tests total, else P6 duration.
-9. Earn window: test window override, else actual start to actual finish, else actual
-   start to the data date. Missing actual start means `NOT STARTED`.
+9. Earn window: from the actual start (your keyed test start, else P6's actual start)
+   to the actual finish; failing that to `progressAsOf`, the date somebody said the
+   progress was true as at; failing that to the data date. Missing actual start means
+   `NOT STARTED`.
 10. Curves: each activity's hours spread calendar-linearly across its window; earned
     hours (budget × pct) across the earn window, with `null` past the data date.
 
@@ -395,6 +397,41 @@ exactly the movement the phase line reports (`pctAtEnd − pctAtStart`), pinned 
 test. The old phase-level figure is still available as the optional `Phase of plan`
 column, and `Achieved` was renamed `Project achieved` so the pair reads as what it
 is: the same calculation against two different budgets.
+
+### The open window, and the progress that never happened
+
+An activity with an actual start and no finish earns across `actualStart → dataDate`,
+because its hours have to accrue somewhere and the only assumption available is that
+the work is still going on. For work genuinely ticking along that is right. For one
+that reached 50% in its first week and has not moved since, it manufactures progress
+in every fortnight from then on — and because the window stretches as the data date
+advances, the same 50% keeps re-spreading over more and more weeks. A review reading
+"achieved" off that is reading arithmetic, not work.
+
+The app cannot know when the progress happened, so it asks: `TestProgress.progressAsOf`
+is the date the current percent was true as at, and it closes the earn window there
+instead of at the data date. `earnWindowSource` reads `PROGRESS AS AT` when it does.
+It is explicitly **not** a finish — the activity is still open, `actualFinish` stays
+null, and an activity that blew its baseline finish is still MISSED — which is exactly
+why it cannot be folded into `testEndOverride`.
+
+Total earned never changes; only which weeks it lands in, which is pinned by a test
+summing every fortnight either way. Until it is set, `PeriodActivity.spreadToDataDate`
+marks the rows whose achieved figure is a share of an open-ended spread, and the log
+says so at the top of the screen as well as on the row: the figure being inflated is
+the headline one.
+
+### Where the log's window lives
+
+`src/app/periodWindow.ts`, not the screen's `useState`. A review is not one page —
+stepping back three fortnights, opening Budget Master to check an activity and coming
+back used to remount the log, re-run its initialiser and snap the end date forward to
+the data date, leaving somebody reading a different period than the one they left with
+nothing on screen saying so. `end` is null until somebody picks one, which is not the
+same as defaulting to the data date: null means *follow* it, so an untouched log still
+opens on the current review after the next import moves it. localStorage, like the
+column layouts and the hours/percent mode, because it is about this person and this
+machine and has no business in the shared OneDrive store.
 
 ### A reason belongs to the activity
 
