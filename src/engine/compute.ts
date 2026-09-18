@@ -495,7 +495,10 @@ export function computeModel(input: ModelInput): Model {
     if (earnStart) {
       const end = actualFinish ?? dataDate;
       earnEnd = end ? maxISO(earnStart, end) : earnStart;
-      earnWindowSource = testStart ? 'TEST WINDOW' : a.actualFinish ? 'P6 ACTUAL' : 'IN PROGRESS';
+      // Either end being yours makes it your window: a keyed test end closes the
+      // window on that date, so calling it IN PROGRESS — which means "running to the
+      // data date" — would name the wrong end of it.
+      earnWindowSource = testStart || testEnd ? 'TEST WINDOW' : a.actualFinish ? 'P6 ACTUAL' : 'IN PROGRESS';
     }
 
     const renamed = !!ov?.nameOverride?.trim();

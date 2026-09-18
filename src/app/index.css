@@ -1190,3 +1190,14 @@ select.cell-input { padding: 3px 22px 3px 6px; }
 .seg button[aria-pressed='true'] { background: var(--white); color: var(--text); box-shadow: var(--shadow-sm); }
 
 hr.rule { border: 0; border-top: 1px solid var(--line-soft); margin: 0; }
+
+/* Which of the two possible sources an actual date on screen came from. It has to
+   be readable without colour — a date that is really P6's, shown where dates can be
+   typed, is exactly the thing somebody would otherwise assume they had keyed. */
+.date-src {
+  flex: none;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-subtle);
+}
+.date-src.is-yours { color: var(--good); }
