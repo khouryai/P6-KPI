@@ -202,6 +202,18 @@ export type TestProgress = {
   pctOverride?: number; // 0 to 1
   testStartOverride?: string; // ISO
   testEndOverride?: string; // ISO
+  /**
+   * What is going on with this activity, in the reviewer's own words. Keyed from
+   * the Two-Week Log or from Test Progress; it is one field, not a copy on each
+   * screen, so the note written at a review is the note the next one reads.
+   *
+   * Deliberately NOT the Budget Master note (`ActivityOverride.note`), which says
+   * why an activity was renamed, hidden or re-priced and belongs to the decision
+   * rather than to the progress. Keeping them apart is the point: a pricing
+   * justification and "waiting on the CTC cutover" are not the same sentence and
+   * must not overwrite each other.
+   */
+  note?: string;
   updatedAt: string;
 };
 
@@ -335,6 +347,21 @@ export type BudgetRow = {
   hasTestCounts: boolean;
   earnedHours: number;
   remainingHours: number;
+  /**
+   * When the work really began, and when it really finished: the test window dates
+   * where they were typed, otherwise P6's dates but only where P6 flags them actual.
+   * A planned date never lands here — it is a forecast, and reading one as a fact is
+   * how an activity gets reported as finished because the plan said it would be.
+   * `actualFinish` is null while the activity is still running.
+   */
+  actualStart: string | null;
+  actualFinish: string | null;
+  /**
+   * The same pair with the open end closed off at the data date, because hours have
+   * to accrue somewhere for an activity that has started and not finished. `earnEnd`
+   * on a running activity IS the data date, so it must never be read as a finish;
+   * `actualFinish` is the field that answers that question.
+   */
   earnStart: string | null;
   earnEnd: string | null;
   earnWindowSource: EarnWindowSource;
@@ -624,6 +651,8 @@ export type TestProgressCheck = {
   pctOverride: number | null;
   testStartOverride: string | null;
   testEndOverride: string | null;
+  /** The progress note keyed against it, which deleting the row would also lose. */
+  note: string;
   updatedAt: string;
   pctEffective: number | null;
   /** Why it matches nothing, and what dropping it would cost. Empty when it matches. */

@@ -25,10 +25,17 @@ const DAY = 86_400_000;
  *
  * The order matters: these are tested in sequence and the first that fits wins, so
  * COMPLETED beats STARTED for an activity that both started and finished inside the
- * same fortnight, and MISSED beats NOT STARTED for one that was due to do both.
+ * same fortnight, COMPLETED beats everything for one that is simply finished, and
+ * MISSED beats NOT STARTED for one that was due to do both.
  */
 export type PeriodOutcome =
-  /** Reached 100%, and its earn window ended inside the period. */
+  /**
+   * Done. It reached 100% and its actual finish is on or before the end of the
+   * period — including one that finished BEFORE the period and appears here only
+   * because the baseline still had it running. Something finished is finished, and
+   * reporting it as still going in the next fortnight because its baseline ran on
+   * is the log arguing with the calendar.
+   */
   | 'COMPLETED'
   /** Began inside the period and is still running. */
   | 'STARTED'
@@ -53,6 +60,17 @@ export type PeriodActivity = {
   earnedHours: number;
   /** The whole activity's budget, for context on a row that only part-accrued. */
   budgetHours: number;
+  /**
+   * What this one row put into its own phase in this window: its earned hours over
+   * the phase's whole budget. Read it as percentage points of the phase — the rows
+   * of a phase add up to exactly how far that phase moved between the two ends of
+   * the window, which is the figure the phase line above the table reports.
+   *
+   * null when the phase carries no budget at all, which is not 0%.
+   */
+  phaseContribution: number | null;
+  /** The phase's whole budget, so a row can say what its share was taken against. */
+  phaseBudgetHours: number;
   pctComplete: number;
   baselineStart: string | null;
   baselineFinish: string | null;
@@ -201,12 +219,34 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
   const inBudget = rows.filter((r) => r.status === 'IN BUDGET');
   const activities: PeriodActivity[] = [];
 
+  /*
+   * Each phase's whole budget, worked out before the rows so every row can say what
+   * it put into its own phase. The denominator is the phase's ENTIRE budget, not the
+   * part of it falling in the window, so the rows of a phase sum to exactly the
+   * movement the phase line reports rather than to some other hundred percent.
+   */
+  const phaseBudget = new Map<string, number>();
+  for (const r of inBudget) phaseBudget.set(r.phase, (phaseBudget.get(r.phase) ?? 0) + r.budgetHours);
+
   for (const r of inBudget) {
     const plannedHours = accruedIn(r.budgetHours, r.baselineStart, r.baselineFinish, lo, hi);
     const earnedHours = accruedIn(r.earnedHours, r.earnStart, r.earnEnd, lo, hi);
-    const finished = r.pctComplete >= 1;
-    const actualStart = r.earnStart;
-    const actualFinish = finished ? r.earnEnd : null;
+    /*
+     * Done, and when.
+     *
+     * "Done" is the percent complete, because that is what earns the hours: an
+     * activity P6 has closed out but whose test pack is half passed is not finished
+     * on this screen, whatever P6 says about it.
+     *
+     * "When" is the actual dates — the test window if it was typed, otherwise P6's
+     * actual dates — and falls back to the end of the earn window only when there is
+     * no actual finish to read. That fallback is the activity at 100% that nothing
+     * has dated, whose hours the curve credits at the data date; dating it anywhere
+     * else here would put the log and the curve on different days.
+     */
+    const finished = r.pctComplete >= 1 - 1e-9;
+    const actualStart = r.actualStart;
+    const actualFinish = finished ? (r.actualFinish ?? r.earnEnd) : null;
 
     const touched =
       Math.abs(plannedHours) > 1e-9 ||
@@ -217,8 +257,18 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
       within(actualFinish, lo, hi);
     if (!touched) continue;
 
+    /*
+     * Finished is finished, whether it happened inside this window or before it.
+     *
+     * The case this guards is an activity that beat its baseline: baseline 31 Aug to
+     * 10 Sep, actually done 2 Sep. The fortnight to 9 Sep reports it COMPLETED, and
+     * the next fortnight lists it again — its baseline hours accrue into that window,
+     * so it is still part of what the plan asked for there. Asking only whether it
+     * finished INSIDE the window made that second row fall through to CONTINUED,
+     * which told the review an activity it had already signed off was still running.
+     */
     let outcome: PeriodOutcome;
-    if (finished && within(actualFinish, lo, hi)) outcome = 'COMPLETED';
+    if (finished && actualFinish && actualFinish <= hi) outcome = 'COMPLETED';
     else if (within(actualStart, lo, hi)) outcome = 'STARTED';
     else if (within(r.baselineFinish, lo, hi) && !finished) outcome = 'MISSED';
     else if (!actualStart) outcome = 'NOT STARTED';
@@ -234,6 +284,8 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
       plannedHours,
       earnedHours,
       budgetHours: r.budgetHours,
+      phaseContribution: (phaseBudget.get(r.phase) ?? 0) > 0 ? earnedHours / (phaseBudget.get(r.phase) as number) : null,
+      phaseBudgetHours: phaseBudget.get(r.phase) ?? 0,
       pctComplete: r.pctComplete,
       baselineStart: r.baselineStart,
       baselineFinish: r.baselineFinish,
@@ -255,7 +307,14 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
   // activity rather than over the rows above: one can be due to finish in the window
   // having accrued nothing in it.
   const dueToFinish = inBudget.filter((r) => within(r.baselineFinish, lo, hi)).length;
-  const finishedOnTime = inBudget.filter((r) => within(r.baselineFinish, lo, hi) && r.pctComplete >= 1 && within(r.earnEnd, lo, hi)).length;
+  // Finished BY the end of the window, not inside it: one that beat its baseline and
+  // finished the week before was not late, and counting it as a miss would make the
+  // one thing this pair is for — did we finish what we said we would — read wrong.
+  const finishedOnTime = inBudget.filter((r) => {
+    if (!within(r.baselineFinish, lo, hi) || r.pctComplete < 1 - 1e-9) return false;
+    const done = r.actualFinish ?? r.earnEnd;
+    return !!done && done <= hi;
+  }).length;
 
   const totalBudget = inBudget.reduce((s, r) => s + r.budgetHours, 0);
   const earnedBy = (rs: BudgetRow[], date: string) => rs.reduce((s, r) => s + r.earnedHours * accruedFraction(date, r.earnStart, r.earnEnd), 0);

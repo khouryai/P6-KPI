@@ -10,7 +10,7 @@ import { href } from '../router';
 import { useUnit } from '../units';
 import { TERMS } from '../../engine/vocab';
 import { setTestProgress, asFraction } from '../testProgress';
-import { reasonCatalogue, reasonFor, setMissedReason, addReasonToCatalogue, removeReasonFromCatalogue, reasonUsage, tallyReasons } from '../missedReasons';
+import { reasonCatalogue, effectiveReasonFor, setMissedReason, addReasonToCatalogue, removeReasonFromCatalogue, reasonUsage, tallyReasons } from '../missedReasons';
 
 /*
  * Planned against achieved, in the two colours the S-curve already uses for the
@@ -26,7 +26,7 @@ const AXIS = '#6e7179';
 
 /** How each outcome reads: its tone, and a word that does not rely on the colour. */
 const OUTCOME_META: Record<PeriodOutcome, { tone: 'good' | 'info' | 'warn' | 'bad' | 'muted'; blurb: string }> = {
-  COMPLETED: { tone: 'good', blurb: 'Reached 100% inside the period.' },
+  COMPLETED: { tone: 'good', blurb: 'Finished. Either inside the period, or before it while the baseline still had it running.' },
   STARTED: { tone: 'info', blurb: 'Began inside the period and is still running.' },
   CONTINUED: { tone: 'info', blurb: 'Began earlier, still running, and earned hours in the period.' },
   MISSED: { tone: 'bad', blurb: 'The baseline had these finishing inside the period. They did not finish.' },
@@ -50,6 +50,9 @@ function ChartKey() {
 /** The option that opens the box for a reason the list does not have yet. */
 const ADD_REASON = '__add-a-reason__';
 
+/** What Test Progress holds for one activity, as this screen reads and writes it. */
+type TestProgressEntry = { testsTotal?: number; testsComplete?: number; pctOverride?: number; note?: string };
+
 /**
  * The reason one activity was missed, and the way a new reason gets onto the list.
  *
@@ -61,19 +64,26 @@ const ADD_REASON = '__add-a-reason__';
 function MissedReasonCell({
   value,
   options,
+  carriedFrom,
   onChange,
   onAdd,
 }: {
   value: string;
   options: string[];
+  /** The period this answer was written against, when it was not this one. */
+  carriedFrom?: string;
   onChange: (reason: string) => void;
   onAdd: (reason: string) => void;
 }) {
   return (
     <select
-      className="cell-input"
+      className={`cell-input${carriedFrom ? ' is-carried' : ''}`}
       value={value}
-      title={value || 'Say why this activity did not finish. Pick a reason, or add one of your own.'}
+      title={
+        carriedFrom
+          ? `${value}\n\nCarried from the period ending ${fmtDate(carriedFrom)}. It stays with the activity until somebody gives this period its own answer; picking one here records it against this period.`
+          : value || 'Say why this activity did not finish. Pick a reason, or add one of your own.'
+      }
       onChange={(e) => {
         if (e.target.value !== ADD_REASON) return onChange(e.target.value);
         const typed = prompt('A reason activities get missed for. It joins the list and is offered on every activity from now on.', '');
@@ -135,9 +145,9 @@ export function PeriodLog() {
   const missed = useMemo(() => log.activities.filter((a) => a.outcome === 'MISSED'), [log.activities]);
   const reasonTally = useMemo(() => tallyReasons(missedReasons, missed.map((a) => a.activityId), log.to), [missedReasons, missed, log.to]);
 
-  /** Test counts as they are keyed right now, for the two editable columns. */
+  /** What is keyed against each activity right now, for the editable columns. */
   const testEntries = useMemo(() => {
-    const m = new Map<string, { testsTotal?: number; testsComplete?: number; pctOverride?: number }>();
+    const m = new Map<string, TestProgressEntry>();
     for (const t of state.data.testProgress) if (!m.has(normKey(t.activityId))) m.set(normKey(t.activityId), t);
     return m;
   }, [state.data.testProgress]);
@@ -210,6 +220,7 @@ export function PeriodLog() {
       lines.push(`Why ${missed.length} missed`);
       for (const t of reasonTally.given) lines.push(`  ${String(t.count).padStart(3)}  ${t.reason}`);
       if (reasonTally.unexplained) lines.push(`  ${String(reasonTally.unexplained).padStart(3)}  no reason given yet`);
+      if (reasonTally.carried) lines.push(`  (${reasonTally.carried} of these answers carried over from an earlier review)`);
       lines.push('');
     }
     for (const o of OUTCOMES) {
@@ -217,9 +228,10 @@ export function PeriodLog() {
       if (!list.length) continue;
       lines.push(`${o} (${list.length})`);
       for (const a of list) {
-        const why = o === 'MISSED' ? reasonFor(missedReasons, a.activityId, log.to)?.reason : undefined;
+        const why = o === 'MISSED' ? effectiveReasonFor(missedReasons, a.activityId, log.to)?.entry.reason : undefined;
+        const note = keyed(a.activityId)?.note;
         lines.push(
-          `  ${a.activityId}  ${a.activityName}  ${fmtPct(a.pctComplete, 0)} complete${percent ? '' : `  ${fmtHours(a.earnedHours, 1)} h earned`}${why ? `  [${why}]` : ''}`,
+          `  ${a.activityId}  ${a.activityName}  ${fmtPct(a.pctComplete, 0)} complete${percent ? '' : `  ${fmtHours(a.earnedHours, 1)} h earned`}${why ? `  [${why}]` : ''}${note ? `  — ${note}` : ''}`,
         );
       }
       lines.push('');
@@ -260,27 +272,89 @@ export function PeriodLog() {
     {
       key: 'reason',
       label: 'Why missed',
-      value: (a) => reasonFor(missedReasons, a.activityId, log.to)?.reason ?? '',
-      hint: 'Why this activity did not finish when the baseline said it would. Kept against this period, so each fortnight keeps its own answer, and counted in the Missed breakdown above.',
-      render: (a) =>
-        a.outcome === 'MISSED' ? (
+      value: (a) => effectiveReasonFor(missedReasons, a.activityId, log.to)?.entry.reason ?? '',
+      hint: 'Why this activity did not finish when the baseline said it would. It sticks with the Activity ID, so nudging the end date by a day does not lose it; each answer is still stamped with the period it was given for, and a shown answer from another period is marked as carried.',
+      render: (a) => {
+        if (a.outcome !== 'MISSED') return <span className="text-[var(--text-subtle)]">—</span>;
+        const eff = effectiveReasonFor(missedReasons, a.activityId, log.to);
+        return (
           <MissedReasonCell
-            value={reasonFor(missedReasons, a.activityId, log.to)?.reason ?? ''}
+            value={eff?.entry.reason ?? ''}
             options={catalogue}
+            carriedFrom={eff?.carried ? eff.entry.periodEnd : undefined}
             onChange={(reason) => setMissedReason(actions.update, a.activityId, log.to, reason)}
             onAdd={(reason) => addReasonToCatalogue(actions.update, reason)}
           />
-        ) : (
-          <span className="text-[var(--text-subtle)]">—</span>
-        ),
+        );
+      },
+    },
+    /*
+     * The reviewer's own words on the row, keyed here and stored on Test Progress.
+     *
+     * One field, not a copy on each screen — the same upsert the test counts go
+     * through — so a note written at a review is the note Test Progress shows, and
+     * there is nothing to reconcile afterwards. It is deliberately not the Budget
+     * Master note, which explains a pricing or visibility decision: "waiting on the
+     * CTC cutover" and "re-priced, agreed with the client" are different sentences
+     * and neither should overwrite the other.
+     */
+    {
+      key: 'note',
+      label: 'Progress note',
+      value: (a) => keyed(a.activityId)?.note ?? '',
+      hint: 'Anything about this activity worth saying at the review. Kept against the Activity ID, and the same field Test Progress shows — write it in either place.',
+      render: (a) => (
+        <CellInput
+          className="cell-input"
+          value={keyed(a.activityId)?.note ?? ''}
+          placeholder="—"
+          title={keyed(a.activityId)?.note || 'Your own words on this activity. Writes straight to Test Progress, where the same note can be edited.'}
+          onCommit={(v) => setTestProgress(actions.update, a.activityId, { note: v })}
+        />
+      ),
     },
     { key: 'phase', label: 'Phase', value: (a) => a.phaseName },
+    /*
+     * What this row put into its own phase, not how the phase did.
+     *
+     * This column used to repeat the phase's achieved-against-planned figure on
+     * every row of the phase, which made it a heading pretending to be data: sorting
+     * by it sorted nothing, and a row could not say what it had personally
+     * contributed. It now reads exactly as Project achieved does one column over —
+     * the row's own earned hours as a share of a budget — with the phase's budget as
+     * the denominator instead of the whole job's. The rows of a phase therefore add
+     * up to how far that phase moved in the window, which is the figure the phase
+     * line above the table already reports.
+     */
     {
       key: 'phasepct',
       label: 'Phase achieved',
-      value: (a) => phaseBy.get(a.phase)?.achievement ?? null,
+      value: (a) => a.phaseContribution,
       num: true,
       width: '130px',
+      hint: 'What this one activity put into its own phase in this window: its achieved hours as a share of the phase’s whole budget. The rows of a phase add up to how far that phase moved.',
+      render: (a) => {
+        const p = phaseBy.get(a.phase);
+        if (a.phaseContribution === null) return <span className="text-[var(--text-subtle)]">—</span>;
+        return (
+          <span
+            className="font-semibold tabular-nums"
+            title={
+              `${fmtHours(a.earnedHours, 1)} h of ${p?.label ?? 'this phase'}’s ${fmtHours(a.phaseBudgetHours)} h budget.` +
+              (p ? ` The phase itself moved ${fmtPct(p.pctAtStart, 1)} → ${fmtPct(p.pctAtEnd, 1)} in this window, and this row is part of that.` : '')
+            }
+          >
+            {fmtPct(a.phaseContribution, 2)}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'phaseplan',
+      label: 'Phase of plan',
+      value: (a) => phaseBy.get(a.phase)?.achievement ?? null,
+      num: true,
+      optional: true,
       hint: 'How this activity’s whole phase did in this window: the phase’s achieved hours over its planned hours. The same figure for every activity of the phase — it judges the phase, not the row.',
       render: (a) => {
         const p = phaseBy.get(a.phase);
@@ -318,10 +392,10 @@ export function PeriodLog() {
     },
     {
       key: 'earned',
-      label: percent ? 'Achieved' : 'Achieved h',
+      label: percent ? 'Project achieved' : 'Project achieved h',
       value: (a) => a.earnedHours,
       num: true,
-      hint: 'What this activity actually got through inside the period.',
+      hint: 'What this activity actually got through inside the period, against the whole job: hours, or the share of the project budget they are. Phase achieved is the same figure taken against its phase.',
       render: (a) => <b>{val(a.earnedHours, 1)}</b>,
     },
     {
@@ -620,6 +694,11 @@ export function PeriodLog() {
                       )}
                     </span>
                   )}
+                  {reasonTally.carried > 0 && (
+                    <span className="text-[var(--text-muted)]" title="These answers were given for another period and stay with the activity until this one gets its own. Pick a reason on the row to record it against this period.">
+                      {reasonTally.carried} carried from an earlier review
+                    </span>
+                  )}
                   {reasonTally.given.length === 0 && reasonTally.unexplained === 0 && <span className="text-[var(--text-muted)]">—</span>}
                 </div>
               </div>
@@ -714,6 +793,14 @@ export function PeriodLog() {
           are the activities the plan was counting on. <b>MISSED</b> beats <b>STARTED</b> and <b>CONTINUED</b> deliberately — an activity that was due to finish here and
           did not is late, whatever else it also did. Activities with progress but no usable dates earn hours that belong to no window at all; the{' '}
           <a href={href('team')}>Earned vs {TERMS.built}</a> screen reports that figure.
+        </p>
+        <p className="mt-1 text-[12px] text-[var(--text-muted)]">
+          <b>COMPLETED</b> is read off the actual dates — your test window where you keyed one, otherwise P6's actual dates — and never off a planned date. So an activity
+          that beat its baseline reads <b>COMPLETED</b> in the fortnight it finished <i>and</i> in the next one, where its baseline hours still accrue: it is finished, and
+          it stays finished. <b>Phase achieved</b> is this row's own contribution to its phase, the same way <b>{percent ? 'Project achieved' : 'Project achieved h'}</b> is
+          its contribution to the job, so the rows of a phase add up to how far that phase moved. <b>Why missed</b> and <b>Progress note</b> stay with the Activity ID: the
+          note is the same field <a href={href('progress')}>Test Progress</a> shows, and a reason keyed for a neighbouring period is carried rather than lost when the end date
+          moves.
         </p>
       </Panel>
     </Page>

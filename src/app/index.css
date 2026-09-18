@@ -571,6 +571,16 @@ select.cell-input {
 .cell-input:hover { border-color: var(--border-strong); background: var(--white); }
 .cell-input:focus { background: var(--white); }
 select.cell-input { padding: 3px 22px 3px 6px; }
+/* An answer given for a neighbouring period, still standing for this one. It is a
+   real answer, so it is not greyed out; it is somebody else's fortnight's words, so
+   it does not read as flatly as one written here. The dotted underline is what says
+   so without colour, for the same reason the outcome tiles carry their own words. */
+.cell-input.is-carried {
+  font-style: italic;
+  color: var(--text-muted);
+  text-decoration: underline dotted var(--border-strong);
+  text-underline-offset: 3px;
+}
 
 /* Controls inside a table must not collapse to the width of their arrow. */
 .tbl td .cell-input { min-width: 48px; }

@@ -4,9 +4,12 @@
  * Two decisions are worth defending here, because both are the kind that look
  * arbitrary until the second fortnight:
  *
- * - A reason belongs to a PERIOD as well as an activity. The same activity missed
- *   three fortnights running usually has three different stories, and the third
- *   overwriting the first would leave the first review unable to explain itself.
+ * - A reason belongs to an ACTIVITY first and to a period second. The same activity
+ *   missed three fortnights running usually has three different stories, so each
+ *   answer is stamped with the period it was given for and the third never
+ *   overwrites the first. But it is still the activity's answer: moving the window's
+ *   end date by a day is the same activity with the same story, so the nearest
+ *   answer it has is what shows, marked as carried.
  * - The catalogue is kept, not derived. A reason typed once stays on offer after
  *   the last activity carrying it is re-dated or finished, or the list would shrink
  *   every time somebody fixed something.
@@ -14,7 +17,7 @@
 import { describe, it, expect } from 'vitest';
 import type { MissedReasonLog } from '../src/engine/types';
 import { DEFAULT_MISSED_REASONS } from '../src/engine/types';
-import { addReasonToCatalogue, isReasonUnused, reasonCatalogue, reasonFor, reasonUsage, removeReasonFromCatalogue, setMissedReason, tallyReasons } from '../src/app/missedReasons';
+import { addReasonToCatalogue, effectiveReasonFor, isReasonUnused, reasonCatalogue, reasonFor, reasonUsage, removeReasonFromCatalogue, setMissedReason, tallyReasons } from '../src/app/missedReasons';
 import { normKey } from '../src/engine/keys';
 import type { DataUpdater } from '../src/app/state';
 
@@ -175,11 +178,70 @@ describe('the period KPI', () => {
     expect(t.unexplained).toBe(2);
   });
 
-  it('does not count last fortnight\u2019s answer as this one\u2019s', () => {
+  it('carries an answer from a neighbouring period, and says it did', () => {
+    // The reason belongs to the activity. It stays its answer until somebody gives
+    // this period a different one, and the tally says how many are second-hand so a
+    // review can still tell a fresh story from a repeated one.
     const { box, update } = harness();
     setMissedReason(update, 'A-1', '2026-08-31', 'Weather');
     const t = tallyReasons(box.log, ['A-1'], '2026-09-14');
-    expect(t.given).toEqual([]);
-    expect(t.unexplained).toBe(1);
+    expect(t.given).toEqual([{ reason: 'Weather', count: 1 }]);
+    expect(t.unexplained).toBe(0);
+    expect(t.carried).toBe(1);
+  });
+
+  it('counts an answer written for this period as this period\u2019s own', () => {
+    const { box, update } = harness();
+    setMissedReason(update, 'A-1', '2026-09-14', 'Weather');
+    const t = tallyReasons(box.log, ['A-1'], '2026-09-14');
+    expect(t.carried).toBe(0);
+  });
+});
+
+describe('the answer follows the activity', () => {
+  it('survives the window end moving by a day, in either direction', () => {
+    // The bug this exists for: the log keyed a fortnight ending on the 9th, somebody
+    // nudged the end date, and every reason on the screen blanked.
+    const { box, update } = harness();
+    setMissedReason(update, 'A-1', '2026-09-09', 'Access not available');
+    for (const end of ['2026-09-08', '2026-09-10', '2026-09-09']) {
+      const eff = effectiveReasonFor(box.log, 'A-1', end);
+      expect(eff?.entry.reason, `end ${end}`).toBe('Access not available');
+      expect(eff?.carried).toBe(end !== '2026-09-09');
+    }
+  });
+
+  it('prefers this period\u2019s own answer over one kept from another', () => {
+    const { box, update } = harness();
+    setMissedReason(update, 'A-1', '2026-08-31', 'Weather');
+    setMissedReason(update, 'A-1', '2026-09-14', 'Access not available');
+    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-14')).toEqual({
+      entry: expect.objectContaining({ reason: 'Access not available' }),
+      carried: false,
+    });
+    // And each review still keeps its own: the older answer is not overwritten.
+    expect(effectiveReasonFor(box.log, 'A-1', '2026-08-31')?.entry.reason).toBe('Weather');
+  });
+
+  it('takes the nearest period, and the later one when two are equally far off', () => {
+    const { box, update } = harness();
+    setMissedReason(update, 'A-1', '2026-08-31', 'Weather');
+    setMissedReason(update, 'A-1', '2026-09-28', 'Access not available');
+    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-20')?.entry.reason).toBe('Access not available');
+    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-05')?.entry.reason).toBe('Weather');
+    // Equidistant: 14 days either side of 14 Sep.
+    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-14')?.entry.reason).toBe('Access not available');
+  });
+
+  it('says nothing about an activity nobody has answered for', () => {
+    const { box, update } = harness();
+    setMissedReason(update, 'A-1', '2026-08-31', 'Weather');
+    expect(effectiveReasonFor(box.log, 'A-2', '2026-08-31')).toBeUndefined();
+  });
+
+  it('matches the Activity ID the way every other file does', () => {
+    const { box, update } = harness();
+    setMissedReason(update, ' a-1 ', '2026-08-31', 'Weather');
+    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-14')?.entry.reason).toBe('Weather');
   });
 });

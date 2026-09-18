@@ -146,6 +146,99 @@ describe('what each activity did', () => {
   });
 });
 
+/**
+ * An activity that beat its baseline, and the fortnight after it finished.
+ *
+ * Baseline 31 Aug to 10 Sep; actually run 24 Aug to 2 Sep. The fortnight to 9 Sep
+ * signs it off, and the fortnight to 23 Sep still lists it, because its baseline
+ * hours accrue into that window — it is part of what the plan asked for there. What
+ * it must not say is that the work is still going.
+ */
+function earlyFinish(): ModelInput {
+  const library: LibraryEntry[] = [{ matchKey: 'Test Type', basis: 'RATE', crewSize: 1, shiftHours: 10, durationShifts: 1 }];
+  const id = 'A-P2-TC-X10-FA-0100';
+  const act = (start: string, finish: string, actual: boolean): P6Activity =>
+    makeActivity({ activityId: id, startDate: start, finishDate: finish, actualStart: actual, actualFinish: actual, sortOrder: 0 });
+  return {
+    settings: { ...DEFAULT_SETTINGS, dataDate: '2026-09-30', defaultComplexity: 1 },
+    locations: [{ code: 'X10' }],
+    library,
+    overrides: [],
+    testProgress: [{ activityId: id, pctOverride: 1, updatedAt: 'x' }],
+    current: [act('2026-08-24', '2026-09-02', true)],
+    baseline: [act('2026-08-31', '2026-09-10', false)],
+    snapshots: [],
+  };
+}
+
+describe('an activity that finished early', () => {
+  const m = computeModel(earlyFinish());
+  const id = 'A-P2-TC-X10-FA-0100';
+  const row = (from: string, to: string) => periodLog(m.rows, from, to).activities.find((a) => a.activityId === id);
+
+  it('reads COMPLETED in the fortnight it finished in', () => {
+    expect(row('2026-08-27', '2026-09-09')!.outcome).toBe('COMPLETED');
+  });
+
+  it('is still COMPLETED in the next fortnight, not CONTINUED', () => {
+    // The bug: its baseline ran to 10 Sep, so it is listed again — and asking only
+    // whether it finished INSIDE that window sent it to CONTINUED, telling the
+    // review an activity it had already signed off was still running.
+    const next = row('2026-09-10', '2026-09-23')!;
+    expect(next.outcome).toBe('COMPLETED');
+    expect(next.plannedHours).toBeGreaterThan(0);
+    expect(next.earnedHours).toBe(0);
+  });
+
+  it('reads the actual dates, and reports how early it was', () => {
+    const a = row('2026-08-27', '2026-09-09')!;
+    expect(a.actualStart).toBe('2026-08-24');
+    expect(a.actualFinish).toBe('2026-09-02');
+    expect(a.finishVarianceDays).toBe(-8);
+  });
+
+  it('counts as finished against a baseline that was due in a later window', () => {
+    const late = periodLog(m.rows, '2026-09-10', '2026-09-23');
+    expect(late.dueToFinish).toBe(1);
+    expect(late.finishedOnTime).toBe(1);
+    expect(late.counts.MISSED).toBe(0);
+  });
+
+  it('is never late and never still running, in any window', () => {
+    for (let i = 0; i < 26; i += 1) {
+      const from = addDays('2026-08-01', i * 14);
+      const to = addDays(from, 13);
+      const a = periodLog(m.rows, from, to).activities.find((x) => x.activityId === id);
+      if (!a) continue;
+      expect(a.outcome, `${from} to ${to}`).not.toBe('MISSED');
+      expect(a.outcome, `${from} to ${to}`).not.toBe('CONTINUED');
+      // Every window that has reached the day it finished says so.
+      if (to >= '2026-09-02') expect(a.outcome, `${from} to ${to}`).toBe('COMPLETED');
+    }
+  });
+});
+
+describe('what a row put into its own phase', () => {
+  const m = computeModel(scenario());
+  const log = periodLog(m.rows, '2026-08-18', '2026-08-31');
+
+  it('is the row’s own achieved hours over its phase’s whole budget', () => {
+    for (const a of log.activities) {
+      expect(a.phaseBudgetHours).toBeGreaterThan(0);
+      expect(a.phaseContribution).toBeCloseTo(a.earnedHours / a.phaseBudgetHours, 9);
+    }
+  });
+
+  it('adds up across the phase to exactly how far that phase moved', () => {
+    // The property that makes the column worth reading: the rows are parts of one
+    // figure, not five copies of a heading.
+    for (const p of log.phases) {
+      const summed = log.activities.filter((a) => a.phase === p.key).reduce((s, a) => s + (a.phaseContribution ?? 0), 0);
+      expect(summed).toBeCloseTo(p.pctAtEnd - p.pctAtStart, 9);
+    }
+  });
+});
+
 describe('the window itself', () => {
   it('splits a fortnight into two weeks that cover it exactly', () => {
     const log = periodLog(model.rows, '2026-08-18', '2026-08-31');
