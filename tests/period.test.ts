@@ -180,14 +180,26 @@ describe('an activity that finished early', () => {
     expect(row('2026-08-27', '2026-09-09')!.outcome).toBe('COMPLETED');
   });
 
-  it('is still COMPLETED in the next fortnight, not CONTINUED', () => {
+  it('is COMPLETED EARLY in the next fortnight, not CONTINUED', () => {
     // The bug: its baseline ran to 10 Sep, so it is listed again — and asking only
     // whether it finished INSIDE that window sent it to CONTINUED, telling the
     // review an activity it had already signed off was still running.
     const next = row('2026-09-10', '2026-09-23')!;
-    expect(next.outcome).toBe('COMPLETED');
+    expect(next.outcome).toBe('COMPLETED EARLY');
     expect(next.plannedHours).toBeGreaterThan(0);
     expect(next.earnedHours).toBe(0);
+  });
+
+  it('does not let work signed off earlier inflate what this fortnight finished', () => {
+    // The whole reason COMPLETED EARLY is its own outcome: the headline count of
+    // what got finished has to mean this fortnight.
+    const next = periodLog(m.rows, '2026-09-10', '2026-09-23');
+    expect(next.counts.COMPLETED).toBe(0);
+    expect(next.counts['COMPLETED EARLY']).toBe(1);
+    // And the fortnight it really finished in counts it, and only it.
+    const own = periodLog(m.rows, '2026-08-27', '2026-09-09');
+    expect(own.counts.COMPLETED).toBe(1);
+    expect(own.counts['COMPLETED EARLY']).toBe(0);
   });
 
   it('reads the actual dates, and reports how early it was', () => {
@@ -212,9 +224,66 @@ describe('an activity that finished early', () => {
       if (!a) continue;
       expect(a.outcome, `${from} to ${to}`).not.toBe('MISSED');
       expect(a.outcome, `${from} to ${to}`).not.toBe('CONTINUED');
-      // Every window that has reached the day it finished says so.
-      if (to >= '2026-09-02') expect(a.outcome, `${from} to ${to}`).toBe('COMPLETED');
+      // Every window that has reached the day it finished says so, one way or the
+      // other: inside the window it is COMPLETED, after it, COMPLETED EARLY.
+      if (to >= '2026-09-02') expect(a.outcome, `${from} to ${to}`).toMatch(/^COMPLETED/);
     }
+  });
+});
+
+describe('keying an actual date', () => {
+  const id = 'A-P2-TC-X10-FA-0100';
+
+  it('overrides P6, and moves the outcome with it', () => {
+    // What the Two-Week Log's Actual finish box writes: the test end override. P6
+    // has this one finishing on 2 Sep; somebody at the review says it was the 12th.
+    const input = earlyFinish();
+    const corrected = computeModel({
+      ...input,
+      testProgress: [{ activityId: id, pctOverride: 1, testEndOverride: '2026-09-12', updatedAt: 'x' }],
+    });
+    const row = corrected.rows.find((r) => r.activityId === id)!;
+    expect(row.actualFinish).toBe('2026-09-12');
+    expect(row.earnWindowSource).toBe('TEST WINDOW');
+    // It no longer finished before the later fortnight — it finished inside it.
+    expect(periodLog(corrected.rows, '2026-09-10', '2026-09-23').activities.find((a) => a.activityId === id)!.outcome).toBe('COMPLETED');
+  });
+
+  it('shows P6\u2019s own dates beside it, so a screen can say what is being overridden', () => {
+    const corrected = computeModel({
+      ...earlyFinish(),
+      testProgress: [{ activityId: id, pctOverride: 1, testStartOverride: '2026-08-20', updatedAt: 'x' }],
+    });
+    const a = periodLog(corrected.rows, '2026-08-18', '2026-08-31').activities.find((x) => x.activityId === id)!;
+    expect(a.actualStart).toBe('2026-08-20');
+    expect(a.p6ActualStart).toBe('2026-08-24');
+    expect(a.p6ActualFinish).toBe('2026-09-02');
+  });
+
+  it('closes the earn window on a keyed end even with no keyed start', () => {
+    // IN PROGRESS means "running to the data date", which is the wrong end of a
+    // window somebody has just dated.
+    const m2 = computeModel({
+      ...earlyFinish(),
+      testProgress: [{ activityId: id, pctOverride: 1, testEndOverride: '2026-09-05', updatedAt: 'x' }],
+    });
+    const row = m2.rows.find((r) => r.activityId === id)!;
+    expect(row.earnStart).toBe('2026-08-24');
+    expect(row.earnEnd).toBe('2026-09-05');
+    expect(row.earnWindowSource).toBe('TEST WINDOW');
+  });
+
+  it('keeps a finish date visible before the activity reads 100%', () => {
+    // The date is editable, so it has to survive being typed: one that vanished
+    // until the percent complete caught up would look like the box had eaten it.
+    const partial = computeModel({
+      ...earlyFinish(),
+      testProgress: [{ activityId: id, pctOverride: 0.5, testEndOverride: '2026-09-02', updatedAt: 'x' }],
+    });
+    const a = periodLog(partial.rows, '2026-08-27', '2026-09-09').activities.find((x) => x.activityId === id)!;
+    expect(a.actualFinish).toBe('2026-09-02');
+    // Shown, but not finished: the outcome still judges it on the percent complete.
+    expect(a.outcome).not.toMatch(/^COMPLETED/);
   });
 });
 

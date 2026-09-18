@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useApp } from '../state';
-import { Page, SortableTable, CellInput, Panel, Notice, Badge, type Column, type HeroStat } from '../components/ui';
+import { Page, SortableTable, CellInput, ActualDateCell, Panel, Notice, Badge, type Column, type HeroStat } from '../components/ui';
 import { periodLog, addDays, OUTCOMES, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
 import { fmtHours, fmtPct, fmtDate, todayISO, num } from '../format';
 import { isValidISO } from '../../engine/dates';
@@ -26,7 +26,11 @@ const AXIS = '#6e7179';
 
 /** How each outcome reads: its tone, and a word that does not rely on the colour. */
 const OUTCOME_META: Record<PeriodOutcome, { tone: 'good' | 'info' | 'warn' | 'bad' | 'muted'; blurb: string }> = {
-  COMPLETED: { tone: 'good', blurb: 'Finished. Either inside the period, or before it while the baseline still had it running.' },
+  COMPLETED: { tone: 'good', blurb: 'Reached 100% inside the period. This is what the fortnight actually finished.' },
+  'COMPLETED EARLY': {
+    tone: 'good',
+    blurb: 'Finished before the period began, and listed here because the baseline still had it running. It beat its dates — it is not work this fortnight did.',
+  },
   STARTED: { tone: 'info', blurb: 'Began inside the period and is still running.' },
   CONTINUED: { tone: 'info', blurb: 'Began earlier, still running, and earned hours in the period.' },
   MISSED: { tone: 'bad', blurb: 'The baseline had these finishing inside the period. They did not finish.' },
@@ -51,7 +55,14 @@ function ChartKey() {
 const ADD_REASON = '__add-a-reason__';
 
 /** What Test Progress holds for one activity, as this screen reads and writes it. */
-type TestProgressEntry = { testsTotal?: number; testsComplete?: number; pctOverride?: number; note?: string };
+type TestProgressEntry = {
+  testsTotal?: number;
+  testsComplete?: number;
+  pctOverride?: number;
+  testStartOverride?: string;
+  testEndOverride?: string;
+  note?: string;
+};
 
 /**
  * The reason one activity was missed, and the way a new reason gets onto the list.
@@ -416,14 +427,52 @@ export function PeriodLog() {
     { key: 'budget', label: 'Budget h', value: (a) => a.budgetHours, num: true, optional: true, render: (a) => (percent ? '' : fmtHours(a.budgetHours)) },
     { key: 'bls', label: 'BL start', value: (a) => a.baselineStart, optional: true, render: (a) => fmtDate(a.baselineStart) },
     { key: 'blf', label: 'BL finish', value: (a) => a.baselineFinish, render: (a) => fmtDate(a.baselineFinish) },
-    { key: 'as', label: 'Actual start', value: (a) => a.actualStart, render: (a) => fmtDate(a.actualStart) },
-    { key: 'af', label: 'Actual finish', value: (a) => a.actualFinish, render: (a) => fmtDate(a.actualFinish) },
+    /*
+     * The actual dates, editable here.
+     *
+     * A review is where somebody says "that was really finished on the 2nd", and
+     * sending them to another screen to key it is how the correction never gets
+     * made. These write the test window override through the same upsert the test
+     * counts go through, so what is typed here IS what Test Progress shows — and
+     * the earn window, the month the hours land in and this row's own outcome all
+     * move on the next render.
+     */
+    {
+      key: 'as',
+      label: 'Actual start',
+      value: (a) => a.actualStart,
+      hint: 'When the activity really began: your keyed date, or P6’s actual start. Editable — typing here writes the test start on Test Progress, and clearing it hands the date back to P6.',
+      render: (a) => (
+        <ActualDateCell
+          shown={a.actualStart}
+          keyed={keyed(a.activityId)?.testStartOverride}
+          p6={a.p6ActualStart}
+          what="start"
+          onCommit={(iso) => setTestProgress(actions.update, a.activityId, { testStartOverride: iso })}
+        />
+      ),
+    },
+    {
+      key: 'af',
+      label: 'Actual finish',
+      value: (a) => a.actualFinish,
+      hint: 'When the activity really finished: your keyed date, or P6’s actual finish. Editable, the same way. An activity at 100% with nothing dating it shows blank here, and its hours land on the data date.',
+      render: (a) => (
+        <ActualDateCell
+          shown={a.actualFinish}
+          keyed={keyed(a.activityId)?.testEndOverride}
+          p6={a.p6ActualFinish}
+          what="finish"
+          onCommit={(iso) => setTestProgress(actions.update, a.activityId, { testEndOverride: iso })}
+        />
+      ),
+    },
     {
       key: 'var',
       label: 'Days late',
       value: (a) => a.finishVarianceDays,
       num: true,
-      hint: 'Actual finish minus baseline finish, in calendar days. Negative is early. Blank until it finishes.',
+      hint: 'Actual finish minus baseline finish, in calendar days. Negative is early. Blank until something has dated the finish.',
       render: (a) =>
         a.finishVarianceDays === null ? (
           <span className="text-[var(--text-subtle)]">—</span>
@@ -750,7 +799,7 @@ export function PeriodLog() {
       </Panel>
 
       {/* --- outcome tiles: clickable filters, never colour alone --- */}
-      <div className="mb-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mb-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
         {OUTCOMES.map((o) => (
           <button
             key={o}
@@ -795,12 +844,16 @@ export function PeriodLog() {
           <a href={href('team')}>Earned vs {TERMS.built}</a> screen reports that figure.
         </p>
         <p className="mt-1 text-[12px] text-[var(--text-muted)]">
-          <b>COMPLETED</b> is read off the actual dates — your test window where you keyed one, otherwise P6's actual dates — and never off a planned date. So an activity
-          that beat its baseline reads <b>COMPLETED</b> in the fortnight it finished <i>and</i> in the next one, where its baseline hours still accrue: it is finished, and
-          it stays finished. <b>Phase achieved</b> is this row's own contribution to its phase, the same way <b>{percent ? 'Project achieved' : 'Project achieved h'}</b> is
-          its contribution to the job, so the rows of a phase add up to how far that phase moved. <b>Why missed</b> and <b>Progress note</b> stay with the Activity ID: the
-          note is the same field <a href={href('progress')}>Test Progress</a> shows, and a reason keyed for a neighbouring period is carried rather than lost when the end date
-          moves.
+          Outcomes are read off the <b>actual dates</b> — your keyed date where there is one, otherwise P6's actual date — and never off a planned date. An activity that
+          beat its baseline reads <b>COMPLETED</b> in the fortnight it finished and <b>COMPLETED EARLY</b> in any later one its baseline ran on into: it is finished and it
+          stays finished, without inflating what this fortnight actually got done. <b>Actual start</b> and <b>Actual finish</b> are editable here — typing one writes the
+          test window date on <a href={href('progress')}>Test Progress</a>, which is the same field, so the earn window, the month those hours land in and this row's own
+          outcome all move with it; clearing the box hands the date back to P6. A green <b>✎</b> means you keyed the date, a grey <b>A</b> means it is P6's.
+        </p>
+        <p className="mt-1 text-[12px] text-[var(--text-muted)]">
+          <b>Phase achieved</b> is this row's own contribution to its phase, the same way <b>{percent ? 'Project achieved' : 'Project achieved h'}</b> is its contribution to
+          the job, so the rows of a phase add up to how far that phase moved. <b>Why missed</b> and <b>Progress note</b> stay with the Activity ID: the note is the same
+          field Test Progress shows, and a reason keyed for a neighbouring period is carried rather than lost when the end date moves.
         </p>
       </Panel>
     </Page>

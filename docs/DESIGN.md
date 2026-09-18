@@ -351,10 +351,37 @@ The case that forced the split: baseline 31 Aug to 10 Sep, actually run 24 Aug t
 2 Sep. The fortnight to 9 Sep signs it off. The fortnight to 23 Sep lists it again —
 correctly, its baseline hours accrue into that window — and the old test, *did it
 finish inside this window*, sent it to CONTINUED. The log was telling a review that
-an activity it had already signed off was still running. COMPLETED now means
-finished on or before the end of the window, so something finished stays finished,
-and `finishedOnTime` counts finishing **by** the end of the window rather than
-inside it, or beating the baseline would have read as a miss.
+an activity it had already signed off was still running.
+
+That second row is **COMPLETED EARLY**, its own outcome rather than more COMPLETED,
+because the two answer different questions. "What did we finish this fortnight" is
+the review's headline and must not be inflated by work signed off a month ago; "is
+this activity still open" is what the row has to answer. `finishedOnTime` counts
+finishing **by** the end of the window rather than inside it, or beating the baseline
+would have read as a miss.
+
+`PeriodActivity.actualFinish` is the date as it stands, ungated by percent complete —
+the dates are editable on the log, and one that vanished the instant it was typed
+because the percent had not caught up would be unusable. The outcome keeps its own
+`finishedOn`, which is that date once the activity reads 100%, falling back to the
+end of the earn window for the activity at 100% that nothing has dated.
+
+### Editing an actual date
+
+`ActualDateCell` (in `components/ui.tsx`, shared by the Two-Week Log and Test
+Progress) shows the effective actual date and writes `testStartOverride` /
+`testEndOverride` — the same field, not a second copy — so a date corrected at a
+review immediately moves the earn window, the month the hours land in, the S-curve
+and the log's own outcome. Clearing hands the date back to P6; typing P6's own date
+back in is read as that rather than stored as an override shadowing it. The marker
+beside the box says which source is on screen, because "8 Sep" tells nobody whether
+it came from the schedule or from somebody in a meeting.
+
+Test Progress used to show only what had been keyed, so an activity P6 had dated sat
+blank there while the log showed its actual dates — the same fact, one screen
+admitting it and one not. Both now show the effective date. `earnWindowSource` reads
+TEST WINDOW when *either* end is yours: a keyed end closes the window on that date,
+and IN PROGRESS means "running to the data date", which would name the wrong end.
 
 ### What a row put into its phase
 

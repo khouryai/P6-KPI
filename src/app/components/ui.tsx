@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { define } from '../../engine/glossary';
 import { downloadBytes, stamp } from '../export';
+import { fmtDate } from '../format';
+import { isValidISO } from '../../engine/dates';
 
 export type Tone = 'good' | 'warn' | 'bad' | 'info' | 'purple' | 'muted';
 
@@ -709,5 +711,57 @@ export function Select({
         </option>
       ))}
     </select>
+  );
+}
+
+/**
+ * An actual date, as it stands and as it can be changed.
+ *
+ * The date shown is the one the whole app works off: the test window date where one
+ * was keyed, otherwise P6's, and only where P6 flags it actual. Typing here writes
+ * the test window override on Test Progress — the same field, not a second copy —
+ * so a date corrected at a review immediately moves the earn window, the percent
+ * complete's month, the S-curve and this log's own outcome. Clearing it hands the
+ * date back to P6, and typing P6's own date back in is read as exactly that rather
+ * than stored as an override that shadows it.
+ *
+ * The marker says which of the two is being shown, because "8 Sep" tells nobody
+ * whether it came from the schedule or from somebody in a meeting.
+ */
+export function ActualDateCell({
+  shown,
+  keyed,
+  p6,
+  what,
+  onCommit,
+}: {
+  /** The effective date, which is what the log and the curve actually use. */
+  shown: string | null;
+  /** The override keyed against this activity, when there is one. */
+  keyed?: string;
+  /** What P6 alone says, when it flags the date actual. */
+  p6: string | null;
+  what: 'start' | 'finish';
+  onCommit: (iso: string | undefined) => void;
+}) {
+  const source = keyed ? 'yours' : p6 ? 'P6' : null;
+  const title = keyed
+    ? `Keyed by you. It overrides P6, which ${p6 ? `has ${fmtDate(p6)}` : `has no actual ${what}`}. Clear the box to hand the date back to P6.`
+    : p6
+      ? `P6's actual ${what}. Type a date to override it; it is stored as the test ${what === 'start' ? 'start' : 'end'} on Test Progress, where the same field can be edited.`
+      : `No actual ${what} yet. Type one to record it — it is stored as the test ${what === 'start' ? 'start' : 'end'} on Test Progress, and drives the earn window from then on.`;
+  return (
+    <span className="flex items-center gap-1" title={title}>
+      <CellInput
+        type="date"
+        value={shown ?? ''}
+        onCommit={(v) => onCommit(isValidISO(v) && v !== p6 ? v : undefined)}
+      />
+      {source && (
+        <b className={`date-src${keyed ? ' is-yours' : ''}`} aria-label={keyed ? 'keyed by you' : 'from P6'}>
+          {source === 'yours' ? '✎' : 'A'}
+        </b>
+      )}
+    </span>
   );
 }

@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../state';
-import { Page, SortableTable, CellInput, Badge, statusTone, Notice, Panel, type Column, type HeroStat } from '../components/ui';
+import { Page, SortableTable, CellInput, ActualDateCell, Badge, statusTone, Notice, Panel, type Column, type HeroStat } from '../components/ui';
 import type { TestProgress as TP, BudgetRow, TestProgressCheck } from '../../engine/types';
 import { fmtPct, fmtHours, fmtDate, num } from '../format';
 import { normKey } from '../../engine/keys';
 import { parseDelimitedText } from '../../engine/parse';
 import { readWorkbook, pickSheet, workbookGrid } from '../../engine/workbook';
-import { parseP6Date, isValidISO } from '../../engine/dates';
+import { parseP6Date } from '../../engine/dates';
 import { href, type Route } from '../router';
 import { setTestProgress, clearTestProgress, tidyTestProgress as tidy, asFraction } from '../testProgress';
 
@@ -374,24 +374,45 @@ export function TestProgress({ route }: { route: Route }) {
         />
       ),
     },
+    /*
+     * The actual dates, keyed here or on the Two-Week Log.
+     *
+     * These boxes used to show ONLY what had been keyed, so an activity P6 had
+     * dated sat here blank while the log two screens over showed its actual dates
+     * — the same fact, one screen admitting it and one not. They now show the
+     * effective date with a marker saying where it came from, and typing still
+     * writes the override that beats P6. Clearing hands the date back to P6, and
+     * typing P6's own date back in is read as that rather than stored as an
+     * override shadowing it.
+     */
     {
       key: 'ts',
-      label: 'Test start',
-      value: (r) => r.entry?.testStartOverride ?? '',
+      label: 'Actual start',
+      value: (r) => r.actualStart ?? '',
+      hint: 'When the activity really began: your keyed date, or P6’s actual start. Type to override P6, clear to hand it back. The Two-Week Log edits the same field.',
       render: (r) => (
-        <CellInput
-          type="date"
-          value={r.entry?.testStartOverride ?? ''}
-          onCommit={(v) => setField(r.activityId, { testStartOverride: isValidISO(v) ? v : undefined })}
+        <ActualDateCell
+          shown={r.actualStart}
+          keyed={r.entry?.testStartOverride}
+          p6={r.activity.actualStart ? r.activity.startDate : null}
+          what="start"
+          onCommit={(iso) => setField(r.activityId, { testStartOverride: iso })}
         />
       ),
     },
     {
       key: 'te',
-      label: 'Test end',
-      value: (r) => r.entry?.testEndOverride ?? '',
+      label: 'Actual finish',
+      value: (r) => r.actualFinish ?? '',
+      hint: 'When the activity really finished: your keyed date, or P6’s actual finish. Blank means nothing has dated it yet, so it earns only as far as the data date.',
       render: (r) => (
-        <CellInput type="date" value={r.entry?.testEndOverride ?? ''} onCommit={(v) => setField(r.activityId, { testEndOverride: isValidISO(v) ? v : undefined })} />
+        <ActualDateCell
+          shown={r.actualFinish}
+          keyed={r.entry?.testEndOverride}
+          p6={r.activity.actualFinish ? r.activity.finishDate : null}
+          what="finish"
+          onCommit={(iso) => setField(r.activityId, { testEndOverride: iso })}
+        />
       ),
     },
     /*
@@ -481,16 +502,17 @@ export function TestProgress({ route }: { route: Route }) {
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text)]">Two separate facts</div>
             <p className="mt-1">
-              <b>How much</b> is done comes from this screen: the test counts, or a % override. <b>When</b> it was done comes from dates, and never from this screen unless
-              you type them into Test start and Test end. Marking a row <b>done</b> sets the count, not a date. It stamps nothing, and the date you clicked it is recorded
-              for the audit trail only — no curve, no month and no snapshot ever reads it.
+              <b>How much</b> is done comes from this screen: the test counts, or a % override. <b>When</b> it was done comes from the actual dates, which are P6's until
+              you type over them in Actual start and Actual finish — here or on the <a href={href('period')}>Two-Week Log</a>, which edits the same field. Marking a row
+              <b> done</b> sets the count, not a date. It stamps nothing, and the date you clicked it is recorded for the audit trail only — no curve, no month and no
+              snapshot ever reads it.
             </p>
           </div>
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text)]">Where the window comes from</div>
             <p className="mt-1">The earn window is picked in this order, and the Window column says which one won:</p>
             <ul className="mt-1 list-disc pl-4">
-              <li><b>TEST WINDOW</b> — your Test start, and your Test end. Yours beats P6 both ends.</li>
+              <li><b>TEST WINDOW</b> — a date you keyed at either end. Yours beats P6, end for end.</li>
               <li><b>P6 ACTUAL</b> — P6's actual start to its actual finish. Both must be actual dates (the <span className="mono">A</span> flag), not planned ones.</li>
               <li><b>IN PROGRESS</b> — P6 has an actual start but no actual finish, so the window runs from that start to the <b>data date</b> in Settings.</li>
               <li><b>NOT STARTED</b> — no actual start and no test start. There is no window, so the hours belong to no month.</li>
@@ -501,7 +523,7 @@ export function TestProgress({ route }: { route: Route }) {
             <p className="mt-1">
               The hours spread evenly across the window by calendar day, and each month gets what accrued inside it. An activity running 10 Aug to 10 Sep puts roughly two
               thirds of its earned hours in August and a third in September; it is not credited in a lump at either end. The P6 work calendar is ignored, so a window
-              spanning a shutdown still accrues straight through it.
+              spanning a shutdown still accrues straight through it. A green <b>✎</b> beside a date means you keyed it; a grey <b>A</b> means it is P6's own actual date.
             </p>
           </div>
           <div>
@@ -523,7 +545,7 @@ export function TestProgress({ route }: { route: Route }) {
               <b>Finished in August</b> is Earn end in August; <b>started in August</b> is Earn start in August; <b>worked on during August</b> is any window that overlaps
               it, which is what the August row on Earned vs Actual adds up. All three columns — Earn start, Earn end and Window — are on <a href={href('budget')}>Budget
               Master</a>, where they can be sorted and filtered. If P6 is the only thing dating an activity, then August is only right once the August import has landed
-              with the actual dates in it; where you know better than P6, key the Test start and Test end here and they win permanently.
+              with the actual dates in it; where you know better than P6, type over Actual start and Actual finish — here or on the Two-Week Log — and yours win permanently.
             </p>
           </div>
         </div>

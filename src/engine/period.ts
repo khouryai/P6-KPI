@@ -25,18 +25,24 @@ const DAY = 86_400_000;
  *
  * The order matters: these are tested in sequence and the first that fits wins, so
  * COMPLETED beats STARTED for an activity that both started and finished inside the
- * same fortnight, COMPLETED beats everything for one that is simply finished, and
- * MISSED beats NOT STARTED for one that was due to do both.
+ * same fortnight, either of the completed outcomes beats everything for one that is
+ * simply finished, and MISSED beats NOT STARTED for one that was due to do both.
  */
 export type PeriodOutcome =
-  /**
-   * Done. It reached 100% and its actual finish is on or before the end of the
-   * period — including one that finished BEFORE the period and appears here only
-   * because the baseline still had it running. Something finished is finished, and
-   * reporting it as still going in the next fortnight because its baseline ran on
-   * is the log arguing with the calendar.
-   */
+  /** Reached 100%, and it finished inside this period. */
   | 'COMPLETED'
+  /**
+   * Finished before this period even began, and listed here only because the
+   * baseline still had it running: it beat its dates.
+   *
+   * It is its own outcome rather than more COMPLETED because the two answer
+   * different questions. "What did we finish this fortnight" is the review's
+   * headline and must not be inflated by work signed off a month ago; "is this
+   * activity still open" is what a row on the table has to answer, and the old code
+   * answered it with CONTINUED — telling a review that something it had already
+   * closed was still running.
+   */
+  | 'COMPLETED EARLY'
   /** Began inside the period and is still running. */
   | 'STARTED'
   /** Began earlier, still running, and earned hours inside the period. */
@@ -74,8 +80,24 @@ export type PeriodActivity = {
   pctComplete: number;
   baselineStart: string | null;
   baselineFinish: string | null;
+  /**
+   * When the work really began and really finished: the test window dates where
+   * they were keyed, otherwise P6's dates and only where P6 flags them actual.
+   *
+   * These are the dates as they stand, not as the outcome reads them. A finish is
+   * here the moment one exists, whether or not the activity has reached 100% — the
+   * log lets these be edited, and a date that vanished the instant it was typed
+   * because the percent complete had not caught up would be unusable.
+   */
   actualStart: string | null;
   actualFinish: string | null;
+  /**
+   * The same two dates as P6 alone has them. What the row would say if nothing were
+   * keyed against it, so a screen can show what is being overridden rather than
+   * just that something is.
+   */
+  p6ActualStart: string | null;
+  p6ActualFinish: string | null;
   /** Calendar days between the baseline finish and the actual one. Negative is early. */
   finishVarianceDays: number | null;
   testsTotal: number | null;
@@ -151,7 +173,7 @@ export type PeriodLog = {
   phases: PeriodPhase[];
 };
 
-export const OUTCOMES: PeriodOutcome[] = ['COMPLETED', 'STARTED', 'CONTINUED', 'MISSED', 'NOT STARTED'];
+export const OUTCOMES: PeriodOutcome[] = ['COMPLETED', 'COMPLETED EARLY', 'STARTED', 'CONTINUED', 'MISSED', 'NOT STARTED'];
 
 /** The day before an ISO date. Windows are inclusive, so "before the window" is from−1. */
 export function dayBefore(iso: string): string {
@@ -246,7 +268,15 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
      */
     const finished = r.pctComplete >= 1 - 1e-9;
     const actualStart = r.actualStart;
-    const actualFinish = finished ? (r.actualFinish ?? r.earnEnd) : null;
+    const actualFinish = r.actualFinish;
+    /*
+     * The day the outcome treats it as finished on. Only meaningful once it IS
+     * finished, and it falls back to the end of the earn window when nothing has
+     * dated it — that is the activity at 100% with no actual dates anywhere, whose
+     * hours the curve credits at the data date. Dating it anywhere else here would
+     * put the log and the curve on different days.
+     */
+    const finishedOn = finished ? (actualFinish ?? r.earnEnd) : null;
 
     const touched =
       Math.abs(plannedHours) > 1e-9 ||
@@ -266,9 +296,12 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
      * so it is still part of what the plan asked for there. Asking only whether it
      * finished INSIDE the window made that second row fall through to CONTINUED,
      * which told the review an activity it had already signed off was still running.
+     * It is COMPLETED EARLY rather than COMPLETED so the fortnight's own count of
+     * what got finished is not inflated by work signed off before it started.
      */
     let outcome: PeriodOutcome;
-    if (finished && actualFinish && actualFinish <= hi) outcome = 'COMPLETED';
+    if (finished && finishedOn && within(finishedOn, lo, hi)) outcome = 'COMPLETED';
+    else if (finished && finishedOn && finishedOn < lo) outcome = 'COMPLETED EARLY';
     else if (within(actualStart, lo, hi)) outcome = 'STARTED';
     else if (within(r.baselineFinish, lo, hi) && !finished) outcome = 'MISSED';
     else if (!actualStart) outcome = 'NOT STARTED';
@@ -291,6 +324,8 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
       baselineFinish: r.baselineFinish,
       actualStart,
       actualFinish,
+      p6ActualStart: r.activity.actualStart ? r.activity.startDate : null,
+      p6ActualFinish: r.activity.actualFinish ? r.activity.finishDate : null,
       finishVarianceDays: r.baselineFinish && actualFinish ? daysBetween(r.baselineFinish, actualFinish) : null,
       testsTotal: r.testsTotal,
       testsComplete: r.testsComplete,
