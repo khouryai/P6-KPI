@@ -12,6 +12,7 @@ import { Rollup } from './screens/Rollup';
 import { Subsystems } from './screens/Subsystems';
 import { TeamHours } from './screens/TeamHours';
 import { PeriodLog } from './screens/PeriodLog';
+import { IdRules } from './screens/IdRules';
 import { Settings } from './screens/Settings';
 
 function Shell() {
@@ -46,6 +47,9 @@ function Shell() {
       break;
     case 'period':
       screen = <PeriodLog />;
+      break;
+    case 'idrules':
+      screen = <IdRules />;
       break;
     case 'settings':
       screen = <Settings />;

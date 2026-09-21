@@ -145,6 +145,17 @@ export const GLOSSARY: Record<string, string> = {
   'Budget left': 'Budget hours the current schedule still plans to earn in this period, spread calendar-linearly across each activity\u2019s remaining window. A fact about the plan, not a projection.',
   'Forecast cost': 'What earning that budget will cost at the rate this group has actually achieved so far. Blank where nothing has been built yet, because there is no rate to project with.',
   'Over / under': 'Budget left minus forecast cost. Negative is the overrun the period is heading for if the current rate holds.',
+  // Activity ID rules. Short labels on a screen whose whole subject is one sentence
+  // read across four columns, so each one says what its part of that sentence means.
+  Rules: 'Exceptions to how an Activity ID is read. Each one says: if the ID contains this text, set its location or phase to that.',
+  'Activities moved': 'Activities in the current schedule whose location or phase came from a rule rather than from their Activity ID.',
+  'Catching nothing': 'Rules that match no activity in the current schedule. Usually a typo \u2014 a rule that matches nothing is silent, and reads exactly like one that is working.',
+  'Then set its': 'Which reading of the Activity ID this rule replaces: the location, or the phase.',
+  To: 'What the rule sets the field to. A location code, or a phase \u2014 typed as 1 or as P1, both meaning Phase 1.',
+  Why: 'Why this exception exists, for whoever reads the list next.',
+  On: 'Whether the rule applies. Turning it off leaves it in the list without changing any grouping.',
+  'The ID says': 'Where the Activity ID alone would have put this activity.',
+  'The rule says': 'Where the rule puts it instead.',
   Groups: 'How many resource groups earned or spent anything inside that fiscal year.',
   'Share of year': 'This group as a share of everything earned in that fiscal year.',
   'Percent keyed': 'In-budget activities whose percent complete somebody typed, against the number of them there are.',

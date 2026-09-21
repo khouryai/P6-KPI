@@ -11,7 +11,8 @@ show. It reproduces the source workbook's numbers exactly; see
 Order of resolution per activity:
 
 1. Row type: blank Activity Name is a WBS row. Parsed, stored, never budgeted.
-2. Location: 4th dash-delimited segment of the trimmed Activity ID.
+2. Location: 4th dash-delimited segment of the trimmed Activity ID, unless an
+   Activity ID Rule overrules it.
 3. Activity type: everything after the first `" - "` in the name.
 4. Exclude reason: `(Deleted)` or `(Cancelled)` anywhere in the name, case-insensitive.
 5. Match key: exact (case-insensitive) library key, else the type with its last
@@ -238,6 +239,73 @@ start" means the export dropped the flag rather than that the work has not begun
 and zeroing every row on the strength of a flag that was never written would be the
 same class of mistake pointing the other way. The flag is the better witness only
 where the flag exists.
+
+## How often the curve reports
+
+Month ends were the only cadence, and they are the wrong one for a fortnightly
+review. A data date of Wed 23 Sep against month-end periods put the last earned
+point at 31 Aug — three weeks of reported progress off the end of the line — and
+the DATA DATE marker on 30 Sep, because the marker was matched on `YYYY-MM` and the
+nearest period was the one the data date fell *inside*. Nothing was stale. The grid
+was too coarse to land on the day being reported, and two symptoms that looked like
+separate bugs were one.
+
+`periodEndsBetween(from, to, cadence, anchor)` steps out from the **data date** in
+both directions, so a period lands exactly on it and the earned line ends where it
+was measured. With no anchor, or on `month`, it is `monthEndsBetween` unchanged. The
+series is extended one step past the end of the span, because a fixed step rarely
+lands on the last finish and a curve whose final period falls short never reaches
+100% — which reads as a plan that does not complete rather than as a grid that
+stopped early.
+
+Two grids come out of `computeModel`, on purpose. The curve runs at the review's
+cadence; `monthlyEarned` and `monthlyRemaining` stay on month ends, because
+timesheets are monthly and a fortnightly grid would key two rows to the same month
+and silently halve one. `CurveChart` keys on the full period end rather than the
+month, and draws the marker at the last period at or before the data date — which
+is the data date itself once the curve is anchored on it, and still the honest place
+for the line when it is not.
+
+## When the Activity ID is wrong
+
+The ID is parsed positionally: location is the 4th dash-delimited segment, phase the
+2nd. That holds until a schedule carries a family that does not follow the
+convention — `HTT` naming a location that is not in the 4th segment, `LMA` standing
+for a phase. The two obvious answers are both bad: live with the mis-grouping, or
+hard-code the exception in `parse.ts`, which means a code change for every new one
+and no way for the person who found it to see why an activity groups where it does.
+
+So the exceptions are data. `IdRule` says "if the Activity ID contains this text,
+set its location (or phase) to that", first match wins, edited on the **Activity ID
+Rules** screen and stored in `id-rules.json`.
+
+They are applied in `computeModel`, not at import, and that placement is the point:
+a rule added now re-groups the schedule already loaded, with nothing re-imported.
+The import is never touched — `row.activity.location` still says exactly what P6
+said, and deleting the rule puts everything back. `BudgetRow` carries
+`locationFromRule` / `phaseFromRule` so a screen can say the reading was overruled.
+
+Two consequences worth stating, both of which a rule applied later would have got
+wrong. The rule resolves at the **top** of the row loop, before the complexity
+factor is looked up, so an activity moved to another location prices at that
+location's factor. And a location a rule invents is appended to the location stats,
+because `locations.json` only ever learns codes discovery found — without it a code
+rows were grouped under would be missing from the Locations screen and unable to
+carry a factor at all.
+
+The screen counts what each rule actually catches against the live schedule, with
+the rules above it applied first. A rule matching nothing is the common mistake, and
+it is silent: it reads exactly like one that is working.
+
+## Phases read in their own order
+
+Every other rollup sorts by hours, biggest first, because the question there is
+where the money is. The dashboard's phase buttons sort **numerically** on the `P<n>`
+code, with the whole project first and non-numeric codes last. A row of phase
+buttons is a place in the programme, and somebody looking for Phase 5 should find it
+between 4 and 6 rather than wherever its budget puts it. It is a string sort only in
+the sense that `P10` must come after `P9`, which is exactly what a string sort gets
+wrong.
 
 
 `test-progress.json` still stores only the activities someone actually keyed something

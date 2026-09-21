@@ -35,7 +35,10 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
   },
   {
     section: 'Setup',
-    items: [{ id: 'settings', label: 'Settings' }],
+    items: [
+      { id: 'idrules', label: 'Activity ID Rules' },
+      { id: 'settings', label: 'Settings' },
+    ],
   },
 ];
 

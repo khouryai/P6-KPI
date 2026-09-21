@@ -507,7 +507,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const b = bundle.data;
     // A backup taken before subsystems existed has neither key. Default them so a
     // restore from an old file does not write "undefined" over a newer store.
-    for (const key of ['settings', 'locations', 'library', 'overrides', 'testProgress', 'subsystems', 'teamActuals'] as const) {
+    for (const key of ['settings', 'locations', 'library', 'overrides', 'testProgress', 'subsystems', 'teamActuals', 'idRules'] as const) {
       await store.saveFile(key, b[key] ?? (key === 'settings' ? b.settings : []));
     }
     // Its own line: unlike every other file this one is an object, so the empty
@@ -544,6 +544,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       testProgress: d.testProgress,
       subsystems: d.subsystems,
       teamActuals: d.teamActuals,
+      idRules: d.idRules,
       current: d.current?.activities ?? [],
       baseline: d.baseline?.activities ?? null,
     };

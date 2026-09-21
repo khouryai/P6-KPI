@@ -4,6 +4,7 @@ import type {
   LibraryEntry,
   Location,
   MissedReasonLog,
+  IdRule,
   ScheduleImport,
   Settings,
   Subsystem,
@@ -23,6 +24,7 @@ export const FILES = {
   testProgress: 'test-progress.json',
   missedReasons: 'missed-reasons.json',
   subsystems: 'subsystems.json',
+  idRules: 'id-rules.json',
   teamActuals: 'team-actuals.json',
   importsIndex: 'imports/index.json',
 } as const;
@@ -43,6 +45,8 @@ export type StoreData = {
   missedReasons: MissedReasonLog;
   subsystems: Subsystem[];
   teamActuals: TeamActual[];
+  /** Exceptions to how an Activity ID is read for location and phase. */
+  idRules: IdRule[];
   importsIndex: ImportIndexEntry[];
   current: ScheduleImport | null;
   baseline: ScheduleImport | null;
@@ -62,6 +66,7 @@ export function emptyStoreData(): StoreData {
     missedReasons: { reasons: [], entries: [], removed: [] },
     subsystems: [],
     teamActuals: [],
+    idRules: [],
     importsIndex: [],
     current: null,
     baseline: null,
@@ -121,9 +126,10 @@ const CANONICAL: RegExp[] = [
   /^missed-reasons\.json$/,
   /^subsystems\.json$/,
   /^team-actuals\.json$/,
+  /^id-rules\.json$/,
   /^\.lock$/,
 ];
-const STEMS = ['settings', 'locations', 'activity-library', 'activity-overrides', 'test-progress', 'missed-reasons', 'subsystems', 'team-actuals'];
+const STEMS = ['settings', 'locations', 'activity-library', 'activity-overrides', 'test-progress', 'missed-reasons', 'subsystems', 'team-actuals', 'id-rules'];
 const CANONICAL_IMPORT = /^(index|\d{4}-\d{2}-\d{2}T\d{4,6}(-\d+)?-(current|baseline))\.json$/;
 
 /**
@@ -192,6 +198,9 @@ export class Store {
     // missing file is not a problem to report.
     data.subsystems = parseJson<Subsystem[]>(await a.read(FILES.subsystems), [], FILES.subsystems, problems);
     data.teamActuals = parseJson<TeamActual[]>(await a.read(FILES.teamActuals), [], FILES.teamActuals, problems);
+    // Absent in every store written before an Activity ID could be overruled. No
+    // rules is the correct reading of "the IDs have all parsed fine so far".
+    data.idRules = parseJson<IdRule[]>(await a.read(FILES.idRules), [], FILES.idRules, problems);
     data.importsIndex = parseJson<ImportIndexEntry[]>(await a.read(FILES.importsIndex), [], FILES.importsIndex, problems);
     for (const kind of ['current', 'baseline'] as const) {
       const latest = [...data.importsIndex].filter((i) => i.kind === kind).sort((x, y) => x.importedAt.localeCompare(y.importedAt)).pop();

@@ -39,9 +39,9 @@ import type {
 } from './types';
 import { normKey, containsCI } from './keys';
 import { indexLibrary, resolveMatchKey } from './match';
-import { phaseOf, workTypeOf, phaseLabel } from './parse';
+import { phaseOf, workTypeOf, phaseLabel, matchIdRule, normalisePhaseValue } from './parse';
 import { accruedFraction } from './curves';
-import { maxISO, monthEnd, monthEndsBetween, isoToMs, msToISO, isValidISO } from './dates';
+import { maxISO, monthEnd, periodEndsBetween, isoToMs, msToISO, isValidISO, type Cadence } from './dates';
 
 // ---------------------------------------------------------------------------
 // Library helpers
@@ -433,11 +433,26 @@ export function computeModel(input: ModelInput): Model {
   const dataDate = isValidISO(settings.dataDate) ? settings.dataDate : null;
   /* Asked of the file once, and handed to every row: see `p6PctComplete`. */
   const p6Opts = { marksActuals: marksActuals(current) };
+  /*
+   * Exceptions to how an Activity ID is read, applied here rather than at import so
+   * that adding one re-groups the schedule already loaded. Nothing is rewritten on
+   * disk: the import stays exactly as P6 wrote it, and the rule is a lens over it.
+   */
+  const idRules = (input.idRules ?? []).filter((r) => !r.disabled && r.match.trim() !== '' && r.value.trim() !== '');
   if (!dataDate) notes.push('No data date is set. In-progress work cannot earn and the earned curve has no end.');
 
   const allRows: BudgetRow[] = [];
   for (const a of current) {
     if (a.rowType !== 'ACTIVITY') continue;
+    /*
+     * What this ID is read as, before anything reads it. The complexity factor is
+     * looked up by location, so a rule that moves an activity to another location
+     * has to move it before the rate is picked, not after.
+     */
+    const locRule = matchIdRule(a.activityId, 'location', idRules);
+    const phaseRule = matchIdRule(a.activityId, 'phase', idRules);
+    const locationOfRow = locRule ? locRule.value.trim() : a.location;
+    const phaseOfRow = phaseRule ? normalisePhaseValue(phaseRule.value) : phaseOf(a.activityId);
     const match = resolveMatchKey(a.activityType, libIdx);
     const entry = match.entry;
     const ovEarly = ovIdx.get(normKey(a.activityId));
@@ -465,7 +480,7 @@ export function computeModel(input: ModelInput): Model {
 
     const inBudget = status === 'IN BUDGET' && entry !== null;
     const basis = inBudget && entry ? effectiveBasis(entry, settings) : null;
-    const loc = locIdx.get(normKey(a.location));
+    const loc = locIdx.get(normKey(locationOfRow));
     const complexity = inBudget ? (loc?.complexityFactor ?? settings.defaultComplexity) : null;
     const stdHours = inBudget && entry ? stdHoursFor(entry, settings, a.originalDuration) : null;
     const ov = ovEarly;
@@ -547,11 +562,13 @@ export function computeModel(input: ModelInput): Model {
       renamed,
       visibility,
       hidden: visibility === 'HIDDEN',
-      location: a.location,
+      location: locationOfRow,
+      locationFromRule: !!locRule,
       // Derived from the Activity ID rather than stored, so imports written by an
       // earlier version of the app group correctly without a migration.
-      phase: phaseOf(a.activityId),
-      phaseName: phaseLabel(phaseOf(a.activityId)),
+      phase: phaseOfRow,
+      phaseFromRule: !!phaseRule,
+      phaseName: phaseLabel(phaseOfRow),
       workType: workTypeOf(a.activityId),
       seqCode: a.seqCode,
       activityType: a.activityType,
@@ -636,7 +653,22 @@ export function computeModel(input: ModelInput): Model {
 
   // Location stats.
   const budgetAllRows = rows.reduce((s, r) => s + r.budgetHours, 0);
-  const allLocationStats: LocationStat[] = input.locations.map((loc) => {
+  /*
+   * A rule can name a location the schedule never spelled — "anything with HTT in
+   * it is at HTT" — and `locations.json` only ever learns codes discovery found. A
+   * code that rows are grouped under but that appears in no list would be missing
+   * from the Locations screen and unable to carry a complexity factor, so the ones
+   * the rules produced are added here.
+   */
+  const knownLocs = new Set(input.locations.map((l) => normKey(l.code)));
+  const ruleLocs: Location[] = [];
+  for (const r of rows) {
+    const k = normKey(r.location);
+    if (!r.location || knownLocs.has(k)) continue;
+    knownLocs.add(k);
+    ruleLocs.push({ code: r.location });
+  }
+  const allLocationStats: LocationStat[] = [...input.locations, ...ruleLocs].map((loc) => {
     const k = normKey(loc.code);
     const mine = rows.filter((r) => normKey(r.location) === k);
     const budgetHours = mine.reduce((s, r) => s + r.budgetHours, 0);
@@ -716,7 +748,14 @@ export function computeModel(input: ModelInput): Model {
 
   // Curves.
   const totalBudget = rows.reduce((s, r) => s + r.budgetHours, 0);
-  const { curve, periods } = buildCurve(rows, dataDate);
+  /*
+   * Two different grids, on purpose. The curve reports at whatever cadence the
+   * review runs at — anchored on the data date, so the line ends on the day it was
+   * measured. Earned-against-built is monthly because timesheets are monthly, and
+   * feeding it fortnightly periods would key two rows to the same month.
+   */
+  const { curve } = buildCurve(rows, dataDate, settings.curveCadence ?? 'month');
+  const { periods } = buildCurve(rows, dataDate, 'month');
 
   // Summary.
   const acts = visibleActs;
@@ -832,7 +871,11 @@ export function computeModel(input: ModelInput): Model {
  * percentages are of the subset's own budget, because a phase at 40 per cent of its
  * own scope is the number anyone asking for a phase curve wants.
  */
-export function buildCurve(rows: BudgetRow[], dataDate: string | null): { curve: CurvePoint[]; periods: string[] } {
+export function buildCurve(
+  rows: BudgetRow[],
+  dataDate: string | null,
+  cadence: Cadence = 'month',
+): { curve: CurvePoint[]; periods: string[] } {
   const dates: string[] = [];
   for (const r of rows) {
     for (const d of [r.baselineStart, r.baselineFinish, r.currentStart, r.currentFinish, r.earnStart, r.earnEnd]) {
@@ -844,7 +887,7 @@ export function buildCurve(rows: BudgetRow[], dataDate: string | null): { curve:
 
   const totalBudget = rows.reduce((s, r) => s + r.budgetHours, 0);
   dates.sort();
-  const periods = monthEndsBetween(dates[0], dates[dates.length - 1]);
+  const periods = periodEndsBetween(dates[0], dates[dates.length - 1], cadence, dataDate);
   const curve = periods.map((p) => {
     let planned = 0;
     let forecast = 0;

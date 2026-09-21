@@ -1,4 +1,4 @@
-import type { P6Activity, ExcludeReason, RowType } from './types';
+import type { P6Activity, ExcludeReason, RowType, IdRule, IdRuleField } from './types';
 import { parseP6Date } from './dates';
 import { detectLayout, type ColumnMap, type Layout } from './columns';
 
@@ -85,6 +85,33 @@ export function workTypeOf(activityId: string): string {
 export function phaseLabel(code: string): string {
   const m = /^P(\d+)$/i.exec(code.trim());
   return m ? `Phase ${m[1]}` : code.trim();
+}
+
+/**
+ * A phase value as the app stores it. People type "1" as often as "P1" and mean the
+ * same phase; a value that is already a word ("Commissioning") is left alone.
+ */
+export function normalisePhaseValue(value: string): string {
+  const t = value.trim();
+  return /^\d+$/.test(t) ? `P${t}` : t;
+}
+
+/**
+ * The rule that decides this Activity ID's location or phase, if any.
+ *
+ * First match wins, so the list is read top to bottom and a specific rule can be
+ * put above a general one. Matching is case-insensitive and anywhere in the ID,
+ * which is how somebody describes the problem out loud: "if there is HTT in it".
+ */
+export function matchIdRule(activityId: string, field: IdRuleField, rules: IdRule[]): IdRule | null {
+  const id = activityId.trim().toUpperCase();
+  if (!id) return null;
+  for (const r of rules) {
+    if (r.disabled || r.field !== field) continue;
+    const needle = r.match.trim().toUpperCase();
+    if (needle && id.includes(needle)) return r;
+  }
+  return null;
 }
 
 /** Seq code is segments 5 and 6 joined with a dash. Informational only. */

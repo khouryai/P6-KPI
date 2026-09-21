@@ -67,6 +67,16 @@ export function Settings() {
           <Field label="Data date" hint="The as-of date of the current P6 export. In-progress work earns from its actual start up to this date, and the earned curve stops here. Changing it moves the end of the earned curve.">
             <input className="input" type="date" value={s.dataDate} onChange={(e) => set({ dataDate: e.target.value })} />
           </Field>
+          <Field
+            label="S-curve reports"
+            hint="How often the curve plots a point. Every two weeks and weekly are anchored on the data date, so one period always lands exactly on it and the earned line runs to the day you measured rather than to the month end after it."
+          >
+            <select className="input" value={s.curveCadence ?? 'month'} onChange={(e) => set({ curveCadence: e.target.value as S['curveCadence'] })}>
+              <option value="month">At each month end</option>
+              <option value="fortnight">Every two weeks, from the data date</option>
+              <option value="week">Every week, from the data date</option>
+            </select>
+          </Field>
         </div>
         <div className="card space-y-3">
           <h2 className="card-title">Budget defaults</h2>
