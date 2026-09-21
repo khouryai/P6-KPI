@@ -504,6 +504,46 @@ export type BurnSummary = {
   bySubsystem: Reforecast[];
   /** Subsystems that built hours but hold no budget, so nothing can be earned there. */
   builtWithNoBudget: string[];
+  /** The months still to come, on the current schedule's dates. */
+  forecastMonths: ForecastRow[];
+  /**
+   * Remaining budget belonging to no future month, because those activities have no
+   * usable current-schedule dates. Stated rather than folded in, for the same reason
+   * `unphasedEarned` is: a monthly table quietly short of the total is worse than one
+   * that admits the gap.
+   */
+  unphasedRemaining: number;
+  /**
+   * Remaining budget on activities the current schedule says should already have
+   * finished. It is placed in the first month ahead, because that is when it is due;
+   * the alternative is a forecast that spends it in the past.
+   */
+  overdueRemaining: number;
+};
+
+/**
+ * One resource group's share of a future month.
+ *
+ * `earned` is budget: what the schedule says the work left in that month is worth.
+ * `built` is what earning it will COST at the rate this group has actually achieved,
+ * which is the number that decides whether the year is fundable. It is null where
+ * the group has built no hours yet, because there is no rate to project with and a
+ * guess would look exactly like a measurement.
+ */
+export type ForecastCell = {
+  code: string;
+  label: string;
+  earned: number;
+  built: number | null;
+};
+
+/** One month of work still to come, whole and split by resource group. */
+export type ForecastRow = {
+  month: string;
+  periodEnd: string;
+  earned: number;
+  built: number | null;
+  bySubsystem: ForecastCell[];
 };
 
 /**
@@ -582,6 +622,13 @@ export type Summary = {
   baselineMatched: number;
   baselineFallback: number;
   noDates: number;
+  /**
+   * In-budget activities carrying an original duration but no remaining duration.
+   * P6 can say nothing about their progress, so they read 0% until somebody keys
+   * one. Counted because an export missing the column does this to every row at
+   * once, and the only other symptom is a number that looks plausible.
+   */
+  noRemainingDuration: number;
   pctFromP6: number; // in budget only
   pctFromOverride: number;
   inProgress: number;

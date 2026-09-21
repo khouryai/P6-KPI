@@ -1,20 +1,23 @@
 import * as XLSX from 'xlsx';
 import type { BurnRow, CurvePoint, Model, Settings, P6Activity, TestProgress, MissedReasonLog } from '../engine/types';
-import { p6PctComplete } from '../engine/compute';
-import { fiscalYearDetail, fyStart } from '../engine/fiscal';
+import { p6PctComplete, marksActuals } from '../engine/compute';
+import { fiscalYearDetail, forecastYears, fyStart } from '../engine/fiscal';
 import { fmtHours } from './format';
 
 const d = (iso: string | null | undefined): Date | '' => (iso ? new Date(`${iso}T00:00:00`) : '');
 const wsFrom = (rows: unknown[][]) => XLSX.utils.aoa_to_sheet(rows, { cellDates: true });
 
 function extractSheet(acts: P6Activity[], withDerived: boolean): XLSX.WorkSheet {
+  // Read the same way the model reads it, so the sheet cannot quote a percent the
+  // application never used.
+  const p6Opts = { marksActuals: marksActuals(acts) };
   const header = ['Activity ID', 'Activity Name', 'Original Duration', 'Remaining Duration', 'Start', 'Finish'];
   const derived = ['Row_Type', 'Location', 'Seq_Code', 'Activity_Type', 'Exclude_Reason', 'Start_Date', 'Finish_Date', 'Actual?', 'P6_Pct_Complete', 'Actual_Start?'];
   const rows: unknown[][] = [withDerived ? [...header, ...derived] : [...header, 'BL_Start_Date', 'BL_Finish_Date']];
   for (const a of acts) {
     const base: unknown[] = [a.rawActivityId, a.activityName, a.originalDuration ?? '', a.remainingDuration ?? '', a.startRaw, a.finishRaw];
     if (withDerived) {
-      rows.push([...base, a.rowType, a.location, a.rowType === 'ACTIVITY' ? a.seqCode : '', a.activityType, a.excludeReason ?? '', d(a.startDate), d(a.finishDate), a.actualFinish ? 'A' : '', a.rowType === 'ACTIVITY' ? p6PctComplete(a) : '', a.actualStart ? 'A' : '']);
+      rows.push([...base, a.rowType, a.location, a.rowType === 'ACTIVITY' ? a.seqCode : '', a.activityType, a.excludeReason ?? '', d(a.startDate), d(a.finishDate), a.actualFinish ? 'A' : '', a.rowType === 'ACTIVITY' ? p6PctComplete(a, p6Opts) : '', a.actualStart ? 'A' : '']);
     } else rows.push([...base, d(a.startDate), d(a.finishDate)]);
   }
   return wsFrom(rows);
@@ -96,12 +99,42 @@ function earnedVsActualSheets(model: Model, settings: Settings): [string, XLSX.W
     ]),
   ]);
 
+  /*
+   * The years that have not happened yet, by group. Kept in their own sheets rather
+   * than added as rows to the ones above, because "budget left" and "forecast cost"
+   * are not the same measurements as "earned" and "built" — one is the schedule's
+   * intent and one is arithmetic on a rate, and a single table carrying both under
+   * one set of headings would be read as though they were.
+   */
+  const ahead = forecastYears(model.burn.forecastMonths, start);
+  const futureYearSheet = wsFrom([
+    ['Fiscal_Year', 'Span', 'Months', 'Groups', 'Budget_Left_Hours', 'Forecast_Cost_Hours', 'Over_Under_Hours'],
+    ...ahead.map((y) => [y.label, y.span, y.months.length, y.resources.length, y.earned, orBlank(y.built), orBlank(y.variance)]),
+  ]);
+  const futureGroupSheet = wsFrom([
+    ['Fiscal_Year', 'Span', 'Group', 'Budget_Left_Hours', 'Forecast_Cost_Hours', 'Over_Under_Hours', 'Share_Of_Year_Left', 'Months_With_Work'],
+    ...ahead.flatMap((y) =>
+      y.resources.map((r) => [y.label, y.span, r.code || 'Unassigned', r.earned, orBlank(r.built), orBlank(r.variance), r.shareOfEarned, r.months.length]),
+    ),
+  ]);
+  const futureGroupMonthSheet = wsFrom([
+    ['Fiscal_Year', 'Month', 'Month_Label', 'Group', 'Budget_Left_Hours', 'Forecast_Cost_Hours'],
+    ...ahead.flatMap((y) =>
+      y.resources.flatMap((r) =>
+        r.months.map((m) => [y.label, m.month, monthLabel(m.month), r.code || 'Unassigned', m.earned, orBlank(m.built)]),
+      ),
+    ),
+  ]);
+
   return [
     ['Earned_vs_Actual', monthSheet],
     ['Fiscal_Year', yearSheet],
     ['FY_By_Group', yearGroupSheet],
     ['FY_By_Group_Month', yearGroupMonthSheet],
     ['Forecast_By_Group', forecastSheet],
+    ['FY_Forecast', futureYearSheet],
+    ['FY_Forecast_By_Group', futureGroupSheet],
+    ['FY_Forecast_By_Month', futureGroupMonthSheet],
   ];
 }
 

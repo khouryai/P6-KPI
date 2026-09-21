@@ -224,3 +224,89 @@ describe('a store written when test case counts existed', () => {
     expect(migrateTestCounts([{ activityId: 'A', testsTotal: 4, testsComplete: 9, updatedAt: 'x' }])[0].pctOverride).toBe(1);
   });
 });
+
+/**
+ * Taking an import back out.
+ *
+ * Imports are otherwise append only; this is the deliberate exception, and the
+ * property that makes it safe to offer is that it cannot reach anything the user
+ * keyed. Every edit lives in its own file keyed on the Activity ID, and none of
+ * them is in the import directory.
+ */
+describe('removing a schedule import', () => {
+  const imp = (id: string, kind: 'current' | 'baseline', at: string) => ({
+    id,
+    kind,
+    importedAt: at,
+    sourceFilename: `${id}.xlsx`,
+    rowCount: 0,
+    activities: [],
+  });
+
+  const seed = async (store: Store) => {
+    let idx = (await store.appendImport(imp('2026-09-01T0900', 'current', '2026-09-01T09:00:00Z'), [])).index;
+    idx = (await store.appendImport(imp('2026-09-14T0930', 'current', '2026-09-14T09:30:00Z'), idx)).index;
+    idx = (await store.appendImport(imp('2026-09-14T0931', 'baseline', '2026-09-14T09:31:00Z'), idx)).index;
+    return idx;
+  };
+
+  it('deletes the file, drops the index row, and leaves the rest alone', async () => {
+    const store = new Store(new FileSystemAdapter(new NodeDirectory(root), 'tmp', { sleep: noSleep }), owner);
+    const idx = await seed(store);
+    const doomed = idx.find((e) => e.id === '2026-09-14T0930')!;
+    const next = await store.removeImport(doomed.file, idx);
+
+    expect(next.map((e) => e.id)).toEqual(['2026-09-01T0900', '2026-09-14T0931']);
+    expect(existsSync(join(root, doomed.file))).toBe(false);
+    expect(existsSync(join(root, 'imports', '2026-09-01T0900-current.json'))).toBe(true);
+  });
+
+  it('falls back to the previous import of that kind on the next load', async () => {
+    const store = new Store(new FileSystemAdapter(new NodeDirectory(root), 'tmp', { sleep: noSleep }), owner);
+    const idx = await seed(store);
+    await store.removeImport(idx.find((e) => e.id === '2026-09-14T0930')!.file, idx);
+    const { data } = await store.loadAll();
+    expect(data.current?.id).toBe('2026-09-01T0900');
+    expect(data.baseline?.id).toBe('2026-09-14T0931');
+  });
+
+  it('leaves no schedule of that kind when the last one goes, which is a valid state', async () => {
+    const store = new Store(new FileSystemAdapter(new NodeDirectory(root), 'tmp', { sleep: noSleep }), owner);
+    let idx = await seed(store);
+    idx = await store.removeImport(idx.find((e) => e.id === '2026-09-14T0931')!.file, idx);
+    const { data, problems } = await store.loadAll();
+    expect(data.baseline).toBeNull();
+    // Not a fault to report: a job with no baseline is a job nobody has baselined.
+    expect(problems).toEqual([]);
+  });
+
+  it('cannot touch anything the user keyed', async () => {
+    const store = new Store(new FileSystemAdapter(new NodeDirectory(root), 'tmp', { sleep: noSleep }), owner);
+    await store.saveFile('overrides', [{ activityId: 'A-1', nameOverride: 'mine', overrideHours: 42 }]);
+    await store.saveFile('testProgress', [{ activityId: 'A-1', pctOverride: 0.4, updatedAt: 'x' }]);
+    await store.saveFile('library', [{ matchKey: 'X', crewSize: 3 }]);
+    await store.saveFile('teamActuals', [{ id: '1', month: '2026-08', subsystem: 'ATS', hours: 40 }]);
+    const idx = await seed(store);
+
+    for (const e of idx) await store.removeImport(e.file, await store.loadAll().then((r) => r.data.importsIndex));
+
+    const { data } = await store.loadAll();
+    expect(data.current).toBeNull();
+    expect(data.baseline).toBeNull();
+    expect(data.overrides).toEqual([{ activityId: 'A-1', nameOverride: 'mine', overrideHours: 42 }]);
+    expect(data.testProgress).toEqual([{ activityId: 'A-1', pctOverride: 0.4, updatedAt: 'x' }]);
+    expect(data.library[0].crewSize).toBe(3);
+    expect(data.teamActuals[0].hours).toBe(40);
+  });
+
+  it('refuses a path that is not an import, so a bad call cannot delete a store file', async () => {
+    const store = new Store(new FileSystemAdapter(new NodeDirectory(root), 'tmp', { sleep: noSleep }), owner);
+    await store.saveFile('settings', { ...DEFAULT_SETTINGS });
+    const idx = await seed(store);
+    for (const bad of ['settings.json', 'imports/index.json', '../settings.json', 'imports/nonsense.json']) {
+      await expect(store.removeImport(bad, idx)).rejects.toThrow(/not an import file/);
+    }
+    expect(existsSync(join(root, 'settings.json'))).toBe(true);
+    expect(existsSync(join(root, 'imports', 'index.json'))).toBe(true);
+  });
+});

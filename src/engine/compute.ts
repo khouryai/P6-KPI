@@ -3,6 +3,8 @@ import type {
   BurnCell,
   BurnRow,
   BurnSummary,
+  ForecastCell,
+  ForecastRow,
   CrewLine,
   MonthlyEarned,
   Reforecast,
@@ -39,7 +41,7 @@ import { normKey, containsCI } from './keys';
 import { indexLibrary, resolveMatchKey } from './match';
 import { phaseOf, workTypeOf, phaseLabel } from './parse';
 import { accruedFraction } from './curves';
-import { maxISO, monthEndsBetween, isValidISO } from './dates';
+import { maxISO, monthEnd, monthEndsBetween, isoToMs, msToISO, isValidISO } from './dates';
 
 // ---------------------------------------------------------------------------
 // Library helpers
@@ -322,12 +324,46 @@ export function testPctEffective(tp: TestProgress | undefined): { pct: number; s
   return null;
 }
 
-/** P6 fallback: 1 if the finish is an actual, else (OD - RD) / OD clamped, 0 if OD is zero or not numeric. */
-export function p6PctComplete(a: P6Activity): number {
+/**
+ * Does this schedule mark its actual dates at all?
+ *
+ * P6 writes a trailing "A" on a date that really happened, and the whole app leans
+ * on it. But whether it survives the trip out of P6 depends on how the export was
+ * taken, and a file that carries none cannot be read the same way as one that does.
+ * Asking the file once, rather than assuming, is what lets `p6PctComplete` use the
+ * strongest signal available without inventing one that is not there.
+ */
+export function marksActuals(activities: P6Activity[]): boolean {
+  return activities.some((a) => a.actualStart || a.actualFinish);
+}
+
+/**
+ * Percent complete as P6's durations imply it, for an activity nobody has keyed.
+ *
+ * `(OD − RD) / OD`, with two refusals in front of it, both of which exist because
+ * the arithmetic quietly reports 100% for work nobody has touched:
+ *
+ * A **missing remaining duration** is not zero remaining. An export without the
+ * column, or with it blank, used to divide `(OD − 0) / OD` and call every activity
+ * in the file complete — a schedule of 675 activities reporting 99.9% done with 0
+ * running and 140 not started, and an earned curve that stopped at 40% because
+ * those same rows had no dates to spread over. P6 has said nothing about progress
+ * here, so the answer is nothing, not everything.
+ *
+ * An activity **P6 has not started** cannot have progressed, whatever its durations
+ * say. That check is only applied where the file marks actual dates at all
+ * (`marksActuals`), because in a file that marks none, "no actual start" means the
+ * export dropped the flag rather than that the work has not begun — and zeroing
+ * every row on the strength of a flag that was never written would be the same
+ * class of mistake in the other direction.
+ */
+export function p6PctComplete(a: P6Activity, opts: { marksActuals?: boolean } = {}): number {
   if (a.actualFinish) return 1;
+  if (opts.marksActuals && !a.actualStart) return 0;
   const od = a.originalDuration;
   if (od === null || !Number.isFinite(od) || od === 0) return 0;
-  const rd = a.remainingDuration ?? 0;
+  const rd = a.remainingDuration;
+  if (rd === null || !Number.isFinite(rd)) return 0;
   return Math.max(0, Math.min(1, (od - rd) / od));
 }
 
@@ -395,6 +431,8 @@ export function computeModel(input: ModelInput): Model {
   const tpIdx = firstByKey<TestProgress>(testProgress, (t) => t.activityId);
   const hasBaseline = input.baseline !== null && input.baseline.length > 0;
   const dataDate = isValidISO(settings.dataDate) ? settings.dataDate : null;
+  /* Asked of the file once, and handed to every row: see `p6PctComplete`. */
+  const p6Opts = { marksActuals: marksActuals(current) };
   if (!dataDate) notes.push('No data date is set. In-progress work cannot earn and the earned curve has no end.');
 
   const allRows: BudgetRow[] = [];
@@ -450,7 +488,7 @@ export function computeModel(input: ModelInput): Model {
     // Percent complete: override, then tests, then P6 duration.
     const tp = tpIdx.get(normKey(a.activityId));
     const tpe = testPctEffective(tp);
-    const pctComplete = tpe ? tpe.pct : p6PctComplete(a);
+    const pctComplete = tpe ? tpe.pct : p6PctComplete(a, p6Opts);
     const pctSource: PctSource = tpe ? tpe.source : 'P6';
     const earnedHours = budgetHours * pctComplete;
 
@@ -704,6 +742,9 @@ export function computeModel(input: ModelInput): Model {
     baselineMatched: count((r) => r.baselineSource === 'BASELINE'),
     baselineFallback: count((r) => r.baselineSource === 'CURRENT'),
     noDates: count((r) => r.baselineSource === 'NONE'),
+    noRemainingDuration: count(
+      (r) => r.status === 'IN BUDGET' && r.activity.originalDuration !== null && r.activity.remainingDuration === null,
+    ),
     pctFromP6: count((r) => r.pctSource === 'P6' && r.status === 'IN BUDGET'),
     pctFromOverride: count((r) => r.pctSource === 'OVERRIDE'),
     inProgress: count((r) => r.earnWindowSource === 'IN PROGRESS'),
@@ -735,13 +776,18 @@ export function computeModel(input: ModelInput): Model {
       `${staleOverrides.length} of your activity edits point at an Activity ID the current schedule does not have. They are kept in case the activity returns, and do nothing until it does.`,
     );
   }
+  if (summary.noRemainingDuration > 0) {
+    notes.push(
+      `${summary.noRemainingDuration} in-budget ${summary.noRemainingDuration === 1 ? 'activity has' : 'activities have'} no Remaining Duration in the import, so P6 can say nothing about their progress and they read 0% until somebody keys one. Check the Remaining Duration column was mapped on Import.`,
+    );
+  }
   if (summary.onNoCurve > 0) {
     notes.push(`${summary.onNoCurve} in-budget activities have hours but no usable dates. They count in the total but appear on no curve.`);
   }
 
   const subsystemDefs = input.subsystems ?? [];
   const subsystems = subsystemRollup(rows, subsystemDefs);
-  const burn = burnSummary(rows, monthlyEarned(rows, periods, dataDate), input.teamActuals ?? [], subsystemDefs);
+  const burn = burnSummary(rows, monthlyEarned(rows, periods, dataDate), input.teamActuals ?? [], subsystemDefs, periods, dataDate);
   if (burn.builtWithNoBudget.length) {
     notes.push(
       `Hours were built against ${burn.builtWithNoBudget.map((c) => c || 'Unassigned').join(', ')}, which hold no budget. Those hours can never be earned back.`,
@@ -1060,6 +1106,102 @@ export function monthlyEarned(rows: BudgetRow[], periods: string[], dataDate: st
   return out;
 }
 
+/**
+ * Where the work that is LEFT falls, month by month, on the current schedule.
+ *
+ * `monthlyEarned` answers "what did we earn"; this answers "what is still to come,
+ * and when". It is the same spread in the other direction: each activity's
+ * remaining budget laid calendar-linearly across the part of its current-schedule
+ * window that has not happened yet.
+ *
+ * Three cases, because remaining work does not always have a future to sit in:
+ *
+ * - **Still to come.** The window is clipped at the data date and the remainder
+ *   spreads across what is left of it. An activity half elapsed carries all of its
+ *   remaining budget over its remaining days, not half of it.
+ * - **Overdue.** The schedule says the activity should already have finished and it
+ *   has not. Its remaining budget lands in the first month ahead, because that is
+ *   when the work is actually owed; spreading it over a window that has closed
+ *   would put spending in the past.
+ * - **Undated.** No usable current-schedule dates, so there is no month it belongs
+ *   in. It is returned separately rather than folded in anywhere, and the caller
+ *   reports the gap.
+ */
+export function monthlyRemaining(
+  rows: BudgetRow[],
+  periods: string[],
+  dataDate: string | null,
+): { months: { month: string; periodEnd: string; total: number; bySubsystem: Map<string, number> }[]; unphased: number; overdue: number } {
+  const future = dataDate ? periods.filter((p) => p > dataDate) : [...periods];
+  /*
+   * A schedule that ends before the data date leaves no month ahead to put anything
+   * in — but work still left on it is not undated, it is late, and calling it
+   * unplaceable would hide exactly the case worth seeing. One month is added past
+   * the data date so overdue work has a "now" to land in.
+   */
+  if (!future.length) {
+    if (!dataDate) return { months: [], unphased: rows.reduce((t, r) => t + Math.max(0, r.remainingHours), 0), overdue: 0 };
+    future.push(monthEnd(msToISO(isoToMs(monthEnd(dataDate)) + 86_400_000)));
+  }
+
+  const acc = future.map((p) => ({ month: p.slice(0, 7), periodEnd: p, total: 0, bySubsystem: new Map<string, number>() }));
+  let unphased = 0;
+  let overdue = 0;
+
+  const put = (i: number, code: string, hours: number) => {
+    acc[i].total += hours;
+    acc[i].bySubsystem.set(code, (acc[i].bySubsystem.get(code) ?? 0) + hours);
+  };
+
+  for (const r of rows) {
+    const remaining = r.remainingHours;
+    if (remaining <= 1e-9) continue;
+    /*
+     * Split the remainder the way the budget itself was split, so a group's future
+     * and its budget can never disagree. Falling back to the whole figure under
+     * Unassigned keeps the months adding up when an activity has no crew breakdown.
+     */
+    const parts: [string, number][] = [];
+    const codes = new Set([...Object.keys(r.subsystemHours), ...Object.keys(r.subsystemEarned)]);
+    let split = 0;
+    for (const code of codes) {
+      const left = (r.subsystemHours[code] ?? 0) - (r.subsystemEarned[code] ?? 0);
+      if (Math.abs(left) <= 1e-9) continue;
+      parts.push([code, left]);
+      split += left;
+    }
+    if (!parts.length || Math.abs(split - remaining) > 1e-6) {
+      parts.length = 0;
+      parts.push([UNASSIGNED, remaining]);
+    }
+
+    const start = r.currentStart;
+    const end = r.currentFinish;
+    if (!start || !end) {
+      unphased += remaining;
+      continue;
+    }
+    if (dataDate && end <= dataDate) {
+      overdue += remaining;
+      for (const [code, hours] of parts) put(0, code, hours);
+      continue;
+    }
+    // Clip to the future. A window that has not begun keeps its own start.
+    const from = dataDate && start < dataDate ? dataDate : start;
+    const to = maxISO(from, end);
+    let prev = 0;
+    acc.forEach((cell, i) => {
+      const f = i === acc.length - 1 ? 1 : accruedFraction(cell.periodEnd, from, to);
+      const share = f - prev;
+      prev = f;
+      if (share <= 1e-12) return;
+      for (const [code, hours] of parts) put(i, code, hours * share);
+    });
+  }
+
+  return { months: acc, unphased, overdue };
+}
+
 function reforecastOf(code: string, label: string, budgetHours: number, cumEarned: number, cumBuilt: number): Reforecast {
   const factor = cumBuilt > 0 ? cumEarned / cumBuilt : null;
   const remainingHours = budgetHours - cumEarned;
@@ -1094,6 +1236,9 @@ export function burnSummary(
   months: MonthlyEarned[],
   actuals: TeamActual[],
   subsystems: Subsystem[],
+  /** The month ends the curve spans, so the forecast can be laid across the future ones. */
+  periods: string[] = [],
+  dataDate: string | null = null,
 ): BurnSummary {
   const clean = actuals.filter((a) => /^\d{4}-\d{2}$/.test((a.month ?? '').trim()) && Number.isFinite(a.hours));
   const builtByMonth = new Map<string, Map<string, number>>();
@@ -1182,6 +1327,44 @@ export function burnSummary(
     )
     .sort((a, b) => b.budgetHours - a.budgetHours || a.code.localeCompare(b.code));
 
+  /*
+   * The future, at the rate each group has actually managed.
+   *
+   * The value of the work left comes from the schedule; what it will COST comes
+   * from the group's own factor, because that is the whole argument this screen
+   * exists to make — a group converting hours at 0.69 needs half again as many
+   * hours to finish as its budget says. A group that has built nothing has no rate
+   * to project with, and gets a null rather than a number that looks measured.
+   */
+  const factorOf = new Map(bySubsystem.map((f) => [f.code, f.factor]));
+  const remaining = monthlyRemaining(rows, periods, dataDate);
+  const forecastMonths: ForecastRow[] = remaining.months
+    .map((m) => {
+      const cells: ForecastCell[] = [...m.bySubsystem.entries()]
+        .filter(([, hours]) => Math.abs(hours) > 1e-9)
+        .map(([code, hours]) => {
+          const f = factorOf.get(code) ?? null;
+          return {
+            code,
+            label: subsystemLabel(code, subsystems),
+            earned: hours,
+            built: f && f > 0 ? hours / f : null,
+          };
+        })
+        .sort((a, b) => b.earned - a.earned || a.label.localeCompare(b.label));
+      // The month's cost is the sum of the groups that HAVE a rate. Null only when
+      // not one of them does, so a single unrated group cannot blank the whole row.
+      const costed = cells.filter((c) => c.built !== null);
+      return {
+        month: m.month,
+        periodEnd: m.periodEnd,
+        earned: m.total,
+        built: costed.length ? costed.reduce((t, c) => t + (c.built ?? 0), 0) : null,
+        bySubsystem: cells,
+      };
+    })
+    .filter((m) => Math.abs(m.earned) > 1e-9);
+
   return {
     months: rowsOut,
     totalEarned,
@@ -1197,5 +1380,8 @@ export function burnSummary(
     ),
     bySubsystem,
     builtWithNoBudget: [...builtBy.keys()].filter((c) => (budgetBy.get(c) ?? 0) === 0 && builtBy.get(c)! > 0),
+    forecastMonths,
+    unphasedRemaining: remaining.unphased,
+    overdueRemaining: remaining.overdue,
   };
 }

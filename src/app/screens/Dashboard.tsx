@@ -79,6 +79,7 @@ export function Dashboard() {
     { label: 'In-budget activities on no curve', count: s.onNoCurve, to: href('budget', { flag: 'nocurve' }), note: 'A start or finish is missing or unparseable on both schedules.' },
     { label: 'Baseline missing, using current dates', count: s.baselineFallback, to: href('budget', { flag: 'blcurrent' }), note: 'Plan equals forecast for these by default, not by agreement.' },
     { label: 'Percent complete still from P6 duration', count: s.pctFromP6, to: href('budget', { flag: 'pctp6' }), note: 'Key a percent complete to replace P6’s duration arithmetic with what you know.' },
+    { label: 'In-budget activities with no Remaining Duration', count: s.noRemainingDuration, to: href('import'), note: 'P6 can say nothing about their progress, so they read 0%. Usually the column was not mapped on import.' },
     { label: 'Progress rows not matching an activity', count: s.testProgressNotMatching, to: href('progress', { flag: 'unmatched' }), note: 'Open the list: it says what each one is and whether losing it costs anything.' },
     { label: 'Your edits pointing at an activity that is gone', count: s.staleOverrides, to: href('budget'), note: 'Kept in case the Activity ID comes back. Doing nothing until it does.' },
   ];
@@ -254,7 +255,7 @@ export function Dashboard() {
         * rates that the mode exists to avoid, so the cards change what they measure
         * rather than just relabelling: progress, and the activity counts behind it.
         */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-4 ${percent ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
         {percent ? (
           <>
             <Stat
@@ -275,7 +276,6 @@ export function Dashboard() {
               tone="good"
               sub={totals.inBudget ? `${fmtPct(totals.finished / totals.inBudget, 0)} of the activities` : undefined}
             />
-            <Stat label="In progress" value={totals.inProgress} sub={`${totals.pctKeyed} of ${totals.inBudget} on a percent you keyed`} />
           </>
         ) : (
           <>

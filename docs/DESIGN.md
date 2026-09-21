@@ -214,6 +214,32 @@ to nothing at all: it says how many tests there are, not how far along the work 
 The conversion is applied to what the app holds and is not written back on load, so
 a store opened and closed without edits is left exactly as it was found.
 
+### What P6's durations are allowed to claim
+
+`(OD − RD) / OD` is the fallback for an activity nobody has keyed, and it has two
+refusals in front of it because the bare arithmetic reports 100% for work nobody
+has touched.
+
+A **missing remaining duration is not zero remaining**. `rd ?? 0` divided
+`(OD − 0) / OD` and called every activity in the file complete. An import whose
+Remaining Duration column was absent or unmapped came back reading 99.9% done
+across 675 activities, with 0 running, 140 not started, and an earned curve that
+stopped at 40% — because the hours those rows "earned" had no actual dates to
+spread over, so they counted in the total and landed on no curve point. Two
+figures on one screen, disagreeing, both wrong. P6 has said nothing about progress
+without an RD, so the answer is now nothing rather than everything, and
+`Summary.noRemainingDuration` counts the rows it happened to so the cause is on the
+dashboard instead of inferred from a number that looks plausible.
+
+An **activity P6 has not started has not progressed**, whatever its durations say.
+That check is applied only where the file marks actual dates at all, which
+`marksActuals()` asks of the import once. In a file that marks none, "no actual
+start" means the export dropped the flag rather than that the work has not begun,
+and zeroing every row on the strength of a flag that was never written would be the
+same class of mistake pointing the other way. The flag is the better witness only
+where the flag exists.
+
+
 `test-progress.json` still stores only the activities someone actually keyed something
 against. One upsert path creates an entry when the first field is filled and deletes it
 again when the last field is cleared, so the file never accumulates empty rows. Stored
@@ -645,6 +671,39 @@ different resolutions; giving each its own hand-written column list is how the
 labels drift apart and a reader starts wondering whether "Variance" means the same
 thing two tables down.
 
+## A forecast is not a measurement, and must not look like one
+
+`monthlyRemaining()` lays each activity's remaining budget across the part of its
+current-schedule window that has not happened yet, and `forecastYears()` groups the
+result into fiscal years broken down by group. That answers the question the actual
+years cannot: what does each group still need, and in which funding year.
+
+Three cases, because remaining work does not always have a future to sit in. Work
+**still to come** has its window clipped at the data date, so a half-elapsed
+activity carries all of its remaining budget over its remaining days rather than
+half of it. Work the schedule says is **overdue** lands in the first month ahead,
+because that is when it is actually owed and spreading it over a window that has
+closed would put spending in the past; where the whole schedule ends before the
+data date, one month is added past the data date so late work still has a "now" to
+land in. **Undated** work is returned separately and reported as a gap, the same
+way `unphasedEarned` is.
+
+The forward tables are a separate type from the backward ones, and their columns are
+built by `forecastColumnsFor()` rather than `coreColumns()`. A past year reports two
+measurements and the ratio between them; a future year reports one measurement —
+budget left, a fact about the schedule — and one projection: what earning it costs
+at the rate the group has actually achieved. Letting those share the headings
+"Earned" and "Built" would invite somebody to read arithmetic-on-an-assumption as a
+figure somebody counted. For the same reason a group that has booked no hours gets a
+dash rather than a cost: there is no rate to project with, and a number there would
+look exactly as measured as the ones beside it. There is no cumulative column
+anywhere in the forward tables, because a running total that crosses from measured
+into projected is a number with two meanings.
+
+The workbook keeps the split: `FY_By_Group` carries `Earned_Hours` and
+`Built_Hours`, `FY_Forecast_By_Group` carries `Budget_Left_Hours` and
+`Forecast_Cost_Hours`, and a test asserts neither sheet grows the other's columns.
+
 ## Locations nobody uses
 
 Import discovers a location the moment one Activity ID mentions it and never removes
@@ -778,7 +837,17 @@ folder they never unlinked.
   and backs off after a failed write until the next edit so a folder that has gone offline
   cannot produce an error every second. Save now stays on the bar, and turning auto-save
   off restores write-only-on-Save. Imports are written when confirmed, as before.
-- Imports are append only.
+- Imports are append only, with one deliberate exception: `removeImport()` deletes a
+  named import file and its index row. An import is a statement of what P6 said on a
+  day, and a wrong one — the wrong file, the wrong kind, a mis-mapped column — is
+  worth being able to take back rather than work around forever. What makes it safe
+  to offer is that it cannot reach anything the user owns: every edit lives in its
+  own file keyed on the Activity ID, and none of them is under `imports/`. The index
+  row goes first and the file second, because a stray file on disk is harmless while
+  an index pointing at a deleted file is a load error. `isImportFile()` refuses any
+  path that is not a canonical import, `imports/index.json` included. Afterwards the
+  newest surviving import of that kind takes over, or none does — a job with no
+  baseline is a job nobody has baselined, not a fault to report.
 
 ## Where the data can live
 

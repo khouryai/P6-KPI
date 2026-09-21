@@ -11,7 +11,7 @@
  * A start month of January makes a fiscal year a calendar year, and the labels say
  * so rather than pretending otherwise.
  */
-import type { BurnRow } from './types';
+import type { BurnRow, ForecastRow } from './types';
 
 /** The default start. July is the usual transit-agency fiscal year. */
 export const DEFAULT_FY_START_MONTH = 7;
@@ -226,4 +226,116 @@ export function fiscalYearDetail(months: BurnRow[], startMonth: number): FiscalY
     ...y,
     resources: resourcesInYear(y.months).map((r) => ({ ...r, months: monthsForResource(y.months, r.code) })),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// The years that have not happened yet
+// ---------------------------------------------------------------------------
+
+/** One group's share of one future month. */
+export type ForecastResourceMonth = { month: string; earned: number; built: number | null };
+
+/** One group inside one future fiscal year, with the months behind the figures. */
+export type ForecastYearResource = {
+  code: string;
+  label: string;
+  /** Budget still to earn in this year on this group. */
+  earned: number;
+  /** What earning it costs at the rate this group has achieved. null = no rate yet. */
+  built: number | null;
+  /** Cost minus value: how much more than budget this year is forecast to take. */
+  variance: number | null;
+  /** This group as a share of everything the year has left to earn. */
+  shareOfEarned: number;
+  months: ForecastResourceMonth[];
+};
+
+/** A fiscal year still ahead, broken out by group. */
+export type ForecastYear = {
+  fy: number;
+  label: string;
+  span: string;
+  from: string;
+  to: string;
+  months: ForecastRow[];
+  earned: number;
+  built: number | null;
+  variance: number | null;
+  resources: ForecastYearResource[];
+};
+
+/**
+ * Group the work still to come into fiscal years, each broken down by resource.
+ *
+ * The mirror image of `fiscalYearDetail`, and deliberately a separate type rather
+ * than the same one with a flag. A past year reports what happened: earned against
+ * built, both measured, with a factor between them. A future year reports what the
+ * schedule intends and what that will cost at the rate achieved so far — the first
+ * is a fact, the second is arithmetic on an assumption, and a table that let them
+ * share a column would be inviting somebody to read one as the other.
+ *
+ * There is no cumulative column here for the same reason: a running total that
+ * crosses from measured into projected is a number with two meanings.
+ */
+export function forecastYears(months: ForecastRow[], startMonth: number): ForecastYear[] {
+  const start = fyStart(startMonth);
+  const buckets = new Map<number, ForecastRow[]>();
+  for (const m of months) {
+    const fy = fiscalYearOf(m.month, start);
+    if (!Number.isFinite(fy)) continue;
+    const list = buckets.get(fy);
+    if (list) list.push(m);
+    else buckets.set(fy, [m]);
+  }
+
+  return [...buckets.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([fy, list]) => {
+      const ordered = [...list].sort((a, b) => a.month.localeCompare(b.month));
+      const range = fiscalYearRange(fy, start);
+
+      const acc = new Map<string, { label: string; earned: number; built: number | null; months: ForecastResourceMonth[] }>();
+      for (const m of ordered) {
+        for (const c of m.bySubsystem) {
+          const prev = acc.get(c.code) ?? { label: c.label, earned: 0, built: null, months: [] };
+          prev.earned += c.earned;
+          // A group with no rate in any month keeps a null total; one with a rate in
+          // some of them totals only the months it could cost, which is the honest
+          // sum rather than a zero standing in for "unknown".
+          if (c.built !== null) prev.built = (prev.built ?? 0) + c.built;
+          if (c.label) prev.label = c.label;
+          prev.months.push({ month: m.month, earned: c.earned, built: c.built });
+          acc.set(c.code, prev);
+        }
+      }
+
+      const earned = ordered.reduce((s, m) => s + m.earned, 0);
+      const costed = ordered.filter((m) => m.built !== null);
+      const built = costed.length ? costed.reduce((s, m) => s + (m.built ?? 0), 0) : null;
+      const resources: ForecastYearResource[] = [...acc.entries()]
+        .map(([code, v]) => ({
+          code,
+          label: v.label,
+          earned: v.earned,
+          built: v.built,
+          variance: v.built === null ? null : v.earned - v.built,
+          shareOfEarned: earned ? v.earned / earned : 0,
+          months: v.months.sort((a, b) => a.month.localeCompare(b.month)),
+        }))
+        .filter((r) => Math.abs(r.earned) > 1e-9)
+        .sort((a, b) => b.earned - a.earned || a.label.localeCompare(b.label));
+
+      return {
+        fy,
+        label: fiscalYearLabel(fy, start),
+        span: fiscalYearSpan(fy, start),
+        from: range.from,
+        to: range.to,
+        months: ordered,
+        earned,
+        built,
+        variance: built === null ? null : earned - built,
+        resources,
+      };
+    });
 }

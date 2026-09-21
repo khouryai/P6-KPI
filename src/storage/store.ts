@@ -124,7 +124,17 @@ const CANONICAL: RegExp[] = [
   /^\.lock$/,
 ];
 const STEMS = ['settings', 'locations', 'activity-library', 'activity-overrides', 'test-progress', 'missed-reasons', 'subsystems', 'team-actuals'];
-const CANONICAL_IMPORT = /^(index|\d{4}-\d{2}-\d{2}T\d{4,6}-(current|baseline))\.json$/;
+const CANONICAL_IMPORT = /^(index|\d{4}-\d{2}-\d{2}T\d{4,6}(-\d+)?-(current|baseline))\.json$/;
+
+/**
+ * A guard on the one operation here that destroys history, so a bad path cannot.
+ * `imports/index.json` is deliberately not a deletable import.
+ */
+export function isImportFile(path: string): boolean {
+  const parts = path.split('/');
+  if (parts.length !== 2 || parts[0] !== IMPORT_DIR) return false;
+  return parts[1] !== 'index.json' && CANONICAL_IMPORT.test(parts[1]);
+}
 
 /**
  * A OneDrive conflict copy is "name-MACHINE.json", "name-MACHINE-1.json" or "name (1).json".
@@ -209,6 +219,30 @@ export class Store {
     const next = [...index, entry];
     await this.saveFile('importsIndex', next);
     return { entry, index: next };
+  }
+
+  /**
+   * Delete one import file and take it out of the index.
+   *
+   * Imports are otherwise append only, and this is the deliberate exception: an
+   * import is a statement of what P6 said on a day, and a wrong one — the wrong
+   * file, the wrong kind, a mis-mapped column — is worth being able to take back
+   * rather than work around forever.
+   *
+   * It touches `imports/` and the index, and nothing else. Every edit the user owns
+   * lives in its own file keyed on the Activity ID (overrides, progress, missed
+   * reasons, the library, locations, subsystems, team actuals), so none of it is in
+   * reach of this call — which is the property that makes removing an import safe
+   * to offer at all.
+   */
+  async removeImport(file: string, index: ImportIndexEntry[]): Promise<ImportIndexEntry[]> {
+    if (!isImportFile(file)) throw new Error(`${file} is not an import file`);
+    // The index row goes first. A file that fails to delete leaves a stray on disk,
+    // which is harmless; an index still pointing at a deleted file is a load error.
+    const next = index.filter((e) => e.file !== file);
+    await this.saveFile('importsIndex', next);
+    await this.adapter.remove(file).catch(() => undefined);
+    return next;
   }
 
   async readImport(file: string): Promise<ScheduleImport | null> {

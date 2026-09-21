@@ -78,6 +78,8 @@ export type AppActions = {
   commitImport(kind: ImportKind, activities: P6Activity[], sourceFilename: string): Promise<void>;
   restoreImport(entry: ImportIndexEntry): Promise<void>;
   readImport(entry: ImportIndexEntry): Promise<ScheduleImport | null>;
+  /** Delete one schedule import. Nothing you keyed is touched; see the action. */
+  removeImport(entry: ImportIndexEntry): Promise<void>;
   writeExport(name: string, bytes: Uint8Array): Promise<string>;
   listFolderFiles(): Promise<string[]>;
   readFolderFile(path: string): Promise<string | null>;
@@ -445,6 +447,52 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const readImport = useCallback(async (entry: ImportIndexEntry) => storeRef.current?.readImport(entry.file) ?? null, []);
 
+  /**
+   * Take a schedule import back out.
+   *
+   * The file goes, its index row goes, and whichever import of that kind is newest
+   * among the survivors becomes the one in use — so removing a bad import returns
+   * the app to the previous one rather than to nothing, and removing the last of a
+   * kind clears it properly (no baseline is a valid state; the planned curve then
+   * mirrors the forecast and the app says so).
+   *
+   * Everything the user keyed is out of reach by construction. Overrides, progress,
+   * missed reasons, the activity library, locations, subsystems and team actuals
+   * each live in their own file keyed on the Activity ID, and none of them is read
+   * or written here. An edit whose activity is no longer in any schedule is not
+   * deleted either — it sits idle and is listed as a stale override, exactly as it
+   * would be if P6 had renumbered the activity.
+   */
+  const removeImport = useCallback(
+    async (entry: ImportIndexEntry) => {
+      const store = storeRef.current;
+      if (!store) throw new Error('No storage open');
+      const index = await store.removeImport(entry.file, stateRef.current.data.importsIndex);
+      await mirror(FILES.importsIndex, JSON.stringify(index, null, 2));
+
+      // Whichever of that kind is newest now takes over. Read it here rather than
+      // reloading the whole folder, so unsaved edits on other screens survive.
+      const latest = [...index]
+        .filter((i) => i.kind === entry.kind)
+        .sort((x, y) => x.importedAt.localeCompare(y.importedAt))
+        .pop();
+      const replacement = latest ? await store.readImport(latest.file) : null;
+
+      setState((s) => {
+        const dirty = new Set(s.dirty);
+        dirty.delete('importsIndex');
+        return { ...s, dirty, data: { ...s.data, importsIndex: index, [entry.kind]: replacement } };
+      });
+      notify(
+        'ok',
+        replacement
+          ? `${entry.file} removed. The ${entry.kind} schedule is now ${replacement.sourceFilename}.`
+          : `${entry.file} removed. There is no ${entry.kind} schedule now. Nothing you keyed was touched.`,
+      );
+    },
+    [mirror, notify],
+  );
+
   const exportBundle = useCallback((): Bundle => ({ kind: 'tc-budget-backup', version: 1, createdAt: new Date().toISOString(), data: stateRef.current.data }), []);
 
   /**
@@ -520,8 +568,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const readFolderBinary = useCallback(async (path: string) => storeRef.current?.adapter.readBinary(path) ?? null, []);
 
   const actions = useMemo<AppActions>(
-    () => ({ chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify }),
-    [chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify],
+    () => ({ chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, removeImport, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify }),
+    [chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, removeImport, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify],
   );
 
   return <AppContext.Provider value={{ state, model, actions }}>{children}</AppContext.Provider>;

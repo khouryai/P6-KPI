@@ -10,6 +10,7 @@ import { distinctActivityTypes, distinctLocations } from '../../engine/discover'
 import { normKey } from '../../engine/keys';
 import type { ImportKind, ImportIndexEntry, ScheduleImport, P6Activity } from '../../engine/types';
 import { fmtDateTime, fmtDate } from '../format';
+import { TERMS } from '../../engine/vocab';
 
 type Pending =
   | { type: 'grid'; name: string; grid: unknown[][] }
@@ -30,6 +31,35 @@ export function Import() {
   const [viewing, setViewing] = useState<{ entry: ImportIndexEntry; imp: ScheduleImport } | null>(null);
 
   const fail = (e: unknown) => setError((e as Error).message);
+
+  /**
+   * Deleting an import is the one destructive thing on this screen, so the confirm
+   * says what happens next rather than only what goes: which schedule takes over,
+   * or that there will be none — and, because it is the question anybody hesitating
+   * here is actually asking, that nothing they keyed is involved.
+   */
+  const remove = async (h: ImportIndexEntry, inUse: boolean) => {
+    const successor = history
+      .filter((x) => x.kind === h.kind && x.file !== h.file)
+      .sort((a, b) => a.importedAt.localeCompare(b.importedAt))
+      .pop();
+    const next = inUse
+      ? successor
+        ? `The ${h.kind} schedule will fall back to ${successor.sourceFilename} (imported ${fmtDateTime(successor.importedAt)}).`
+        : `There will be no ${h.kind} schedule afterwards.`
+      : `The ${h.kind} schedule in use does not change.`;
+    if (!confirm(`Remove ${h.file}?\n\n${next}\n\nNothing you keyed is touched: renames, hidden and excluded flags, hours overrides, notes, percent complete, actual dates, missed reasons, the activity library, locations and team hours are all kept.`)) return;
+    setError(null);
+    setBusy(true);
+    try {
+      if (viewing?.entry.file === h.file) setViewing(null);
+      await actions.removeImport(h);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
   const reset = () => {
     setPending(null);
     setMapOverride(null);
@@ -413,7 +443,12 @@ export function Import() {
 
       <div className="card mt-4">
         <h2 className="card-title">Import history</h2>
-        <p className="text-[12px] text-[var(--text-muted)]">Imports are append only. The most recent of each kind is in use. Restoring writes a new import with the old rows, so nothing is ever overwritten.</p>
+        <p className="text-[12px] text-[var(--text-muted)]">
+          Imports are append only, and the most recent of each kind is in use. <b>Restore</b> writes a new import with the old rows, so nothing is overwritten.{' '}
+          <b>Remove</b> is the one exception: it deletes that import and hands the job back to whichever import of the same kind is next newest, or to none at all.
+          Nothing you keyed is touched either way — your renames, hidden and excluded flags, hours overrides, notes, percent complete, actual dates, missed reasons, the
+          activity library, locations, {TERMS.subsystemPlural.toLowerCase()} and team hours all live in their own files, keyed on the Activity ID.
+        </p>
         <table className="tbl mt-2">
           <thead><tr><th>Imported</th><th>Kind</th><th>Source</th><th className="num">Rows</th><th>File</th><th></th></tr></thead>
           <tbody>
@@ -431,6 +466,13 @@ export function Import() {
                     {!inUse && (
                       <button className="btn-link ml-2" onClick={() => { if (confirm(`Restore ${h.file} as the ${h.kind} schedule?`)) void actions.restoreImport(h).catch(fail); }}>restore</button>
                     )}
+                    <button
+                      className="btn-link danger ml-2"
+                      title={`Delete this import. Nothing you keyed is affected.${inUse ? ' The next newest import of this kind takes over.' : ''}`}
+                      onClick={() => void remove(h, inUse)}
+                    >
+                      remove
+                    </button>
                   </td>
                 </tr>
               );
