@@ -352,7 +352,7 @@ export function Import() {
                 {preview.strandedEdits + preview.strandedTests > 0 && (
                   <>
                     {' '}The other {preview.strandedEdits + preview.strandedTests} name an Activity ID this file does not contain, so they will sit idle rather than being
-                    deleted — renumbered in P6, or removed from the schedule. Budget Master and Test Progress both list them afterwards.
+                    deleted — renumbered in P6, or removed from the schedule. Budget Master and Progress both list them afterwards.
                   </>
                 )}
               </Notice>

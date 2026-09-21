@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { NodeDirectory } from '../src/storage/nodeDirectory';
 import { FileSystemAdapter } from '../src/storage/fileSystemAdapter';
 import { MemoryAdapter } from '../src/storage/memoryAdapter';
-import { Store, classifyConflict, FILES, importStamp } from '../src/storage/store';
+import { migrateTestCounts, Store, classifyConflict, FILES, importStamp } from '../src/storage/store';
 import { StorageError } from '../src/storage/adapter';
 import { DEFAULT_SETTINGS } from '../src/engine/types';
 
@@ -92,8 +92,6 @@ describe('Store', () => {
     let idx = (await store.appendImport(imp('2026-09-01T0900', 'current', '2026-09-01T09:00:00Z'), [])).index;
     idx = (await store.appendImport(imp('2026-09-14T0930', 'current', '2026-09-14T09:30:00Z'), idx)).index;
     idx = (await store.appendImport(imp('2026-09-14T0931', 'baseline', '2026-09-14T09:31:00Z'), idx)).index;
-    await store.appendSnapshot({ statusDate: '2026-08-31', takenAt: '2026-09-01T00:00:00Z', lines: [] });
-    await store.appendSnapshot({ statusDate: '2026-08-31', takenAt: '2026-09-02T00:00:00Z', lines: [] });
     const { data, problems } = await store.loadAll();
     expect(problems).toEqual([]);
     expect(data.settings.dataDate).toBe('2026-08-31');
@@ -101,7 +99,6 @@ describe('Store', () => {
     expect(data.importsIndex.length).toBe(3);
     expect(data.current?.id).toBe('2026-09-14T0930');
     expect(data.baseline?.id).toBe('2026-09-14T0931');
-    expect(data.snapshots.length).toBe(2);
     // Imports are never overwritten: the first file is still there.
     expect(existsSync(join(root, 'imports', '2026-09-01T0900-current.json'))).toBe(true);
   });
@@ -183,5 +180,47 @@ describe('Store', () => {
     const { data } = await store.loadAll();
     expect(data.overrides[0].overrideHours).toBe(5);
     expect(importStamp(new Date(2026, 8, 14, 9, 30, 5))).toBe('2026-09-14T093005');
+  });
+});
+
+/**
+ * Every store in the field was written when percent complete could come from a
+ * count of test cases. Reading those rows as "nothing keyed" would hand the
+ * activity back to P6's durations and move the earned curve without telling
+ * anybody, so the counts are converted to the percentage they stood for.
+ */
+describe('a store written when test case counts existed', () => {
+  it('reads the counts as the percent complete they always meant', () => {
+    const [row] = migrateTestCounts([{ activityId: 'A', testsTotal: 40, testsComplete: 10, updatedAt: 'x' }]);
+    expect(row.pctOverride).toBe(0.25);
+    expect(row).not.toHaveProperty('testsTotal');
+    expect(row).not.toHaveProperty('testsComplete');
+  });
+
+  it('leaves a percent somebody keyed alone, counts or no counts', () => {
+    const [row] = migrateTestCounts([{ activityId: 'A', testsTotal: 40, testsComplete: 10, pctOverride: 0.9, updatedAt: 'x' }]);
+    expect(row.pctOverride).toBe(0.9);
+  });
+
+  it('keeps a keyed zero, which is a statement and not an absence', () => {
+    const [row] = migrateTestCounts([{ activityId: 'A', testsTotal: 40, testsComplete: 10, pctOverride: 0, updatedAt: 'x' }]);
+    expect(row.pctOverride).toBe(0);
+  });
+
+  it('invents nothing from a total of zero, which says how many tests there are and not how far along', () => {
+    const [row] = migrateTestCounts([{ activityId: 'A', testsTotal: 0, testsComplete: 0, note: 'no pack yet', updatedAt: 'x' }]);
+    expect(row.pctOverride).toBeUndefined();
+    expect(row.note).toBe('no pack yet');
+  });
+
+  it('carries the dates and the note through untouched', () => {
+    const [row] = migrateTestCounts([
+      { activityId: 'A', testsTotal: 2, testsComplete: 2, testStartOverride: '2026-01-01', testEndOverride: '2026-02-01', progressAsOf: '2026-02-01', note: 'done', updatedAt: 'x' },
+    ]);
+    expect(row).toMatchObject({ pctOverride: 1, testStartOverride: '2026-01-01', testEndOverride: '2026-02-01', progressAsOf: '2026-02-01', note: 'done' });
+  });
+
+  it('clamps a count sheet that says more passed than exist', () => {
+    expect(migrateTestCounts([{ activityId: 'A', testsTotal: 4, testsComplete: 9, updatedAt: 'x' }])[0].pctOverride).toBe(1);
   });
 });

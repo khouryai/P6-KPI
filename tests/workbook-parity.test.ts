@@ -45,7 +45,6 @@ describe.skipIf(!available)('real workbook parity', () => {
     defaultShiftHours: setting('Default_Shift_Hours') as number,
     defaultComplexity: setting('Default_Complexity') as number,
     dataDate: parseP6Date(setting('Data_Date')).iso ?? '',
-    statusDate: parseP6Date(setting('Status_Date')).iso ?? '',
   };
 
   const current = parseTable(sheetToGrid(wb.Sheets['P6_Extract']));
@@ -68,13 +67,21 @@ describe.skipIf(!available)('real workbook parity', () => {
   const locations: Location[] = sheet('Locations')
     .filter((r) => str(r['Location_Code']) && r['Activities'] !== null)
     .map((r) => ({ code: str(r['Location_Code'])!, name: str(r['Location_Name']), complexityFactor: num(r['Complexity_Factor']) }));
+  /*
+   * The workbook still derives percent complete from test case counts; the app no
+   * longer does, and takes only a keyed percent. So the workbook's counts are read
+   * as the percentage they stood for — passed ÷ total, the workbook's own formula —
+   * and handed over as the keyed percent. Everything else the parity check is for
+   * (the rates, the dates, the curves, the rounding) is then compared like for like
+   * rather than being written off because one input changed shape.
+   */
+  const pctFromCounts = (total: number | undefined, done: number | undefined): number | undefined =>
+    total !== undefined && total > 0 ? Math.max(0, Math.min(1, (done ?? 0) / total)) : undefined;
   const testProgress: TestProgress[] = sheet('Test_Progress')
     .filter((r) => str(r['P6_Activity_ID']))
     .map((r) => ({
       activityId: str(r['P6_Activity_ID'])!,
-      testsTotal: num(r['Tests_Total']),
-      testsComplete: num(r['Tests_Complete']),
-      pctOverride: num(r['Pct_Override']),
+      pctOverride: num(r['Pct_Override']) ?? pctFromCounts(num(r['Tests_Total']), num(r['Tests_Complete'])),
       testStartOverride: parseP6Date(r['Test_Start_Override']).iso ?? undefined,
       testEndOverride: parseP6Date(r['Test_End_Override']).iso ?? undefined,
       updatedAt: '',
@@ -88,7 +95,6 @@ describe.skipIf(!available)('real workbook parity', () => {
     testProgress,
     current: current.activities,
     baseline: baseline.activities,
-    snapshots: [],
   });
 
   it('matches the Summary sheet', () => {
@@ -110,7 +116,9 @@ describe.skipIf(!available)('real workbook parity', () => {
     expect(s.baselineMatched).toBe(cellOf('Summary', 'B22'));
     expect(s.baselineFallback).toBe(cellOf('Summary', 'B23'));
     expect(s.noDates).toBe(cellOf('Summary', 'B24'));
-    expect(s.pctFromTests).toBe(cellOf('Summary', 'B26'));
+    // B26 counted the rows the workbook measured by test case count; here that is
+    // every row carrying a keyed percent, which is the same set of activities.
+    expect(s.pctFromOverride).toBe(cellOf('Summary', 'B26'));
     expect(s.pctFromP6).toBe(cellOf('Summary', 'B27'));
     expect(s.inProgress).toBe(cellOf('Summary', 'B36'));
     expect(s.p6Actual).toBe(cellOf('Summary', 'B37'));

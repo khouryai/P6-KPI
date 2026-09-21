@@ -3,9 +3,9 @@
 ## What the numbers mean
 
 The engine (`src/engine`) is a module of pure functions with no storage or UI
-dependency. `computeModel(input)` takes the settings, locations, library, overrides, test
-progress, both schedule imports and the snapshots, and returns every derived figure the
-screens show. It reproduces the source workbook's numbers exactly; see
+dependency. `computeModel(input)` takes the settings, locations, library, overrides,
+progress and both schedule imports, and returns every derived figure the screens
+show. It reproduces the source workbook's numbers exactly; see
 `tests/workbook-parity.test.ts`.
 
 Order of resolution per activity:
@@ -20,7 +20,7 @@ Order of resolution per activity:
 7. Hours: `RATE` = crew × shift hours × duration shifts; `DUR` = crew × shift hours ×
    max(0, original duration). Rounded after the location's complexity factor. An
    override replaces the rounded figure and bypasses the factor.
-8. Percent complete: direct override, else tests complete / tests total, else P6 duration.
+8. Percent complete: the percent somebody keyed, else P6 duration.
 9. Earn window: from the actual start (your keyed test start, else P6's actual start)
    to the actual finish; failing that to `progressAsOf`, the date somebody said the
    progress was true as at; failing that to the data date. Missing actual start means
@@ -33,7 +33,7 @@ Order of resolution per activity:
 - **Case-insensitive keys.** Excel `MATCH`, `COUNTIF` and `SEARCH` ignore case. The
   workbook therefore treats `IXL Cutover (by BART)` and `IXL Cutover (By BART)` as one
   library key. Every join goes through `normKey`.
-- **First match wins.** Duplicate Activity IDs in a baseline or test progress list
+- **First match wins.** Duplicate Activity IDs in a baseline or progress list
   resolve to the first occurrence, as `MATCH` does.
 - **Unparseable dates are no date.** A P6 constraint star (`01-Oct-26*`) defeats
   `DATEVALUE` in the workbook, so it is treated as no date here too, and flagged on import
@@ -103,12 +103,12 @@ two kinds of type have no library key at all: one P6 marked `(Deleted)` or
 `(Cancelled)`, which `discoverLibrary` skips on purpose so the library is not full of
 dead work, and one whose key was retired by hand. Forcing such an activity in moved it
 from DELETED to REVIEW and stopped there — no rate could reach it, it carried no hours,
-and since both the Activity Library and Test Progress are lists of *priced* things, it
+and since both the Activity Library and the Progress screen are lists of *priced* things, it
 appeared in neither. It had been included into nowhere.
 
 So Budget Master creates the key, or un-retires it, in the same action, on the Settings
 defaults exactly as a discovered type would arrive. The type is then visible and
-editable like any other, and the activity reaches Test Progress carrying real hours.
+editable like any other, and the activity reaches the Progress screen carrying real hours.
 Other activities of that type are not dragged in with it: P6's marker still excludes
 them on its own, and only the ones forced in individually cross over. The toast names
 every key it had to add, because a per-activity action that edits the library is a side
@@ -167,11 +167,11 @@ bucket), so group totals always add back to the whole. That invariant is asserte
 every dimension in `tests/rollup.test.ts` and against the real workbook in the parity
 suite.
 
-The Dashboard can be cut down to one phase. `buildCurve(rows, snapshots, dataDate)`
-takes the rows rather than reading the model, so a phase curve is the same arithmetic
-over a subset and cannot disagree with the programme curve it is part of; the snapshot
-diamonds are cut to the same rows, and the percentages are of the subset's own budget,
-which is what "Phase 2 is 40 per cent done" means. `rowTotals(rows)` does the same for
+The Dashboard can be cut down to one phase. `buildCurve(rows, dataDate)` takes the
+rows rather than reading the model, so a phase curve is the same arithmetic over a
+subset and cannot disagree with the programme curve it is part of, and the
+percentages are of the subset's own budget, which is what "Phase 2 is 40 per cent
+done" means. `rowTotals(rows)` does the same for
 the four KPI cards, counting activities over budgeted rows only so the cards and the
 phase tiles under them agree. Data quality and the summary stay whole-programme, and
 the screen says so.
@@ -188,11 +188,31 @@ the four screens that group by phase all read it from there. A segment nobody ha
 taught the app is still kept as it appears, so an unknown code groups with its own
 kind rather than disappearing into a bucket.
 
-## Test progress is schedule-driven
+## Progress is schedule-driven, and is one number
 
-The Test Progress screen lists **every budgeted activity**, always. There is no list
+The Progress screen lists **every budgeted activity**, always. There is no list
 to build and no way for the worksheet to drift out of step with the schedule: the rows
 *are* `model.rows` filtered to `IN BUDGET`, joined to whatever has been keyed.
+
+Percent complete is **keyed by hand, and nothing else**. It used to be derivable from
+test case counts as well, which meant two ways of saying the same thing, a precedence
+rule to remember, and a standing argument about which one a given activity was using
+— and a count of test cases was never the figure anybody defended in a meeting
+anyway. `PctSource` is now `OVERRIDE` or `P6`: the number somebody typed, or the one
+P6's durations imply, `(OD − RD) ÷ OD`. A row carrying only a note or a date says
+nothing about progress, so P6 still answers for it; a keyed **zero** is a statement
+and beats P6's arithmetic, which is why `testPctEffective` tests for `undefined`
+rather than for falsiness.
+
+Stores written before this change still hold `testsTotal` / `testsComplete` on
+disk. `migrateTestCounts()` in `src/storage/store.ts` converts them on the way in,
+using the formula that produced the figure in the first place — passed ÷ total,
+clamped — because reading them as "nothing keyed" would hand those activities back
+to P6's durations and move the earned curve without saying so. A percent somebody
+keyed always wins over a count, a keyed zero survives, and a total of zero converts
+to nothing at all: it says how many tests there are, not how far along the work is.
+The conversion is applied to what the app holds and is not written back on load, so
+a store opened and closed without edits is left exactly as it was found.
 
 `test-progress.json` still stores only the activities someone actually keyed something
 against. One upsert path creates an entry when the first field is filled and deletes it
@@ -212,11 +232,11 @@ wording lives in one place and is testable.
 ### Progress and dates are separate facts
 
 Keying a percent says *how much*; it says nothing about *when*, and only the earn window
-puts hours into a month or onto a curve point. Marking a row **done** sets the count and
+puts hours into a month or onto a curve point. Marking a row **done** sets the percent and
 stamps no date — `updatedAt` is an audit field no curve reads. An activity at 100% that
 P6 has never actually started and that carries no test window earns its hours into the
 project total and into no month at all; that is what Earned vs Actual reports as
-unphased. Test Progress names those rows in a warning and can filter to them, and the
+unphased. The Progress screen names those rows in a warning and can filter to them, and the
 collapsible explainer at the top of the screen sets out the window precedence (TEST
 WINDOW → P6 ACTUAL → IN PROGRESS → NOT STARTED) and what the monthly import changes.
 
@@ -304,19 +324,20 @@ Chart colors stay literal hex rather than `var(--…)`, matching cx-portal's own
 exception for Chart.js palettes. Here the reason is the PNG export: it
 rasterises through a detached SVG where custom properties do not resolve.
 
-## Hiding a snapshot
+## There are no snapshots
 
-`computeModel` drops hidden snapshots once, at the top, before anything reads them.
-That keeps them out of the markers, out of the curve's `snapshot` column, and out of
-the date range the curve spans — a snapshot dated three years past the end of the work
-must not be able to stretch the chart once it has been hidden. The record itself is
-unchanged, and the exported `Status_History` sheet still carries every snapshot with an
-`On_Curve` column, because a history that quietly dropped rows would not be a history.
+There used to be: a frozen copy of every activity's percent complete on a status
+date, written to `snapshots/`, plotted as diamonds against the earned curve, and
+carrying its own hide-but-keep and delete-for-good rules. It is gone, with the module,
+the screen, the store directory, the `CurvePoint.snapshot` column and the markers.
 
-Hide is the right move far more often than delete: a marker sitting well off the earned
-curve usually means the rates, dates or test counts changed after it was taken, which
-is worth explaining rather than erasing. Delete is for a snapshot that should never
-have existed — a wrong status date, a duplicate.
+The reason is that it never answered the question it looked like it answered. A
+diamond far off the earned curve tells you the underlying data changed after the
+snapshot was taken, not what changed or whether the change was right, and the
+apparatus around it — a status date separate from the data date, a hidden flag, a
+delete that could not be undone — was a standing source of "which of these numbers is
+the real one". What people actually wanted from it is a copy of the figures as at a
+date, and **Settings → Export workbook** already writes one.
 
 ## The two-week log
 
@@ -379,7 +400,7 @@ back in is read as that rather than stored as an override shadowing it. The mark
 beside the box says which source is on screen, because "8 Sep" tells nobody whether
 it came from the schedule or from somebody in a meeting.
 
-Test Progress used to show only what had been keyed, so an activity P6 had dated sat
+The Progress screen used to show only what had been keyed, so an activity P6 had dated sat
 blank there while the log showed its actual dates — the same fact, one screen
 admitting it and one not. Both now show the effective date. `earnWindowSource` reads
 TEST WINDOW when *either* end is yours: a keyed end closes the window on that date,
@@ -448,7 +469,7 @@ week's.
 ### One progress note, two screens
 
 `TestProgress.note` is the reviewer's own words on an activity, keyed from the
-Two-Week Log or from Test Progress through the same upsert — one field, not a copy on
+Two-Week Log or from the Progress screen through the same upsert — one field, not a copy on
 each screen. It is deliberately not `ActivityOverride.note`, which explains why an
 activity was renamed, hidden or re-priced: a pricing justification and "waiting on the
 CTC cutover" are different sentences and neither should overwrite the other.
@@ -505,11 +526,11 @@ list lives in the code, not in the file, so a deletion has to be remembered or t
 reason returns on the next render. Typing one back, or answering with it, un-removes
 it.
 
-### Keying test counts from the log
+### Keying the percent complete from the log
 
-The Test Progress screen owns the test counts, but it is not where somebody is
-holding them at four o'clock on a Friday — they are being read out activity by
-activity in the review. So the log's Tests, Done and % override cells write through
+The Progress screen owns the percent complete, but it is not where somebody is
+holding it at four o'clock on a Friday — it is being read out activity by activity in
+the review. So the log's **% complete** cell writes through
 `src/app/testProgress.ts`, the same upsert both screens use: one file, one set of
 rules about when a row is created and when it is dropped. There is no copy and
 nothing to reconcile — the percent complete, the earned hours and the curve all move
@@ -519,7 +540,7 @@ on the next render.
 
 Creating the library key was only half of it. A forced-in activity can reach IN
 BUDGET and still carry **zero hours**, which is the failure that looks like success:
-the row says IN BUDGET, Test Progress lists it, and it adds nothing to any total.
+the row says IN BUDGET, the Progress screen lists it, and it adds nothing to any total.
 Three causes, none visible from the row:
 
 - a P6 original duration of zero (a milestone);
@@ -602,6 +623,27 @@ It deliberately does **not** show to-complete or at-completion. Those divide the
 whole remaining budget by a rate, and a remaining budget is not something one
 fiscal year has — quoting one per year would be inventing a number. The
 whole-project forecast stays in its own panel underneath, labelled as such.
+
+### One derivation, four tables and five sheets
+
+`fiscalYearDetail(months, startMonth)` returns each fiscal year with its groups
+broken out, and each of those groups with the months that made it up. Everything on
+Earned vs Actual that is cut by year reads that one structure — the year table, the
+by-group table under a selected year, the months under a selected group, and the
+per-group detail under the forecast — and so does `earnedVsActualSheets()` in
+`src/app/export.ts`, which writes `Earned_vs_Actual`, `Fiscal_Year`, `FY_By_Group`,
+`FY_By_Group_Month` and `Forecast_By_Group`.
+
+That sharing is the point rather than a tidiness. A workbook somebody takes into a
+funding meeting and a screen somebody reads it off must not be able to disagree, and
+two independent pivots of the same months is exactly how they come to.
+
+The four figures every one of these tables reports — earned, built, variance, factor
+— are also defined once, by `coreColumns()` in `TeamHours.tsx`. A month, a fiscal
+year, a group inside a year and a group's own months are the same question asked at
+different resolutions; giving each its own hand-written column list is how the
+labels drift apart and a reader starts wondering whether "Variance" means the same
+thing two tables down.
 
 ## Locations nobody uses
 
@@ -735,15 +777,8 @@ folder they never unlinked.
   on by default, is a per-machine preference in the browser rather than a stored setting,
   and backs off after a failed write until the next edit so a folder that has gone offline
   cannot produce an error every second. Save now stays on the bar, and turning auto-save
-  off restores write-only-on-Save. Imports and snapshots are written when confirmed,
-  as before.
+  off restores write-only-on-Save. Imports are written when confirmed, as before.
 - Imports are append only.
-- Snapshots are never *edited*: a correction is a new snapshot, not a rewrite. The two
-  exceptions are deliberate and explicit, and both act on a named file rather than on a
-  status date (two snapshots can share one). **Hiding** sets `hidden` and rewrites that
-  one file; the lines, the status date and the taken-at are untouched. **Deleting**
-  removes the file, and there is no other copy. Both go through `isSnapshotFile()`, so a
-  path outside `snapshots/` is refused rather than obeyed.
 
 ## Where the data can live
 
@@ -760,10 +795,10 @@ cannot tell them apart.
   API is unavailable or declined.
 - **Memory**, for tests and for looking around without saving.
 
-A whole-store backup (settings, library, locations, overrides, test progress, both
-schedules and every snapshot) downloads as one JSON file and restores into any of them,
-which is also how you move between machines. A restore replaces the edited files but
-*appends* the schedules and snapshots, so the append-only history is never rewritten.
+A whole-store backup (settings, library, locations, overrides, progress and both
+schedules) downloads as one JSON file and restores into any of them, which is also how
+you move between machines. A restore replaces the edited files but *appends* the
+schedules, so the append-only import history is never rewritten.
 
 ## Crews, and who the hours belong to
 

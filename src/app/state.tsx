@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { Model, ModelInput, ScheduleImport, ImportKind, ImportIndexEntry, Snapshot, P6Activity } from '../engine/types';
-import { computeModel, buildSnapshot } from '../engine/compute';
+import type { Model, ModelInput, ScheduleImport, ImportKind, ImportIndexEntry, P6Activity } from '../engine/types';
+import { computeModel } from '../engine/compute';
 import { discoverLibrary, discoverLocations } from '../engine/discover';
 import type { StorageAdapter } from '../storage/adapter';
 import { FileSystemAdapter } from '../storage/fileSystemAdapter';
@@ -78,11 +78,6 @@ export type AppActions = {
   commitImport(kind: ImportKind, activities: P6Activity[], sourceFilename: string): Promise<void>;
   restoreImport(entry: ImportIndexEntry): Promise<void>;
   readImport(entry: ImportIndexEntry): Promise<ScheduleImport | null>;
-  takeSnapshot(statusDate: string, note?: string): Promise<void>;
-  /** Keep the record, take it off the S-curve (or put it back). */
-  setSnapshotHidden(snap: Snapshot, hidden: boolean): Promise<void>;
-  /** Delete the snapshot file. There is no other copy. */
-  deleteSnapshot(snap: Snapshot): Promise<void>;
   writeExport(name: string, bytes: Uint8Array): Promise<string>;
   listFolderFiles(): Promise<string[]>;
   readFolderFile(path: string): Promise<string | null>;
@@ -454,8 +449,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /**
    * Restore a backup over the current store. Settings, library, locations, overrides and
-   * test progress are replaced; the schedules in the backup are appended as new imports
-   * and snapshots as new files, so the append-only history is never rewritten.
+   * progress are replaced; the schedules in the backup are appended as new imports, so
+   * the append-only import history is never rewritten.
    */
   const restoreBundle = useCallback(async (bundle: Bundle) => {
     const store = storeRef.current;
@@ -477,10 +472,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!imp) continue;
       const res = await store.appendImport({ ...imp, id: importStamp(), importedAt: new Date().toISOString(), sourceFilename: `restored from backup (${imp.sourceFilename})` }, index);
       index = res.index;
-    }
-    const have = new Set(stateRef.current.data.snapshots.map((s) => `${s.statusDate}|${s.takenAt}`));
-    for (const snap of b.snapshots ?? []) {
-      if (!have.has(`${snap.statusDate}|${snap.takenAt}`)) await store.appendSnapshot(snap);
     }
     await reload();
     notify('ok', 'Backup restored.');
@@ -507,48 +498,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       teamActuals: d.teamActuals,
       current: d.current?.activities ?? [],
       baseline: d.baseline?.activities ?? null,
-      snapshots: d.snapshots,
     };
     return computeModel(input);
   }, [state.data]);
-
-  const takeSnapshot = useCallback(
-    async (statusDate: string, note?: string) => {
-      const store = storeRef.current;
-      if (!store) throw new Error('No storage open');
-      const snap: Snapshot = buildSnapshot(model, statusDate, note);
-      // Keep the path it was written to, so it can be hidden or deleted straight
-      // away rather than only after the next reload.
-      const file = await store.appendSnapshot(snap);
-      setState((s) => ({ ...s, data: { ...s.data, snapshots: [...s.data.snapshots, { ...snap, file }] } }));
-      notify('ok', `Snapshot for ${statusDate} written (${snap.lines.length} lines).`);
-    },
-    [model, notify],
-  );
-
-  /**
-   * Both of these act on the snapshot's own file, matched by path rather than by
-   * status date: two snapshots can share a date, and picking the wrong one would
-   * silently rewrite somebody's audit trail.
-   */
-  const setSnapshotHidden = useCallback(async (snap: Snapshot, hidden: boolean) => {
-    const store = storeRef.current;
-    if (!store) throw new Error('No storage open');
-    if (!snap.file) throw new Error('This snapshot has no file to write to. Reload the folder and try again.');
-    const next: Snapshot = { ...snap, hidden: hidden || undefined };
-    await store.writeSnapshot(snap.file, next);
-    setState((s) => ({ ...s, data: { ...s.data, snapshots: s.data.snapshots.map((x) => (x.file === snap.file ? next : x)) } }));
-    notify('ok', hidden ? `Snapshot for ${snap.statusDate} taken off the curve. It is still stored.` : `Snapshot for ${snap.statusDate} is back on the curve.`);
-  }, [notify]);
-
-  const deleteSnapshot = useCallback(async (snap: Snapshot) => {
-    const store = storeRef.current;
-    if (!store) throw new Error('No storage open');
-    if (!snap.file) throw new Error('This snapshot has no file to delete. Reload the folder and try again.');
-    await store.deleteSnapshot(snap.file);
-    setState((s) => ({ ...s, data: { ...s.data, snapshots: s.data.snapshots.filter((x) => x.file !== snap.file) } }));
-    notify('ok', `Snapshot for ${snap.statusDate} deleted.`);
-  }, [notify]);
 
   const writeExport = useCallback(async (name: string, bytes: Uint8Array) => {
     const store = storeRef.current;
@@ -568,8 +520,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const readFolderBinary = useCallback(async (path: string) => storeRef.current?.adapter.readBinary(path) ?? null, []);
 
   const actions = useMemo<AppActions>(
-    () => ({ chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, takeSnapshot, setSnapshotHidden, deleteSnapshot, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify }),
-    [chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, takeSnapshot, setSnapshotHidden, deleteSnapshot, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify],
+    () => ({ chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify }),
+    [chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify],
   );
 
   return <AppContext.Provider value={{ state, model, actions }}>{children}</AppContext.Provider>;

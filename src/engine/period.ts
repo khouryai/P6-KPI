@@ -110,8 +110,6 @@ export type PeriodActivity = {
   spreadToDataDate: boolean;
   /** Calendar days between the baseline finish and the actual one. Negative is early. */
   finishVarianceDays: number | null;
-  testsTotal: number | null;
-  testsComplete: number | null;
 };
 
 /**
@@ -339,8 +337,6 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
       progressAsOf: r.progressAsOf,
       spreadToDataDate: r.earnWindowSource === 'IN PROGRESS' && Math.abs(earnedHours) > 1e-9,
       finishVarianceDays: r.baselineFinish && actualFinish ? daysBetween(r.baselineFinish, actualFinish) : null,
-      testsTotal: r.testsTotal,
-      testsComplete: r.testsComplete,
     });
   }
 

@@ -64,14 +64,12 @@ describe('rollups', () => {
     expect([...h].sort((a, b) => b - a)).toEqual(h);
   });
 
-  it('counts progress state and test coverage per group', () => {
+  it('counts progress state and keyed coverage per group', () => {
     const a10 = model.groups.location.find((g) => g.key === 'A10')!;
     // A10 has a finished pair, one in progress, one with a test window override.
     expect(a10.inBudget).toBeGreaterThan(0);
     expect(a10.finished + a10.inProgress + a10.notStarted).toBe(a10.inBudget);
-    expect(a10.withCounts).toBe(2); // FA-0010 and FA-0030 carry test counts
-    expect(a10.testsTotal).toBe(40);
-    expect(a10.testsComplete).toBe(37);
+    expect(a10.withKeyedPct).toBe(3); // FA-0010, FA-0020 and FA-0030 carry a keyed percent
     expect(a10.pctComplete).toBeCloseTo(a10.earnedHours / a10.budgetHours, 9);
   });
 
@@ -83,7 +81,7 @@ describe('rollups', () => {
       makeActivity({ activityId: '0-P3-AC-SW-SW-0020', sortOrder: 2 }),
       makeActivity({ activityId: '0-SW-TC-TF-FA-0000', sortOrder: 3 }),
     ];
-    const m = computeModel({ settings: { ...DEFAULT_SETTINGS, dataDate: '2026-08-31' }, locations: [], library: lib, overrides: [], testProgress: [], current: acts, baseline: null, snapshots: [] });
+    const m = computeModel({ settings: { ...DEFAULT_SETTINGS, dataDate: '2026-08-31' }, locations: [], library: lib, overrides: [], testProgress: [], current: acts, baseline: null });
     // The SW activity joins Phase 2 rather than standing as a phase of its own.
     expect(m.groups.phase.map((g) => g.label).sort()).toEqual(['Phase 2', 'Phase 3']);
     const p3 = m.groups.phase.find((g) => g.key === 'P3')!;

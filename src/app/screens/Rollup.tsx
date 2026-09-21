@@ -140,16 +140,16 @@ export function Rollup() {
     },
     {
       key: 'counts',
-      label: 'Test coverage',
-      value: (g) => (g.inBudget ? g.withCounts / g.inBudget : 0),
+      label: '% keyed',
+      value: (g) => (g.inBudget ? g.withKeyedPct / g.inBudget : 0),
       num: true,
+      hint: 'In-budget activities whose percent complete somebody typed. The rest fall back to P6 duration, which is the weaker figure.',
       render: (g) => (
-        <span className={g.withCounts === g.inBudget ? 'text-[var(--good)]' : 'text-[var(--text-muted)]'}>
-          {g.withCounts}/{g.inBudget}
+        <span className={g.withKeyedPct === g.inBudget ? 'text-[var(--good)]' : 'text-[var(--text-muted)]'}>
+          {g.withKeyedPct}/{g.inBudget}
         </span>
       ),
     },
-    { key: 'tests', label: 'Test cases', value: (g) => g.testsTotal, num: true, render: (g) => (g.testsTotal ? `${g.testsComplete}/${g.testsTotal}` : '') },
     { key: 'start', label: 'First start', value: (g) => g.earliestStart, render: (g) => fmtDate(g.earliestStart) },
     { key: 'finish', label: 'Last finish', value: (g) => g.latestFinish, render: (g) => fmtDate(g.latestFinish) },
   ];

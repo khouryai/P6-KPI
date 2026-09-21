@@ -55,10 +55,8 @@ function ChartKey() {
 /** The option that opens the box for a reason the list does not have yet. */
 const ADD_REASON = '__add-a-reason__';
 
-/** What Test Progress holds for one activity, as this screen reads and writes it. */
+/** What Progress holds for one activity, as this screen reads and writes it. */
 type TestProgressEntry = {
-  testsTotal?: number;
-  testsComplete?: number;
   pctOverride?: number;
   testStartOverride?: string;
   testEndOverride?: string;
@@ -317,10 +315,10 @@ export function PeriodLog() {
       },
     },
     /*
-     * The reviewer's own words on the row, keyed here and stored on Test Progress.
+     * The reviewer's own words on the row, keyed here and stored on Progress.
      *
      * One field, not a copy on each screen — the same upsert the test counts go
-     * through — so a note written at a review is the note Test Progress shows, and
+     * through — so a note written at a review is the note Progress shows, and
      * there is nothing to reconcile afterwards. It is deliberately not the Budget
      * Master note, which explains a pricing or visibility decision: "waiting on the
      * CTC cutover" and "re-priced, agreed with the client" are different sentences
@@ -330,13 +328,13 @@ export function PeriodLog() {
       key: 'note',
       label: 'Progress note',
       value: (a) => keyed(a.activityId)?.note ?? '',
-      hint: 'Anything about this activity worth saying at the review. Kept against the Activity ID, and the same field Test Progress shows — write it in either place.',
+      hint: 'Anything about this activity worth saying at the review. Kept against the Activity ID, and the same field Progress shows — write it in either place.',
       render: (a) => (
         <CellInput
           className="cell-input"
           value={keyed(a.activityId)?.note ?? ''}
           placeholder="—"
-          title={keyed(a.activityId)?.note || 'Your own words on this activity. Writes straight to Test Progress, where the same note can be edited.'}
+          title={keyed(a.activityId)?.note || 'Your own words on this activity. Writes straight to Progress, where the same note can be edited.'}
           onCommit={(v) => setTestProgress(actions.update, a.activityId, { note: v })}
         />
       ),
@@ -454,7 +452,7 @@ export function PeriodLog() {
      * A review is where somebody says "that was really finished on the 2nd", and
      * sending them to another screen to key it is how the correction never gets
      * made. These write the test window override through the same upsert the test
-     * counts go through, so what is typed here IS what Test Progress shows — and
+     * counts go through, so what is typed here IS what Progress shows — and
      * the earn window, the month the hours land in and this row's own outcome all
      * move on the next render.
      */
@@ -462,7 +460,7 @@ export function PeriodLog() {
       key: 'as',
       label: 'Actual start',
       value: (a) => a.actualStart,
-      hint: 'When the activity really began: your keyed date, or P6’s actual start. Editable — typing here writes the test start on Test Progress, and clearing it hands the date back to P6.',
+      hint: 'When the activity really began: your keyed date, or P6’s actual start. Editable — typing here writes the test start on Progress, and clearing it hands the date back to P6.',
       render: (a) => (
         <ActualDateCell
           shown={a.actualStart}
@@ -541,62 +539,26 @@ export function PeriodLog() {
         ),
     },
     /*
-     * Test progress, keyed here rather than on the screen that owns it.
+     * Percent complete, keyed here rather than on the screen that owns it.
      *
-     * These write to `test-progress.json` through exactly the path the Test Progress
-     * screen writes through, so a count keyed during a review IS the count on that
-     * screen — the percent complete, the earned hours, the curve and this very log
-     * all move on the next render. There is no copy of this data and nothing to
-     * reconcile afterwards.
+     * This writes to `test-progress.json` through exactly the path the Progress
+     * screen writes through, so a percent keyed during a review IS the percent on
+     * that screen — the earned hours, the curve and this very log all move on the
+     * next render. There is no copy of this data and nothing to reconcile afterwards.
      */
     {
-      key: 'ttot',
-      label: 'Tests',
-      value: (a) => a.testsTotal,
-      num: true,
-      hint: 'Test cases in this activity’s pack. Keyed here, stored on Test Progress: this is the same field, not a copy of it.',
-      render: (a) => (
-        <CellInput
-          type="number"
-          className="cell-input text-right"
-          value={keyed(a.activityId)?.testsTotal?.toString() ?? ''}
-          placeholder="—"
-          title="Test cases in the pack. Writes straight to Test Progress."
-          onCommit={(v) => setTestProgress(actions.update, a.activityId, { testsTotal: num(v) })}
-        />
-      ),
-    },
-    {
-      key: 'tdone',
-      label: 'Done',
-      value: (a) => a.testsComplete,
-      num: true,
-      hint: 'Test cases passed. With a total keyed, this is what the activity’s percent complete is worked out from.',
-      render: (a) => (
-        <CellInput
-          type="number"
-          className="cell-input text-right"
-          value={keyed(a.activityId)?.testsComplete?.toString() ?? ''}
-          placeholder="—"
-          title="Test cases passed. Writes straight to Test Progress."
-          onCommit={(v) => setTestProgress(actions.update, a.activityId, { testsComplete: num(v) })}
-        />
-      ),
-    },
-    {
       key: 'tov',
-      label: '% override',
+      label: '% complete',
       value: (a) => keyed(a.activityId)?.pctOverride ?? null,
       num: true,
-      optional: true,
-      hint: 'A percent complete keyed by hand. It beats the test counts. 0 to 1, or a percentage.',
+      hint: 'The percent complete you key by hand. It beats P6’s durations. 0 to 1, or a percentage.',
       render: (a) => (
         <CellInput
           type="number"
           className="cell-input text-right"
           value={keyed(a.activityId)?.pctOverride?.toString() ?? ''}
           placeholder="—"
-          title="Beats the test counts. 0 to 1, or a percentage. Writes straight to Test Progress."
+          title="Your own percent complete. Beats P6’s durations. 0 to 1, or a percentage. Writes straight to Progress."
           onCommit={(v) => setTestProgress(actions.update, a.activityId, { pctOverride: asFraction(num(v)) })}
         />
       ),
@@ -924,7 +886,7 @@ export function PeriodLog() {
           Outcomes are read off the <b>actual dates</b> — your keyed date where there is one, otherwise P6's actual date — and never off a planned date. An activity that
           beat its baseline reads <b>COMPLETED</b> in the fortnight it finished and <b>COMPLETED EARLY</b> in any later one its baseline ran on into: it is finished and it
           stays finished, without inflating what this fortnight actually got done. <b>Actual start</b> and <b>Actual finish</b> are editable here — typing one writes the
-          test window date on <a href={href('progress')}>Test Progress</a>, which is the same field, so the earn window, the month those hours land in and this row's own
+          test window date on <a href={href('progress')}>Progress</a>, which is the same field, so the earn window, the month those hours land in and this row's own
           outcome all move with it; clearing the box hands the date back to P6. A green <b>✎</b> means you keyed the date, a grey <b>A</b> means it is P6's.
         </p>
         <p className="mt-1 text-[12px] text-[var(--text-muted)]">
@@ -936,7 +898,7 @@ export function PeriodLog() {
         <p className="mt-1 text-[12px] text-[var(--text-muted)]">
           <b>Phase achieved</b> is this row's own contribution to its phase, the same way <b>{percent ? 'Project achieved' : 'Project achieved h'}</b> is its contribution to
           the job, so the rows of a phase add up to how far that phase moved. <b>Why missed</b> and <b>Progress note</b> stay with the Activity ID: the note is the same
-          field Test Progress shows, and a reason keyed for a neighbouring period is carried rather than lost when the end date moves.
+          field Progress shows, and a reason keyed for a neighbouring period is carried rather than lost when the end date moves.
         </p>
       </Panel>
     </Page>

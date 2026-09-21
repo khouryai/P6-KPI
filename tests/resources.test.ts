@@ -13,7 +13,7 @@ import { DEFAULT_SETTINGS, type LibraryEntry } from '../src/engine/types';
 import { makeActivity } from './helpers';
 
 const S = { ...DEFAULT_SETTINGS, dataDate: '2026-08-31', statusDate: '2026-08-31' };
-const base = { settings: S, locations: [], overrides: [], testProgress: [], baseline: null, snapshots: [] };
+const base = { settings: S, locations: [], overrides: [], testProgress: [], baseline: null };
 
 /** One activity of one type, priced by the entry given. */
 function modelOf(entry: LibraryEntry, activityType = 'Test Type') {

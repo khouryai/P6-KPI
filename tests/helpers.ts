@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { readWorkbook, parseWorkbookSheet } from '../src/engine/workbook';
-import type { ModelInput, P6Activity, Settings, Location, LibraryEntry, ActivityOverride, TestProgress, Snapshot } from '../src/engine/types';
+import type { ModelInput, P6Activity, Settings, Location, LibraryEntry, ActivityOverride, TestProgress } from '../src/engine/types';
 
 export const FIXTURE_DIR = resolve(process.cwd(), 'fixtures');
 
@@ -11,7 +11,6 @@ export type FixtureInputs = {
   library: LibraryEntry[];
   overrides: ActivityOverride[];
   testProgress: TestProgress[];
-  snapshots: Snapshot[];
 };
 
 export function loadFixtureInputs(): FixtureInputs {
@@ -48,7 +47,6 @@ export function fixtureModelInput(overrides: Partial<ModelInput> = {}): ModelInp
     testProgress: inputs.testProgress,
     current: wb.current.activities,
     baseline: wb.baseline.activities,
-    snapshots: inputs.snapshots,
     ...overrides,
   };
 }

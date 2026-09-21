@@ -4,7 +4,7 @@ import { parseTable, parseTsv, parseCsv, activityTypeOf, locationOf, seqCodeOf }
 import { discoverLibrary, discoverLocations } from '../src/engine/discover';
 import { indexLibrary, resolveMatchKey } from '../src/engine/match';
 import { accruedFraction } from '../src/engine/curves';
-import { computeModel, buildSnapshot, effectiveInclude, buildCurve, rowTotals, assignSubsystem, setCrewCount, effectiveCrew, crewWeights, isOnDefaults } from '../src/engine/compute';
+import { computeModel, effectiveInclude, buildCurve, rowTotals, assignSubsystem, setCrewCount, effectiveCrew, crewWeights, isOnDefaults } from '../src/engine/compute';
 import { DEFAULT_SETTINGS, type LibraryEntry } from '../src/engine/types';
 import { fixtureModelInput, loadExpected, loadFixtureWorkbook, makeActivity, FIXTURE_DIR } from './helpers';
 import { readFileSync } from 'node:fs';
@@ -260,17 +260,9 @@ describe('fixture acceptance', () => {
     expect(model.summary.typesNeedingShifts).toBe(1);
   });
 
-  it('warns on test progress rows that do not match a budgeted activity', () => {
+  it('warns on progress rows that do not match a budgeted activity', () => {
     const bad = model.testProgressChecks.filter((c) => !c.matched);
     expect(bad.map((c) => c.status).sort()).toEqual(['not budgeted', 'not in extract']);
-  });
-
-  it('plots snapshots as markers, not as the curve', () => {
-    expect(model.snapshotMarkers).toEqual([{ statusDate: '2026-07-31', earnedHours: 210, budgetHours: 210 }]);
-    expect(model.curve.find((c) => c.periodEnd === '2026-07-31')!.snapshot).toBe(210);
-    const snap = buildSnapshot(model, '2026-08-31', 'test', '2026-09-01T00:00:00Z');
-    expect(snap.lines.length).toBe(model.summary.inBudget);
-    expect(snap.lines.reduce((s, l) => s + l.earnedHours, 0)).toBeCloseTo(267);
   });
 
   it('falls back to current dates and says so when the baseline lacks the activity', () => {
@@ -284,30 +276,32 @@ describe('edge rules', () => {
   const lib: LibraryEntry[] = [{ matchKey: 'Test Type', basis: 'RATE', crewSize: 2, shiftHours: 10, durationShifts: 4 }];
   it('unpriced types fall back to defaults so the first import has a usable total', () => {
     const a = makeActivity({ activityId: '0-P2-TC-X10-FA-0010', originalDuration: 5 });
-    const m = computeModel({ settings: S, locations: [], library: [{ matchKey: 'Test Type' }], overrides: [], testProgress: [], current: [a], baseline: null, snapshots: [] });
+    const m = computeModel({ settings: S, locations: [], library: [{ matchKey: 'Test Type' }], overrides: [], testProgress: [], current: [a], baseline: null });
     expect(m.rows[0].budgetHours).toBe(2 * 8 * 5);
     expect(m.library[0].rateStatus).toBe('DEFAULT');
     expect(m.notes.some((n) => n.includes('No baseline'))).toBe(true);
   });
-  it('percent complete priority: override, tests, then P6 duration', () => {
+  it('percent complete is the one you keyed, otherwise P6 duration', () => {
     const a = makeActivity({ activityId: 'A', originalDuration: 10, remainingDuration: 2 });
-    const base = { settings: S, locations: [], library: lib, overrides: [], current: [a], baseline: null, snapshots: [] };
+    const base = { settings: S, locations: [], library: lib, overrides: [], current: [a], baseline: null };
     expect(computeModel({ ...base, testProgress: [] }).rows[0]).toMatchObject({ pctComplete: 0.8, pctSource: 'P6' });
-    expect(computeModel({ ...base, testProgress: [{ activityId: 'A', testsTotal: 4, testsComplete: 1, updatedAt: '' }] }).rows[0]).toMatchObject({ pctComplete: 0.25, pctSource: 'TESTS' });
-    expect(computeModel({ ...base, testProgress: [{ activityId: 'A', testsTotal: 4, testsComplete: 1, pctOverride: 0.5, updatedAt: '' }] }).rows[0]).toMatchObject({ pctComplete: 0.5, pctSource: 'OVERRIDE' });
-    expect(computeModel({ ...base, testProgress: [{ activityId: 'A', testsTotal: 0, testsComplete: 1, updatedAt: '' }] }).rows[0].pctSource).toBe('P6');
+    expect(computeModel({ ...base, testProgress: [{ activityId: 'A', pctOverride: 0.5, updatedAt: '' }] }).rows[0]).toMatchObject({ pctComplete: 0.5, pctSource: 'OVERRIDE' });
+    // Keying zero is a statement, not an absence: it must not fall back to P6's 80%.
+    expect(computeModel({ ...base, testProgress: [{ activityId: 'A', pctOverride: 0, updatedAt: '' }] }).rows[0]).toMatchObject({ pctComplete: 0, pctSource: 'OVERRIDE' });
+    // A row carrying only a note says nothing about progress, so P6 still answers.
+    expect(computeModel({ ...base, testProgress: [{ activityId: 'A', note: 'waiting on access', updatedAt: '' }] }).rows[0].pctSource).toBe('P6');
     const done = makeActivity({ activityId: 'B', originalDuration: 10, remainingDuration: 10, actualFinish: true, finishDate: '2026-01-01' });
     expect(computeModel({ ...base, current: [done], testProgress: [] }).rows[0].pctComplete).toBe(1);
   });
   it('earn end never precedes earn start', () => {
     const a = makeActivity({ activityId: 'A', actualStart: true, startDate: '2026-09-15', actualFinish: false });
-    const m = computeModel({ settings: S, locations: [], library: lib, overrides: [], testProgress: [], current: [a], baseline: null, snapshots: [] });
+    const m = computeModel({ settings: S, locations: [], library: lib, overrides: [], testProgress: [], current: [a], baseline: null });
     expect(m.rows[0].earnStart).toBe('2026-09-15');
     expect(m.rows[0].earnEnd).toBe('2026-09-15');
   });
   it('an activity with no dates at all counts in the total but on no curve', () => {
     const a = makeActivity({ activityId: 'A' });
-    const m = computeModel({ settings: S, locations: [], library: lib, overrides: [], testProgress: [], current: [a], baseline: null, snapshots: [] });
+    const m = computeModel({ settings: S, locations: [], library: lib, overrides: [], testProgress: [], current: [a], baseline: null });
     expect(m.summary.totalBudgetHours).toBe(80);
     expect(m.summary.onNoCurve).toBe(1);
     expect(m.curve.every((c) => c.planned === 0 && c.forecast === 0)).toBe(true);
@@ -320,11 +314,11 @@ describe('a curve for one phase', () => {
     makeActivity({ activityId: '0-P2-TC-X10-FA-0010', startDate: '2026-07-01', finishDate: '2026-07-31', actualStart: true, actualFinish: true, originalDuration: 10, remainingDuration: 0 }),
     makeActivity({ activityId: '0-P3-TC-X10-FA-0020', startDate: '2026-08-01', finishDate: '2026-08-31', originalDuration: 10, remainingDuration: 10 }),
   ];
-  const m = computeModel({ settings: S, locations: [], library: lib, overrides: [], testProgress: [], current: acts, baseline: null, snapshots: [] });
+  const m = computeModel({ settings: S, locations: [], library: lib, overrides: [], testProgress: [], current: acts, baseline: null });
 
   it('splits the programme curve into phases that add back to it', () => {
-    const p2 = buildCurve(m.rows.filter((r) => r.phase === 'P2'), [], S.dataDate).curve;
-    const p3 = buildCurve(m.rows.filter((r) => r.phase === 'P3'), [], S.dataDate).curve;
+    const p2 = buildCurve(m.rows.filter((r) => r.phase === 'P2'), S.dataDate).curve;
+    const p3 = buildCurve(m.rows.filter((r) => r.phase === 'P3'), S.dataDate).curve;
     const at = (c: typeof p2, iso: string) => c.find((x) => x.periodEnd === iso);
     expect(at(p2, '2026-07-31')!.forecast).toBe(10);
     // A phase's curve spans that phase's own dates: P3 has nothing to say about July.
@@ -333,7 +327,7 @@ describe('a curve for one phase', () => {
   });
 
   it('shows a phase as a share of its own budget, not of the programme', () => {
-    const p2 = buildCurve(m.rows.filter((r) => r.phase === 'P2'), [], S.dataDate).curve;
+    const p2 = buildCurve(m.rows.filter((r) => r.phase === 'P2'), S.dataDate).curve;
     expect(p2[p2.length - 1].plannedPct).toBe(1);
     expect(m.curve[m.curve.length - 1].plannedPct).toBe(1);
     const t = rowTotals(m.rows.filter((r) => r.phase === 'P2'));
@@ -342,23 +336,6 @@ describe('a curve for one phase', () => {
     expect(t.pctComplete).toBe(1);
     expect(t.inBudget).toBe(1);
     expect(t.finished).toBe(1);
-  });
-
-  it('counts only the snapshot lines belonging to the rows on the curve', () => {
-    const snaps = [{
-      statusDate: '2026-07-31',
-      takenAt: '2026-08-01T00:00:00Z',
-      lines: [
-        { activityId: '0-P2-TC-X10-FA-0010', pctComplete: 1, budgetHours: 10, earnedHours: 10 },
-        { activityId: '0-P3-TC-X10-FA-0020', pctComplete: 0, budgetHours: 10, earnedHours: 0 },
-      ],
-    }];
-    const whole = buildCurve(m.rows, snaps, S.dataDate).curve;
-    const p2 = buildCurve(m.rows.filter((r) => r.phase === 'P2'), snaps, S.dataDate).curve;
-    expect(whole.find((c) => c.periodEnd === '2026-07-31')!.snapshot).toBe(10);
-    expect(p2.find((c) => c.periodEnd === '2026-07-31')!.snapshot).toBe(10);
-    const p3 = buildCurve(m.rows.filter((r) => r.phase === 'P3'), snaps, S.dataDate).curve;
-    expect(p3.find((c) => c.periodEnd === '2026-07-31')!.snapshot).toBe(0);
   });
 
   it('totals the whole programme to the same hours as the summary', () => {
@@ -372,7 +349,7 @@ describe('a curve for one phase', () => {
   it('counts activities the way the phase tiles do, over budgeted rows only', () => {
     const excluded = makeActivity({ activityId: '0-P2-TC-X10-FA-0030', activityName: '[T&C] X10 (Ph2) - Skip Me' });
     const withExcluded = computeModel({
-      settings: S, locations: [], overrides: [], testProgress: [], baseline: null, snapshots: [],
+      settings: S, locations: [], overrides: [], testProgress: [], baseline: null,
       library: [...lib, { matchKey: 'Skip Me', includeOverride: 'N' }],
       current: [...acts, excluded],
     });

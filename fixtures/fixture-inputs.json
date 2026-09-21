@@ -5,8 +5,7 @@
     "defaultCrew": 2,
     "defaultShiftHours": 8,
     "defaultComplexity": 1,
-    "dataDate": "2026-08-31",
-    "statusDate": "2026-08-31"
+    "dataDate": "2026-08-31"
   },
   "locations": [
     {
@@ -101,7 +100,7 @@
       "durationShifts": 1
     },
     {
-      "matchKey": "Sim Mode Test (Adjacent Location) (DF: A10 → B20)",
+      "matchKey": "Sim Mode Test (Adjacent Location) (DF: A10 \u2192 B20)",
       "discipline": "IXL",
       "basis": "RATE",
       "crewSize": 2,
@@ -109,7 +108,7 @@
       "durationShifts": 4
     },
     {
-      "matchKey": "Sim Mode Test (Adjacent Location) (DF: B20 → A10)",
+      "matchKey": "Sim Mode Test (Adjacent Location) (DF: B20 \u2192 A10)",
       "discipline": "IXL",
       "basis": "RATE",
       "crewSize": 2,
@@ -117,7 +116,7 @@
       "durationShifts": 4
     },
     {
-      "matchKey": "Sim Mode Test (Adjacent Location) (DF: C30 → B20)",
+      "matchKey": "Sim Mode Test (Adjacent Location) (DF: C30 \u2192 B20)",
       "discipline": "IXL",
       "basis": "RATE",
       "crewSize": 2,
@@ -125,7 +124,7 @@
       "durationShifts": 4
     },
     {
-      "matchKey": "Sim Mode Test (Adjacent Location) (DF: B20 → C30)",
+      "matchKey": "Sim Mode Test (Adjacent Location) (DF: B20 \u2192 C30)",
       "discipline": "IXL",
       "basis": "RATE",
       "crewSize": 2,
@@ -147,8 +146,7 @@
   "testProgress": [
     {
       "activityId": "0-P2-TC-A10-FA-0010",
-      "testsTotal": 30,
-      "testsComplete": 30,
+      "pctOverride": 1.0,
       "updatedAt": "2026-08-31T00:00:00Z"
     },
     {
@@ -160,60 +158,28 @@
     },
     {
       "activityId": "0-P2-TC-A10-FA-0030",
-      "testsTotal": 10,
-      "testsComplete": 7,
+      "pctOverride": 0.7,
       "updatedAt": "2026-08-31T00:00:00Z"
     },
     {
       "activityId": "0-P2-TC-C30-FA-0050",
-      "testsTotal": 4,
-      "testsComplete": 4,
+      "pctOverride": 1.0,
       "updatedAt": "2026-08-31T00:00:00Z"
     },
     {
       "activityId": "0-P2-TC-E50-FA-0010",
-      "testsTotal": 20,
-      "testsComplete": 5,
+      "pctOverride": 0.25,
       "updatedAt": "2026-08-31T00:00:00Z"
     },
     {
       "activityId": "  Phase 2",
-      "testsTotal": 100,
-      "testsComplete": 40,
+      "pctOverride": 0.4,
       "updatedAt": "2026-08-31T00:00:00Z"
     },
     {
       "activityId": "0-P2-TC-Z99-FA-0010",
-      "testsTotal": 10,
-      "testsComplete": 1,
+      "pctOverride": 0.1,
       "updatedAt": "2026-08-31T00:00:00Z"
-    }
-  ],
-  "snapshots": [
-    {
-      "statusDate": "2026-07-31",
-      "takenAt": "2026-08-01T09:00:00Z",
-      "note": "July status",
-      "lines": [
-        {
-          "activityId": "0-P2-TC-A10-FA-0010",
-          "pctComplete": 1,
-          "budgetHours": 80,
-          "earnedHours": 80
-        },
-        {
-          "activityId": "0-P2-TC-A10-FA-0020",
-          "pctComplete": 1,
-          "budgetHours": 80,
-          "earnedHours": 80
-        },
-        {
-          "activityId": "0-P2-TC-C30-FA-0050",
-          "pctComplete": 1,
-          "budgetHours": 50,
-          "earnedHours": 50
-        }
-      ]
     }
   ]
 }

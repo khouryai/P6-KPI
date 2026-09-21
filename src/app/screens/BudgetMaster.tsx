@@ -108,7 +108,7 @@ export function BudgetMaster({ route }: { route: Route }) {
    * purpose, since nobody wants a library full of dead work — and one whose key was
    * retired by hand. Forcing such an activity in used to move it from DELETED to
    * REVIEW and stop there: no rate could ever reach it, it carried no hours, and
-   * because both the Activity Library and Test Progress are lists of priced things,
+   * because both the Activity Library and Progress are lists of priced things,
    * it appeared in neither. It had been "included" into nowhere.
    *
    * So the key is created, or un-retired, in the same action. It arrives on the
@@ -408,7 +408,7 @@ export function BudgetMaster({ route }: { route: Route }) {
    * Forced in, in the budget, and worth nothing.
    *
    * This is the other half of "I forced it in and nothing happened", and it is the
-   * half that looks fine: the row says IN BUDGET, it appears on Test Progress, and
+   * half that looks fine: the row says IN BUDGET, it appears on Progress, and
    * it contributes zero to every total. Three things cause it — a P6 duration of
    * zero (a milestone), a duration P6 never supplied, and a RATE-basis key with no
    * shift count — and none of them are visible from the row.
@@ -523,7 +523,7 @@ export function BudgetMaster({ route }: { route: Route }) {
           <Notice tone="warn">
             <b>{forcedButUnpriced.length} {forcedButUnpriced.length === 1 ? 'activity is' : 'activities are'} forced into the budget but cannot be priced.</b> Their activity
             type has no live key in the <a href={href('library')}>Activity Library</a> — it was most likely retired after they were forced in. Until a key matches the type
-            exactly they carry no hours and stay out of Test Progress.{' '}
+            exactly they carry no hours and stay out of Progress.{' '}
             {[...new Set(forcedButUnpriced.map((r) => r.activityType))].slice(0, 4).map((t) => (
               <code key={t} className="mono mr-2">{t}</code>
             ))}

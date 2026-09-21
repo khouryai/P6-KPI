@@ -25,7 +25,6 @@ function modelOf(discipline: string, extra: Partial<ModelInput> = {}) {
     locations: [],
     overrides: [],
     testProgress: [],
-    snapshots: [],
     baseline: null,
     library: [{ matchKey: 'Test Type', discipline, crewSize: 1 }],
     current: [

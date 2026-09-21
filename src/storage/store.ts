@@ -6,7 +6,6 @@ import type {
   MissedReasonLog,
   ScheduleImport,
   Settings,
-  Snapshot,
   Subsystem,
   TeamActual,
   TestProgress,
@@ -29,7 +28,6 @@ export const FILES = {
 } as const;
 
 export type StoreFileKey = keyof typeof FILES;
-export const SNAPSHOT_DIR = 'snapshots';
 export const IMPORT_DIR = 'imports';
 export const EXPORT_DIR = 'exports';
 export const LOCK_FILE = '.lock';
@@ -46,7 +44,6 @@ export type StoreData = {
   subsystems: Subsystem[];
   teamActuals: TeamActual[];
   importsIndex: ImportIndexEntry[];
-  snapshots: Snapshot[];
   current: ScheduleImport | null;
   baseline: ScheduleImport | null;
 };
@@ -66,10 +63,37 @@ export function emptyStoreData(): StoreData {
     subsystems: [],
     teamActuals: [],
     importsIndex: [],
-    snapshots: [],
     current: null,
     baseline: null,
   };
+}
+
+/** A `test-progress.json` row as it may be on disk, counts and all. */
+type StoredTestProgress = TestProgress & { testsTotal?: number; testsComplete?: number };
+
+/**
+ * Turn test case counts into the percent complete they always stood for.
+ *
+ * Percent complete used to be derivable from a count of passed cases over a total.
+ * It no longer is — one keyed number is the whole contract — but every store in the
+ * field still holds rows written that way, and reading them as "nothing keyed"
+ * would quietly drop a person's progress back onto P6's durations and move the
+ * earned curve without saying so. So the counts are converted on the way in, using
+ * the formula that produced the figure in the first place, and the keyed percent
+ * that was already there always wins.
+ *
+ * The conversion is not written back here. It is applied to what the app holds, and
+ * the file is rewritten with the counts gone on the next save of that file, so a
+ * store opened and closed without edits is left exactly as it was found.
+ */
+export function migrateTestCounts(rows: StoredTestProgress[]): TestProgress[] {
+  return rows.map((raw) => {
+    const { testsTotal, testsComplete, ...rest } = raw;
+    if (rest.pctOverride !== undefined && rest.pctOverride !== null) return rest;
+    if (typeof testsTotal !== 'number' || !(testsTotal > 0)) return rest;
+    const done = typeof testsComplete === 'number' ? testsComplete : 0;
+    return { ...rest, pctOverride: Math.max(0, Math.min(1, done / testsTotal)) };
+  });
 }
 
 function parseJson<T>(text: string | null, fallback: T, path: string, problems: string[]): T {
@@ -101,7 +125,6 @@ const CANONICAL: RegExp[] = [
 ];
 const STEMS = ['settings', 'locations', 'activity-library', 'activity-overrides', 'test-progress', 'missed-reasons', 'subsystems', 'team-actuals'];
 const CANONICAL_IMPORT = /^(index|\d{4}-\d{2}-\d{2}T\d{4,6}-(current|baseline))\.json$/;
-const CANONICAL_SNAPSHOT = /^\d{4}-\d{2}-\d{2}(-\d+)?\.json$/;
 
 /**
  * A OneDrive conflict copy is "name-MACHINE.json", "name-MACHINE-1.json" or "name (1).json".
@@ -124,24 +147,7 @@ export function classifyConflict(path: string): ConflictCopy | null {
     if (CANONICAL_IMPORT.test(name)) return null;
     return { path, of: `${IMPORT_DIR}/${name.replace(/(-[^-.]+(-\d+)?| \(\d+\))\.json$/i, '.json')}` };
   }
-  if (dir === SNAPSHOT_DIR) {
-    if (CANONICAL_SNAPSHOT.test(name)) return null;
-    return { path, of: `${SNAPSHOT_DIR}/${name.replace(/(-[^-.]+(-\d+)?| \(\d+\))\.json$/i, '.json')}` };
-  }
   return null;
-}
-
-/** A guard on the two operations that can destroy history, so a bad path cannot. */
-export function isSnapshotFile(path: string): boolean {
-  const parts = path.split('/');
-  return parts.length === 2 && parts[0] === SNAPSHOT_DIR && CANONICAL_SNAPSHOT.test(parts[1]);
-}
-
-/** The record as it is stored: `file` is where it was read from, not part of it. */
-function snapshotRecord(snap: Snapshot): Omit<Snapshot, 'file'> {
-  const { file: _where, ...rest } = snap;
-  void _where;
-  return rest;
 }
 
 /**
@@ -165,7 +171,7 @@ export class Store {
     data.locations = parseJson<Location[]>(await a.read(FILES.locations), [], FILES.locations, problems);
     data.library = parseJson<LibraryEntry[]>(await a.read(FILES.library), [], FILES.library, problems);
     data.overrides = parseJson<ActivityOverride[]>(await a.read(FILES.overrides), [], FILES.overrides, problems);
-    data.testProgress = parseJson<TestProgress[]>(await a.read(FILES.testProgress), [], FILES.testProgress, problems);
+    data.testProgress = migrateTestCounts(parseJson<StoredTestProgress[]>(await a.read(FILES.testProgress), [], FILES.testProgress, problems));
     // Absent in every store written before the two-week log asked why an activity
     // was missed. An empty catalogue is the right reading of "nobody has said yet",
     // so a missing file is not a problem to report.
@@ -184,14 +190,6 @@ export class Store {
       if (imp) data[kind] = imp;
       else problems.push(`The latest ${kind} import (${latest.file}) is missing. Re-import or restore it from OneDrive.`);
     }
-    const snapFiles = (await a.list(SNAPSHOT_DIR)).filter((p) => classifyConflict(p) === null && p.endsWith('.json'));
-    for (const f of snapFiles.sort()) {
-      const s = parseJson<Snapshot | null>(await a.read(f), null, f, problems);
-      // Remember which file this came from, so a screen can hide or delete this exact
-      // snapshot. Two snapshots can share a status date, so the date is not a key.
-      if (s) data.snapshots.push({ ...s, file: f });
-    }
-    data.snapshots.sort((x, y) => x.statusDate.localeCompare(y.statusDate) || x.takenAt.localeCompare(y.takenAt));
     return { data, problems };
   }
 
@@ -218,31 +216,6 @@ export class Store {
     return text ? (JSON.parse(text) as ScheduleImport) : null;
   }
 
-  /**
-   * Snapshots are never edited in place: a new one is always a new file, so the
-   * history cannot be rewritten by accident. Hiding one and deleting one are the two
-   * deliberate exceptions, and both are explicit acts on a named file.
-   */
-  async appendSnapshot(snap: Snapshot): Promise<string> {
-    let file = `${SNAPSHOT_DIR}/${snap.statusDate}.json`;
-    let n = 1;
-    while (await this.adapter.exists(file)) file = `${SNAPSHOT_DIR}/${snap.statusDate}-${n++}.json`;
-    await this.adapter.write(file, JSON.stringify(snapshotRecord(snap), null, 2));
-    return file;
-  }
-
-  /** Rewrite one snapshot file, for the hidden flag. The lines are never touched. */
-  async writeSnapshot(file: string, snap: Snapshot): Promise<void> {
-    if (!isSnapshotFile(file)) throw new Error(`${file} is not a snapshot file`);
-    await this.adapter.write(file, JSON.stringify(snapshotRecord(snap), null, 2));
-  }
-
-  /** Delete one snapshot file. Gone for good: there is no other copy. */
-  async deleteSnapshot(file: string): Promise<void> {
-    if (!isSnapshotFile(file)) throw new Error(`${file} is not a snapshot file`);
-    await this.adapter.remove(file);
-  }
-
   async writeExport(name: string, bytes: Uint8Array): Promise<string> {
     const path = `${EXPORT_DIR}/${name}`;
     await this.adapter.writeBinary(path, bytes);
@@ -251,7 +224,7 @@ export class Store {
 
   async scanConflicts(): Promise<ConflictCopy[]> {
     const out: ConflictCopy[] = [];
-    for (const dir of ['', IMPORT_DIR, SNAPSHOT_DIR]) {
+    for (const dir of ['', IMPORT_DIR]) {
       for (const p of await this.adapter.list(dir)) {
         const c = classifyConflict(p);
         if (c) out.push(c);

@@ -18,7 +18,7 @@ export function Settings() {
   const exportXlsx = async () => {
     setBusy(true);
     try {
-      const wb = buildWorkbook(model, s, state.data.current?.activities ?? [], state.data.baseline?.activities ?? [], state.data.testProgress, state.data.snapshots, state.data.missedReasons);
+      const wb = buildWorkbook(model, s, state.data.current?.activities ?? [], state.data.baseline?.activities ?? [], state.data.testProgress, state.data.missedReasons);
       const bytes = workbookBytes(wb);
       const name = `TC_Budget_${stamp()}.xlsx`;
       if (state.adapterKind === 'filesystem') actions.notify('ok', `Workbook written to ${await actions.writeExport(name, bytes)}`);
@@ -42,7 +42,7 @@ export function Settings() {
   };
 
   const restore = async (file: File) => {
-    if (!confirm(`Restore from ${file.name}? Settings, library, locations, overrides and test progress are replaced. Schedules and snapshots in the backup are added alongside what you already have.`)) return;
+    if (!confirm(`Restore from ${file.name}? Settings, library, locations, overrides and progress are replaced. Schedules in the backup are added alongside what you already have.`)) return;
     try {
       const bundle = JSON.parse(await file.text()) as Bundle;
       await actions.restoreBundle(bundle);
@@ -66,9 +66,6 @@ export function Settings() {
           <h2 className="card-title">Dates</h2>
           <Field label="Data date" hint="The as-of date of the current P6 export. In-progress work earns from its actual start up to this date, and the earned curve stops here. Changing it moves the end of the earned curve.">
             <input className="input" type="date" value={s.dataDate} onChange={(e) => set({ dataDate: e.target.value })} />
-          </Field>
-          <Field label="Status date" hint="Proposed date for the next snapshot.">
-            <input className="input" type="date" value={s.statusDate} onChange={(e) => set({ statusDate: e.target.value })} />
           </Field>
         </div>
         <div className="card space-y-3">
@@ -138,7 +135,7 @@ export function Settings() {
         <div className="card space-y-3">
           <h2 className="card-title">Backup and restore</h2>
           <p className="text-[12px] text-[var(--text-muted)]">
-            One JSON file holding everything: settings, locations, the rate library, overrides, test progress, both schedules and every snapshot. Use it to move to another machine, or as a safety net when saving in the browser.
+            One JSON file holding everything: settings, locations, the rate library, overrides, progress and both schedules. Use it to move to another machine, or as a safety net when saving in the browser.
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <button className="btn" onClick={() => void backup()}>Download a backup</button>

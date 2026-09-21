@@ -10,7 +10,15 @@ import { normKey } from '../../engine/keys';
 import { fmtHours, fmtPct } from '../format';
 import { href } from '../router';
 import { readWorkbook, workbookGrid } from '../../engine/workbook';
-import { groupByFiscalYear, fyStart, fiscalYearOf, resourcesInYear, type FiscalYear, type ResourceYear } from '../../engine/fiscal';
+import {
+  fiscalYearDetail,
+  fyStart,
+  fiscalYearOf,
+  monthsForResource,
+  type FiscalYearDetail,
+  type ResourceMonth,
+  type ResourceYearDetail,
+} from '../../engine/fiscal';
 import { TERMS } from '../../engine/vocab';
 
 const GRID = '#e4e7ec';
@@ -18,15 +26,59 @@ const AXIS = '#6e7179';
 const EARNED = '#0b6bcb';
 const BUILT = '#e60012';
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 function monthLabel(m: string): string {
   const [y, mm] = m.split('-');
-  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${names[Number(mm) - 1] ?? mm} ${y.slice(2)}`;
+  return `${MONTH_NAMES[Number(mm) - 1] ?? mm} ${y.slice(2)}`;
 }
 
 function varianceTone(v: number): 'good' | 'bad' | 'muted' {
   if (Math.abs(v) < 0.5) return 'muted';
   return v >= 0 ? 'good' : 'bad';
+}
+
+/** A signed hours figure, coloured by which way it points. Used in a dozen tables. */
+function Variance({ v }: { v: number }) {
+  return (
+    <span className={`tone-${varianceTone(v)} font-semibold`}>
+      {v >= 0 ? '+' : ''}
+      {fmtHours(v)}
+    </span>
+  );
+}
+
+/** A factor, or a dash where nothing was built and the ratio would be a divide by zero. */
+function Factor({ f, plain = false }: { f: number | null; plain?: boolean }) {
+  if (f === null) return <span className="text-[var(--text-subtle)]">—</span>;
+  if (plain) return <>{f.toFixed(2)}</>;
+  return <span className={f >= 1 ? 'tone-good font-semibold' : 'tone-bad font-semibold'}>{f.toFixed(2)}</span>;
+}
+
+/**
+ * The four columns every earned-against-built table shares, whatever it is cut by.
+ *
+ * A month, a fiscal year, a group inside a year and a group's own months all
+ * answer the same question, and giving each its own hand-written column list is
+ * how the labels drift apart and a reader starts wondering whether "Variance"
+ * means the same thing two tables down. One definition, reused.
+ */
+function coreColumns<T>(pick: (r: T) => { earned: number; built: number; variance: number; factor: number | null }): Column<T>[] {
+  return [
+    { key: 'earned', label: 'Earned h', value: (r) => pick(r).earned, num: true, render: (r) => fmtHours(pick(r).earned) },
+    { key: 'built', label: TERMS.builtHours, value: (r) => pick(r).built, num: true, render: (r) => fmtHours(pick(r).built) },
+    { key: 'variance', label: 'Variance', value: (r) => pick(r).variance, num: true, render: (r) => <Variance v={pick(r).variance} /> },
+    { key: 'factor', label: 'Factor', value: (r) => pick(r).factor ?? null, num: true, render: (r) => <Factor f={pick(r).factor} /> },
+  ];
+}
+
+/** The months a single group ran through, for the row that was expanded. */
+function ResourceMonthTable({ rows }: { rows: ResourceMonth[] }) {
+  const columns: Column<ResourceMonth>[] = [
+    { key: 'month', label: 'Month', value: (r) => r.month, render: (r) => <span className="mono">{monthLabel(r.month)}</span> },
+    ...coreColumns<ResourceMonth>((r) => r),
+  ];
+  return <SortableTable rows={rows} columns={columns} rowKey={(r) => r.month} defaultSort={{ key: 'month', dir: 'asc' }} maxHeight="240px" />;
 }
 
 /**
@@ -36,6 +88,11 @@ function varianceTone(v: number): 'good' | 'bad' | 'muted' {
  * 5,000 hours in a month the team built 6,000 is a 1,000 hour hole, and if that
  * rate holds the rest of the job costs more than it is worth. Everything here
  * exists to make that visible early enough to do something about it.
+ *
+ * The screen reads top to bottom as an answer getting more specific: where the job
+ * lands, then the shape of it month by month, then each fiscal year, then the
+ * groups inside a year and the months inside a group, then the forecast per group.
+ * Every one of those tables is the same four figures cut a different way.
  */
 export function TeamHours() {
   const { state, model, actions } = useApp();
@@ -44,9 +101,14 @@ export function TeamHours() {
   const [pending, setPending] = useState<TeamPaste | null>(null);
   const [labelsAre, setLabelsAre] = useState<'subsystem' | 'person'>('subsystem');
   const [pendingSubsystem, setPendingSubsystem] = useState('');
-  const [open, setOpen] = useState<string | null>(null);
+  /** The month whose by-group split is open, on the months table. */
+  const [openMonth, setOpenMonth] = useState<string | null>(null);
+  /** The group whose own months are open, inside the chosen fiscal year. */
+  const [openYearGroup, setOpenYearGroup] = useState<string | null>(null);
+  /** The group whose whole-project detail is open, under the forecast table. */
+  const [openForecast, setOpenForecast] = useState<string | null>(null);
   const [hideQuiet, setHideQuiet] = useState(true);
-  /** '' is every year; otherwise the fiscal year the months table is narrowed to. */
+  /** '' is every year; otherwise the fiscal year the screen is narrowed to. */
   const [fy, setFy] = useState<string>('');
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -160,141 +222,96 @@ export function TeamHours() {
   const editRow = (id: string, patch: Partial<TeamActual>) =>
     actions.update('teamActuals', (list) => list.map((x) => (x.id === id ? { ...x, ...patch } : x)));
 
+  // --- what the screen is showing -------------------------------------------
+  const fyMonth = fyStart(state.data.settings.fiscalYearStartMonth);
+  /*
+   * One derivation, read by every table below and by the workbook export. The
+   * fiscal years, the groups inside each of them and the months inside each group
+   * all come out of here together, so a figure cannot read one way on screen and
+   * another way in the spreadsheet somebody takes to a meeting.
+   */
+  const years: FiscalYearDetail[] = useMemo(() => fiscalYearDetail(burn.months, fyMonth), [burn.months, fyMonth]);
+  const selectedYear = fy ? years.find((y) => String(y.fy) === fy) ?? null : null;
+
+  /*
+   * A long project has stretches where nothing was earned and nothing was built.
+   * Those months are real and the engine reports them, but forty rows of zeros
+   * carrying the same cumulative figure bury the months that matter. They are
+   * hidden by default and counted, never dropped.
+   *
+   * How many months are quiet is a fact about the data, NOT about the checkbox: it
+   * used to be derived as "rows before minus rows after", which is zero whenever the
+   * checkbox is off — so unticking it removed the control from the page and left no
+   * way to turn it back on.
+   */
+  const quiet = burn.months.filter((m) => m.earned === 0 && m.built === 0).length;
+  const inYear = (m: BurnRow) => !fy || String(fiscalYearOf(m.month, fyMonth)) === fy;
+  const yearMonths = burn.months.filter(inYear);
+  const shownMonths = hideQuiet ? yearMonths.filter((m) => m.earned !== 0 || m.built !== 0) : yearMonths;
+  /** Quiet months inside the chosen year, which is what the table actually hid. */
+  const hiddenHere = yearMonths.length - shownMonths.length;
+  const keyed = state.data.teamActuals;
+
+  const openedMonth = openMonth === null ? null : (burn.months.find((m) => m.month === openMonth) ?? null);
+  /** Every month of the whole project for the group opened under the forecast table. */
+  const forecastMonths = useMemo(
+    () => (openForecast === null ? [] : monthsForResource(burn.months, openForecast)),
+    [openForecast, burn.months],
+  );
+  /** The same group's fiscal years, so its story reads a year at a time as well. */
+  const forecastYears = useMemo(
+    () =>
+      openForecast === null
+        ? []
+        : years
+            .map((y) => ({ year: y, r: y.resources.find((x) => x.code === openForecast) ?? null }))
+            .filter((x): x is { year: FiscalYearDetail; r: ResourceYearDetail } => x.r !== null),
+    [openForecast, years],
+  );
+
   // --- tables ---------------------------------------------------------------
   const monthColumns: Column<BurnRow>[] = [
     { key: 'month', label: 'Month', value: (r) => r.month, render: (r) => <span className="mono">{monthLabel(r.month)}</span> },
-    { key: 'earned', label: 'Earned h', value: (r) => r.earned, num: true, render: (r) => fmtHours(r.earned) },
-    { key: 'built', label: TERMS.builtHours, value: (r) => r.built, num: true, render: (r) => fmtHours(r.built) },
-    {
-      key: 'variance',
-      label: 'Variance',
-      value: (r) => r.variance,
-      num: true,
-      render: (r) => (
-        <span className={`tone-${varianceTone(r.variance)} font-semibold`}>
-          {r.variance >= 0 ? '+' : ''}
-          {fmtHours(r.variance)}
-        </span>
-      ),
-    },
-    { key: 'factor', label: 'Factor', value: (r) => r.factor ?? null, num: true, render: (r) => (r.factor === null ? <span className="text-[var(--text-subtle)]">—</span> : r.factor.toFixed(2)) },
+    ...coreColumns<BurnRow>((r) => r),
     { key: 'cumEarned', label: 'Cum earned', value: (r) => r.cumEarned, num: true, render: (r) => fmtHours(r.cumEarned) },
+    { key: 'cumBuilt', label: `Cum ${TERMS.builtLower}`, value: (r) => r.cumBuilt, num: true, render: (r) => fmtHours(r.cumBuilt) },
+    { key: 'cumVariance', label: 'Cum variance', value: (r) => r.cumVariance, num: true, render: (r) => <Variance v={r.cumVariance} /> },
     {
       key: 'cumPct',
       label: '% complete',
       value: (r) => (project.budgetHours ? r.cumEarned / project.budgetHours : 0),
       num: true,
       hint: 'Cumulative earned hours as a share of the whole budget: how complete the job was at the end of that month.',
-      render: (r) => (
-        <span className="tabular-nums font-semibold">{fmtPct(project.budgetHours ? r.cumEarned / project.budgetHours : 0, 1)}</span>
-      ),
-    },
-    { key: 'cumBuilt', label: `Cum ${TERMS.builtLower}`, value: (r) => r.cumBuilt, num: true, render: (r) => fmtHours(r.cumBuilt) },
-    {
-      key: 'cumVariance',
-      label: 'Cum variance',
-      value: (r) => r.cumVariance,
-      num: true,
-      render: (r) => (
-        <span className={`tone-${varianceTone(r.cumVariance)} font-semibold`}>
-          {r.cumVariance >= 0 ? '+' : ''}
-          {fmtHours(r.cumVariance)}
-        </span>
-      ),
+      render: (r) => <span className="tabular-nums font-semibold">{fmtPct(project.budgetHours ? r.cumEarned / project.budgetHours : 0, 1)}</span>,
     },
     {
-      key: 'by',
+      key: 'groups',
       label: '',
       value: () => '',
       hint: '',
       render: (r) => (
-        <button className="btn-link text-[11px] font-normal" onClick={() => setOpen(open === r.month ? null : r.month)}>
-          {open === r.month ? 'hide' : 'by group'}
+        <button className="btn-link text-[11px] font-normal" onClick={() => setOpenMonth(openMonth === r.month ? null : r.month)}>
+          {openMonth === r.month ? 'hide' : `by group (${r.bySubsystem.length})`}
         </button>
       ),
     },
   ];
 
-  const forecastColumns: Column<Reforecast>[] = [
-    { key: 'label', label: TERMS.subsystem, value: (r) => r.label, render: (r) => <span className="mono">{r.code || 'Unassigned'}</span> },
-    { key: 'budget', label: 'Budget h', value: (r) => r.budgetHours, num: true, render: (r) => fmtHours(r.budgetHours) },
-    { key: 'earned', label: 'Earned h', value: (r) => r.cumEarned, num: true, render: (r) => fmtHours(r.cumEarned) },
-    { key: 'built', label: TERMS.builtHours, value: (r) => r.cumBuilt, num: true, render: (r) => fmtHours(r.cumBuilt) },
-    { key: 'factor', label: 'Factor', value: (r) => r.factor ?? null, num: true, render: (r) => (r.factor === null ? <span className="text-[var(--text-subtle)]">—</span> : <span className={r.factor >= 1 ? 'tone-good font-semibold' : 'tone-bad font-semibold'}>{r.factor.toFixed(2)}</span>) },
-    { key: 'toGo', label: 'To complete', value: (r) => r.hoursToComplete ?? null, num: true, render: (r) => (r.hoursToComplete === null ? <span className="text-[var(--text-subtle)]">—</span> : fmtHours(r.hoursToComplete)) },
-    { key: 'forecast', label: 'Forecast', value: (r) => r.forecastTotalHours ?? null, num: true, render: (r) => (r.forecastTotalHours === null ? <span className="text-[var(--text-subtle)]">—</span> : fmtHours(r.forecastTotalHours)) },
-    {
-      key: 'pct',
-      label: '% complete',
-      value: (r) => (r.budgetHours ? r.cumEarned / r.budgetHours : 0),
-      num: true,
-      render: (r) => <span className="tabular-nums">{fmtPct(r.budgetHours ? r.cumEarned / r.budgetHours : 0, 0)}</span>,
-    },
-    {
-      key: 'vacPct',
-      label: 'Overrun',
-      value: (r) => (r.budgetHours && r.varianceAtCompletion !== null ? r.varianceAtCompletion / r.budgetHours : null),
-      num: true,
-      hint: 'Variance at completion as a share of that group\u2019s own budget. A 500 hour hole means something different to a group with 2,000 hours than to one with 40,000.',
-      render: (r) =>
-        r.varianceAtCompletion === null || !r.budgetHours ? (
-          <span className="text-[var(--text-subtle)]">—</span>
-        ) : (
-          <span className={`tone-${varianceTone(r.varianceAtCompletion)} font-semibold`}>
-            {r.varianceAtCompletion >= 0 ? '+' : ''}{fmtPct(r.varianceAtCompletion / r.budgetHours, 1)}
-          </span>
-        ),
-    },
-    {
-      key: 'vac',
-      label: 'At completion',
-      value: (r) => r.varianceAtCompletion ?? null,
-      num: true,
-      render: (r) =>
-        r.varianceAtCompletion === null ? (
-          <span className="text-[var(--text-subtle)]">—</span>
-        ) : (
-          <span className={`tone-${varianceTone(r.varianceAtCompletion)} font-semibold`}>
-            {r.varianceAtCompletion >= 0 ? '+' : ''}
-            {fmtHours(r.varianceAtCompletion)}
-          </span>
-        ),
-    },
-  ];
-
-  const fyColumns: Column<FiscalYear>[] = [
+  const yearColumns: Column<FiscalYearDetail>[] = [
     {
       key: 'fy',
       label: 'Fiscal year',
       locked: true,
       value: (r) => r.fy,
       render: (r) => (
-        <button className="btn-link" title={`Show only the months in ${r.label}`} onClick={() => setFy(fy === String(r.fy) ? '' : String(r.fy))}>
+        <button className="btn-link" title={`Show ${r.label} on its own, with its groups broken out`} onClick={() => pickYear(String(r.fy))}>
           <b>{r.label}</b> <span className="font-normal text-[var(--text-muted)]">{r.span}</span>
         </button>
       ),
     },
     { key: 'months', label: 'Months', value: (r) => r.months.length, num: true, optional: true },
-    { key: 'earned', label: 'Earned h', value: (r) => r.earned, num: true, render: (r) => fmtHours(r.earned) },
-    { key: 'built', label: TERMS.builtHours, value: (r) => r.built, num: true, render: (r) => fmtHours(r.built) },
-    {
-      key: 'variance',
-      label: 'Variance',
-      value: (r) => r.variance,
-      num: true,
-      render: (r) => (
-        <span className={`tone-${varianceTone(r.variance)} font-semibold`}>
-          {r.variance >= 0 ? '+' : ''}{fmtHours(r.variance)}
-        </span>
-      ),
-    },
-    {
-      key: 'factor',
-      label: 'Factor',
-      value: (r) => r.factor ?? null,
-      num: true,
-      render: (r) => (r.factor === null ? <span className="text-[var(--text-subtle)]">—</span> : <span className={r.factor >= 1 ? 'tone-good font-semibold' : 'tone-bad font-semibold'}>{r.factor.toFixed(2)}</span>),
-    },
+    { key: 'groupCount', label: 'Groups', value: (r) => r.resources.length, num: true, hint: 'How many resource groups earned or spent anything in the year.' },
+    ...coreColumns<FiscalYearDetail>((r) => r),
     {
       key: 'cumEarned',
       label: 'Cum earned',
@@ -314,28 +331,83 @@ export function TeamHours() {
     },
   ];
 
-  const yearResourceColumns: Column<ResourceYear>[] = [
+  /** One group inside the chosen fiscal year, with its own months a click away. */
+  const yearGroupColumns: Column<ResourceYearDetail>[] = [
     { key: 'code', label: TERMS.subsystem, locked: true, value: (r) => r.label || 'zzz', render: (r) => <span className="mono font-semibold">{r.code || 'Unassigned'}</span> },
-    { key: 'earned', label: 'Earned h', value: (r) => r.earned, num: true, render: (r) => fmtHours(r.earned) },
-    { key: 'share', label: 'Share', value: (r) => r.shareOfEarned, num: true, hint: 'This resource as a share of everything earned in the year.', render: (r) => <span className="tabular-nums text-[var(--text-muted)]">{fmtPct(r.shareOfEarned, 0)}</span> },
-    { key: 'built', label: TERMS.builtHours, value: (r) => r.built, num: true, render: (r) => fmtHours(r.built) },
+    ...coreColumns<ResourceYearDetail>((r) => r),
     {
-      key: 'variance',
-      label: 'Variance',
-      value: (r) => r.variance,
+      key: 'share',
+      label: 'Share',
+      value: (r) => r.shareOfEarned,
       num: true,
+      hint: 'This group as a share of everything earned in the year.',
+      render: (r) => <span className="tabular-nums text-[var(--text-muted)]">{fmtPct(r.shareOfEarned, 0)}</span>,
+    },
+    { key: 'active', label: 'Months', value: (r) => r.months.length, num: true, hint: 'Months inside the year in which this group earned or spent anything.' },
+    {
+      key: 'open',
+      label: '',
+      value: () => '',
+      hint: '',
       render: (r) => (
-        <span className={`tone-${varianceTone(r.variance)} font-semibold`}>
-          {r.variance >= 0 ? '+' : ''}{fmtHours(r.variance)}
-        </span>
+        <button className="btn-link text-[11px] font-normal" onClick={() => setOpenYearGroup(openYearGroup === r.code ? null : r.code)}>
+          {openYearGroup === r.code ? 'hide' : 'by month'}
+        </button>
       ),
     },
+  ];
+
+  const forecastColumns: Column<Reforecast>[] = [
+    { key: 'label', label: TERMS.subsystem, locked: true, value: (r) => r.label, render: (r) => <span className="mono">{r.code || 'Unassigned'}</span> },
+    { key: 'budget', label: 'Budget h', value: (r) => r.budgetHours, num: true, render: (r) => fmtHours(r.budgetHours) },
+    { key: 'earned', label: 'Earned h', value: (r) => r.cumEarned, num: true, render: (r) => fmtHours(r.cumEarned) },
+    { key: 'built', label: TERMS.builtHours, value: (r) => r.cumBuilt, num: true, render: (r) => fmtHours(r.cumBuilt) },
+    { key: 'factor', label: 'Factor', value: (r) => r.factor ?? null, num: true, render: (r) => <Factor f={r.factor} /> },
     {
-      key: 'factor',
-      label: 'Factor',
-      value: (r) => r.factor ?? null,
+      key: 'pct',
+      label: '% complete',
+      value: (r) => (r.budgetHours ? r.cumEarned / r.budgetHours : 0),
       num: true,
-      render: (r) => (r.factor === null ? <span className="text-[var(--text-subtle)]">—</span> : <span className={r.factor >= 1 ? 'tone-good font-semibold' : 'tone-bad font-semibold'}>{r.factor.toFixed(2)}</span>),
+      render: (r) => <span className="tabular-nums">{fmtPct(r.budgetHours ? r.cumEarned / r.budgetHours : 0, 0)}</span>,
+    },
+    { key: 'toGo', label: 'To complete', value: (r) => r.hoursToComplete ?? null, num: true, render: (r) => (r.hoursToComplete === null ? <span className="text-[var(--text-subtle)]">—</span> : fmtHours(r.hoursToComplete)) },
+    { key: 'forecast', label: 'Forecast', value: (r) => r.forecastTotalHours ?? null, num: true, render: (r) => (r.forecastTotalHours === null ? <span className="text-[var(--text-subtle)]">—</span> : fmtHours(r.forecastTotalHours)) },
+    {
+      key: 'vac',
+      label: 'At completion',
+      value: (r) => r.varianceAtCompletion ?? null,
+      num: true,
+      render: (r) => (r.varianceAtCompletion === null ? <span className="text-[var(--text-subtle)]">—</span> : <Variance v={r.varianceAtCompletion} />),
+    },
+    {
+      key: 'vacPct',
+      label: 'Overrun',
+      value: (r) => (r.budgetHours && r.varianceAtCompletion !== null ? r.varianceAtCompletion / r.budgetHours : null),
+      num: true,
+      hint: 'Variance at completion as a share of that group’s own budget. A 500 hour hole means something different to a group with 2,000 hours than to one with 40,000.',
+      render: (r) =>
+        r.varianceAtCompletion === null || !r.budgetHours ? (
+          <span className="text-[var(--text-subtle)]">—</span>
+        ) : (
+          <span className={`tone-${varianceTone(r.varianceAtCompletion)} font-semibold`}>
+            {r.varianceAtCompletion >= 0 ? '+' : ''}{fmtPct(r.varianceAtCompletion / r.budgetHours, 1)}
+          </span>
+        ),
+    },
+    {
+      key: 'open',
+      label: '',
+      value: () => '',
+      hint: '',
+      render: (r) => (
+        <button
+          className="btn-link text-[11px] font-normal"
+          title="Show this group year by year and month by month"
+          onClick={() => setOpenForecast(openForecast === r.code ? null : r.code)}
+        >
+          {openForecast === r.code ? 'hide' : 'detail'}
+        </button>
+      ),
     },
   ];
 
@@ -352,36 +424,13 @@ export function TeamHours() {
     { key: 'act', label: '', value: () => '', hint: '', render: (r) => <button className="btn-link text-[11px] font-normal" onClick={() => removeRow(r.id)}>remove</button> },
   ];
 
-  const openedMonth = open === null ? null : (burn.months.find((m) => m.month === open) ?? null);
+  /** Choosing a year closes whatever group was open under the last one. */
+  function pickYear(next: string) {
+    setFy(fy === next ? '' : next);
+    setOpenYearGroup(null);
+  }
 
-  /*
-   * A long project has stretches where nothing was earned and nothing was built.
-   * Those months are real and the engine reports them, but forty rows of zeros
-   * carrying the same cumulative figure bury the months that matter. They are
-   * hidden by default and counted, never dropped.
-   */
-  const fyMonth = fyStart(state.data.settings.fiscalYearStartMonth);
-  const fiscalYears = useMemo(() => groupByFiscalYear(burn.months, fyMonth), [burn.months, fyMonth]);
-
-  /*
-   * How many months are quiet is a fact about the data, NOT about the checkbox.
-   *
-   * It used to be derived as "rows before minus rows after", which is zero whenever
-   * the checkbox is off — and the control was rendered only when `quiet > 0 ||
-   * hideQuiet`. So unticking it made it compute zero, fail its own condition, and
-   * remove itself from the page, leaving no way to turn it back on. Counting the
-   * quiet months directly keeps the control on screen in both states.
-   */
-  const quiet = burn.months.filter((m) => m.earned === 0 && m.built === 0).length;
-  const inYear = (m: BurnRow) => !fy || String(fiscalYearOf(m.month, fyMonth)) === fy;
-  const yearMonths = burn.months.filter(inYear);
-  const shownMonths = hideQuiet ? yearMonths.filter((m) => m.earned !== 0 || m.built !== 0) : yearMonths;
-  /** Quiet months inside the chosen year, which is what the table actually hid. */
-  const hiddenHere = yearMonths.length - shownMonths.length;
-  const selectedYear = fy ? fiscalYears.find((y) => String(y.fy) === fy) : null;
-  /** Per-resource figures for the chosen year. Empty when no year is chosen. */
-  const yearResources = useMemo(() => (selectedYear ? resourcesInYear(selectedYear.months) : []), [selectedYear]);
-  const keyed = state.data.teamActuals;
+  const openedYearGroup = selectedYear && openYearGroup !== null ? selectedYear.resources.find((r) => r.code === openYearGroup) ?? null : null;
 
   return (
     <Page
@@ -394,6 +443,17 @@ export function TeamHours() {
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void loadFile(f); }} />
           <button className="btn" onClick={() => fileRef.current?.click()}>Import a sheet…</button>
           <a className="btn" href={href('subsystems')}>{TERMS.subsystemPlural}</a>
+          {years.length > 1 && (
+            <>
+              <span className="ml-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Fiscal year</span>
+              <select className="input" value={fy} onChange={(e) => pickYear(e.target.value === fy ? '' : e.target.value)}>
+                <option value="">Every fiscal year</option>
+                {years.map((y) => (
+                  <option key={y.fy} value={String(y.fy)}>{y.label} ({y.span})</option>
+                ))}
+              </select>
+            </>
+          )}
         </>
       }
     >
@@ -456,7 +516,7 @@ export function TeamHours() {
       )}
 
       {chart.length > 0 && (
-        <Panel title="Month by month" meta="Bars are the month; lines are cumulative. Where the red line sits above the blue one, the job has spent more than it has earned." className="mb-3">
+        <Panel title="Month by month" className="mb-3">
           <div style={{ height: 280 }}>
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={chart} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
@@ -496,70 +556,27 @@ export function TeamHours() {
         </Panel>
       )}
 
-      {fiscalYears.length > 0 && (
+      {years.length > 0 && (
         <Panel
           title="By fiscal year"
-          meta={`Year starts in ${['January','February','March','April','May','June','July','August','September','October','November','December'][fyMonth - 1]}, named for the year it ends in. Change it in Settings.`}
-          className="mb-3"
-        >
-          <SortableTable
-            tableId="burn-fiscal"
-            rows={fiscalYears}
-            columns={fyColumns}
-            rowKey={(r) => String(r.fy)}
-            defaultSort={{ key: 'fy', dir: 'asc' }}
-            maxHeight="300px"
-            rowClass={(r) => (fy === String(r.fy) ? 'row-warn' : '')}
-          />
-        </Panel>
-      )}
-
-      {burn.months.length > 0 && (
-        <Panel
-          title="Every month"
           meta={
             <span className="flex flex-wrap items-center gap-3">
-              {fiscalYears.length > 1 && (
-                <select className="input" value={fy} onChange={(e) => setFy(e.target.value)}>
-                  <option value="">Every fiscal year</option>
-                  {fiscalYears.map((y) => (
-                    <option key={y.fy} value={String(y.fy)}>{y.label} ({y.span})</option>
-                  ))}
-                </select>
-              )}
-              {quiet > 0 && (
-                <label className="flex cursor-pointer items-center gap-1.5">
-                  <input type="checkbox" checked={hideQuiet} onChange={(e) => setHideQuiet(e.target.checked)} />
-                  Hide the {hiddenHere || quiet} quiet {(hiddenHere || quiet) === 1 ? 'month' : 'months'}
-                </label>
-              )}
-              {selectedYear && (
-                <button className="btn btn-mini" onClick={() => setFy('')} title="Show every fiscal year again">
-                  Showing {selectedYear.label} ✕
-                </button>
-              )}
+              <span>
+                Year starts in {MONTH_NAMES[fyMonth - 1]}, named for the year it ends in. Change it in <a className="btn-link" href={href('settings')}>Settings</a>.
+              </span>
+              <span>Click a year to break it out by group.</span>
             </span>
           }
           className="mb-3"
         >
-          <SortableTable tableId="burn-months" rows={shownMonths} columns={monthColumns} rowKey={(r) => r.month} defaultSort={{ key: 'month', dir: 'asc' }} maxHeight="340px" />
-        </Panel>
-      )}
-
-      {openedMonth && (
-        <Panel title={`${monthLabel(openedMonth.month)} by ${TERMS.subsystemLower}`} className="mb-3">
           <SortableTable
-            rows={openedMonth.bySubsystem}
-            columns={[
-              { key: 'code', label: TERMS.subsystem, value: (c) => c.label, render: (c) => <span className="mono">{c.code || 'Unassigned'}</span> },
-              { key: 'earned', label: 'Earned h', value: (c) => c.earned, num: true, render: (c) => fmtHours(c.earned) },
-              { key: 'built', label: TERMS.builtHours, value: (c) => c.built, num: true, render: (c) => fmtHours(c.built) },
-              { key: 'variance', label: 'Variance', value: (c) => c.variance, num: true, render: (c) => <span className={`tone-${varianceTone(c.variance)} font-semibold`}>{c.variance >= 0 ? '+' : ''}{fmtHours(c.variance)}</span> },
-              { key: 'factor', label: 'Factor', value: (c) => c.factor ?? null, num: true, render: (c) => (c.factor === null ? <span className="text-[var(--text-subtle)]">—</span> : c.factor.toFixed(2)) },
-            ]}
-            rowKey={(c) => c.code || '(unassigned)'}
-            defaultSort={{ key: 'built', dir: 'desc' }}
-            maxHeight="260px"
+            tableId="burn-fiscal"
+            rows={years}
+            columns={yearColumns}
+            rowKey={(r) => String(r.fy)}
+            defaultSort={{ key: 'fy', dir: 'asc' }}
+            maxHeight="300px"
+            rowClass={(r) => (fy === String(r.fy) ? 'row-warn' : '')}
           />
         </Panel>
       )}
@@ -570,36 +587,152 @@ export function TeamHours() {
           meta={
             <span className="flex flex-wrap items-center gap-3">
               <span>{selectedYear.span}</span>
-              <button className="btn btn-mini" onClick={() => setFy('')}>Show every year ✕</button>
+              <span>
+                {fmtHours(selectedYear.earned)} h earned against {fmtHours(selectedYear.built)} h {TERMS.builtLower} across {selectedYear.resources.length}{' '}
+                {selectedYear.resources.length === 1 ? 'group' : 'groups'}.
+              </span>
+              <button className="btn btn-mini" onClick={() => pickYear(String(selectedYear.fy))}>Show every year ✕</button>
             </span>
           }
           className="mb-3"
         >
-          {yearResources.length === 0 ? (
+          {selectedYear.resources.length === 0 ? (
             <Notice tone="info">Nothing was earned and nothing was spent by any {TERMS.subsystemLower} in {selectedYear.label}.</Notice>
           ) : (
             <>
               <SortableTable
                 tableId="burn-year-resource"
-                rows={yearResources}
-                columns={yearResourceColumns}
+                rows={selectedYear.resources}
+                columns={yearGroupColumns}
                 rowKey={(r) => r.code || '(unassigned)'}
                 defaultSort={{ key: 'earned', dir: 'desc' }}
                 maxHeight="320px"
+                rowClass={(r) => (openYearGroup === r.code ? 'row-warn' : '')}
               />
+              {openedYearGroup && (
+                <div className="mt-3">
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    {openedYearGroup.code || 'Unassigned'} through {selectedYear.label}
+                  </div>
+                  <ResourceMonthTable rows={openedYearGroup.months} />
+                </div>
+              )}
               <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">
                 What each {TERMS.subsystemLower} earned and spent inside {selectedYear.label}. There is deliberately no forecast here: to-complete and at-completion divide
                 the whole remaining budget by a rate, and a remaining budget is not something one fiscal year has — quoting one per year would be inventing a number. The
-                whole-project forecast is below.
+                whole-project forecast per group is below, and the same rows are in the workbook export as <span className="mono">FY_By_Group</span>.
               </p>
             </>
           )}
         </Panel>
       )}
 
+      {burn.months.length > 0 && (
+        <Panel
+          title={selectedYear ? `Every month in ${selectedYear.label}` : 'Every month'}
+          meta={
+            <span className="flex flex-wrap items-center gap-3">
+              {quiet > 0 && (
+                <label className="flex cursor-pointer items-center gap-1.5">
+                  <input type="checkbox" checked={hideQuiet} onChange={(e) => setHideQuiet(e.target.checked)} />
+                  Hide the {hiddenHere || quiet} quiet {(hiddenHere || quiet) === 1 ? 'month' : 'months'}
+                </label>
+              )}
+              {selectedYear && (
+                <button className="btn btn-mini" onClick={() => pickYear(String(selectedYear.fy))} title="Show every fiscal year again">
+                  Showing {selectedYear.label} ✕
+                </button>
+              )}
+            </span>
+          }
+          className="mb-3"
+        >
+          <SortableTable tableId="burn-months" rows={shownMonths} columns={monthColumns} rowKey={(r) => r.month} defaultSort={{ key: 'month', dir: 'asc' }} maxHeight="340px" />
+          {openedMonth && (
+            <div className="mt-3">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                {monthLabel(openedMonth.month)} by {TERMS.subsystemLower}
+              </div>
+              <SortableTable
+                rows={openedMonth.bySubsystem}
+                columns={[
+                  { key: 'code', label: TERMS.subsystem, value: (c) => c.label, render: (c) => <span className="mono">{c.code || 'Unassigned'}</span> },
+                  ...coreColumns<(typeof openedMonth.bySubsystem)[number]>((c) => c),
+                ]}
+                rowKey={(c) => c.code || '(unassigned)'}
+                defaultSort={{ key: 'built', dir: 'desc' }}
+                maxHeight="260px"
+              />
+            </div>
+          )}
+        </Panel>
+      )}
+
       {burn.totalBuilt > 0 && (
-        <Panel title={`Forecast by ${TERMS.subsystemLower}`} meta="Each group at its own rate, so the one in trouble is not hidden by the ones that are fine. Whole project, every year." className="mb-3">
-          <SortableTable tableId="burn-forecast" rows={burn.bySubsystem} columns={forecastColumns} rowKey={(r) => r.code || '(unassigned)'} defaultSort={{ key: 'budget', dir: 'desc' }} maxHeight="320px" />
+        <Panel
+          title={`Forecast by ${TERMS.subsystemLower}`}
+          meta="Each group at its own rate, so the one in trouble is not hidden by the ones that are fine. Whole project, every year — open a row for its fiscal years and its months."
+          className="mb-3"
+        >
+          <SortableTable
+            tableId="burn-forecast"
+            rows={burn.bySubsystem}
+            columns={forecastColumns}
+            rowKey={(r) => r.code || '(unassigned)'}
+            defaultSort={{ key: 'budget', dir: 'desc' }}
+            maxHeight="320px"
+            rowClass={(r) => (openForecast === r.code ? 'row-warn' : '')}
+          />
+          {openForecast !== null && (
+            <div className="mt-3 grid gap-4 lg:grid-cols-2">
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  {openForecast || 'Unassigned'} by fiscal year
+                </div>
+                {forecastYears.length === 0 ? (
+                  <Notice tone="info">This group has earned and spent nothing in any month, so there is no year to break out.</Notice>
+                ) : (
+                  <SortableTable
+                    rows={forecastYears}
+                    columns={[
+                      {
+                        key: 'fy',
+                        label: 'Fiscal year',
+                        value: (x) => x.year.fy,
+                        render: (x) => (
+                          <span>
+                            <b>{x.year.label}</b> <span className="font-normal text-[var(--text-muted)]">{x.year.span}</span>
+                          </span>
+                        ),
+                      },
+                      ...coreColumns<{ year: FiscalYearDetail; r: ResourceYearDetail }>((x) => x.r),
+                      {
+                        key: 'share',
+                        label: 'Share of year',
+                        value: (x) => x.r.shareOfEarned,
+                        num: true,
+                        hint: 'This group as a share of everything earned in that fiscal year.',
+                        render: (x) => <span className="tabular-nums text-[var(--text-muted)]">{fmtPct(x.r.shareOfEarned, 0)}</span>,
+                      },
+                    ]}
+                    rowKey={(x) => String(x.year.fy)}
+                    defaultSort={{ key: 'fy', dir: 'asc' }}
+                    maxHeight="240px"
+                  />
+                )}
+              </div>
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  {openForecast || 'Unassigned'} month by month
+                </div>
+                {forecastMonths.length === 0 ? (
+                  <Notice tone="info">No month carries anything for this group.</Notice>
+                ) : (
+                  <ResourceMonthTable rows={forecastMonths} />
+                )}
+              </div>
+            </div>
+          )}
         </Panel>
       )}
 

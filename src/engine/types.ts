@@ -12,7 +12,6 @@ export type Settings = {
   defaultShiftHours: number; // 8
   defaultComplexity: number; // 1.00
   dataDate: string; // ISO date, end of the earned curve
-  statusDate: string; // ISO date, used when taking a snapshot
   /**
    * The calendar month a fiscal year starts in, 1-12. 7 (July) is the usual
    * transit-agency year; 1 makes a fiscal year a calendar year. Optional, because
@@ -195,10 +194,17 @@ export const DEFAULT_MISSED_REASONS: string[] = [
   'Re-sequenced by the plan',
 ];
 
+/**
+ * What somebody keyed against one activity: how far along it is, when that was
+ * true, and anything worth saying about it.
+ *
+ * Percent complete is keyed by hand and nothing else. It used to be derivable from
+ * test case counts as well, which meant two ways of saying the same thing and a
+ * standing argument about which one a given activity was using. One number,
+ * typed by the person who knows, is the whole contract now.
+ */
 export type TestProgress = {
   activityId: string;
-  testsTotal?: number;
-  testsComplete?: number;
   pctOverride?: number; // 0 to 1
   testStartOverride?: string; // ISO
   testEndOverride?: string; // ISO
@@ -249,31 +255,6 @@ export type TeamActual = {
   note?: string;
 };
 
-export type SnapshotLine = {
-  activityId: string;
-  pctComplete: number;
-  budgetHours: number;
-  earnedHours: number;
-};
-
-export type Snapshot = {
-  statusDate: string;
-  takenAt: string;
-  note?: string;
-  /**
-   * Kept and still listed, but off the S-curve and out of every marker. For the
-   * snapshot taken against numbers that later turned out to be wrong: the record of
-   * what was reported at the time is worth keeping even when plotting it is not.
-   */
-  hidden?: boolean;
-  lines: SnapshotLine[];
-  /**
-   * The file it was read from, filled in on load so a screen can hide or delete this
-   * exact one. It is not part of the record and is stripped before writing.
-   */
-  file?: string;
-};
-
 // ---------------------------------------------------------------------------
 // Computed model
 // ---------------------------------------------------------------------------
@@ -281,7 +262,8 @@ export type Snapshot = {
 export type ActivityStatus = 'IN BUDGET' | 'EXCLUDED' | 'REVIEW' | 'DELETED' | 'CANCELLED';
 export type RateStatus = 'SET' | 'DEFAULT' | 'NEEDS SHIFTS' | 'EXCLUDED' | 'NO MATCH';
 export type BaselineSource = 'BASELINE' | 'CURRENT' | 'NONE';
-export type PctSource = 'OVERRIDE' | 'TESTS' | 'P6';
+/** Where a percent complete came from: you typed it, or P6's durations implied it. */
+export type PctSource = 'OVERRIDE' | 'P6';
 export type EarnWindowSource = 'TEST WINDOW' | 'P6 ACTUAL' | 'PROGRESS AS AT' | 'IN PROGRESS' | 'NOT STARTED';
 
 /**
@@ -359,10 +341,6 @@ export type BudgetRow = {
   currentFinish: string | null;
   pctComplete: number;
   pctSource: PctSource;
-  /** Test case counts as keyed on the Test Progress screen, when present. */
-  testsTotal: number | null;
-  testsComplete: number | null;
-  hasTestCounts: boolean;
   earnedHours: number;
   remainingHours: number;
   /**
@@ -570,10 +548,8 @@ export type GroupStat = {
   notStarted: number;
   inProgress: number;
   finished: number;
-  /** In-budget activities that have test case counts keyed. */
-  withCounts: number;
-  testsTotal: number;
-  testsComplete: number;
+  /** In-budget activities whose percent complete somebody keyed by hand. */
+  withKeyedPct: number;
   earliestStart: string | null;
   latestFinish: string | null;
 };
@@ -585,10 +561,7 @@ export type CurvePoint = {
   earned: number | null; // null after the data date
   plannedPct: number;
   earnedPct: number | null;
-  snapshot: number | null; // sum of snapshot earned hours at this date, if a snapshot exists
 };
-
-export type SnapshotMarker = { statusDate: string; earnedHours: number; budgetHours: number };
 
 export type Summary = {
   extractRows: number;
@@ -609,7 +582,6 @@ export type Summary = {
   baselineMatched: number;
   baselineFallback: number;
   noDates: number;
-  pctFromTests: number;
   pctFromP6: number; // in budget only
   pctFromOverride: number;
   inProgress: number;
@@ -621,7 +593,6 @@ export type Summary = {
   testProgressUsingOverride: number;
   rateNeedsShifts: number; // activities in budget whose library entry needs shifts
   onNoCurve: number; // in-budget activities with hours that appear on neither curve
-  latestStatusDate: string | null;
   /** Library entries priced as a crew of named subsystems rather than a headcount. */
   typesWithCrewSplit: number;
   /** Budget hours not attributed to any subsystem. */
@@ -670,8 +641,6 @@ export type TestProgressCheck = {
   /** The library key it priced through, when it is a budgeted activity. */
   matchKey: string | null;
   budgetHours: number | null;
-  testsTotal: number | null;
-  testsComplete: number | null;
   pctOverride: number | null;
   testStartOverride: string | null;
   testEndOverride: string | null;
@@ -709,7 +678,6 @@ export type Model = {
   library: LibraryStat[];
   locations: LocationStat[];
   curve: CurvePoint[];
-  snapshotMarkers: SnapshotMarker[];
   summary: Summary;
   testProgressChecks: TestProgressCheck[];
   notes: string[];
@@ -729,7 +697,6 @@ export type ModelInput = {
   testProgress: TestProgress[];
   current: P6Activity[];
   baseline: P6Activity[] | null;
-  snapshots: Snapshot[];
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -739,6 +706,5 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultShiftHours: 8,
   defaultComplexity: 1.0,
   dataDate: '',
-  statusDate: '',
   fiscalYearStartMonth: 7,
 };
