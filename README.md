@@ -39,7 +39,7 @@ The workbook never has to be opened again, and neither does Excel:
 
 | Job | Where |
 | --- | --- |
-| Load a schedule | **Import**: drop an `.xer`, `.xlsx` or `.csv`, paste rows, or pick a file already in the folder. Columns are matched by header name and can be corrected by hand before importing. |
+| Load a schedule | **Import**: drop an `.xer`, `.xlsx` or `.csv`, paste rows, or pick a file already in the folder. Columns are matched by header name and can be corrected by hand before importing. The history below can **remove** an import that should not have been made — the next newest of that kind takes over, or none does, and nothing you keyed is touched. |
 | Price activity types | **Activity Library**: inline editing, plus adding keys by hand. An activity type is priced by an exact match on its library key; anything unmatched shows as REVIEW. Its **Subsystem** can name more than one — `ATS, IXL` — and every activity of that type then splits its hours evenly between them wherever the budget is rolled up by subsystem. |
 | Per-location complexity | **Locations** |
 | Edit one activity | **Budget Master**: rename it, set its discipline, override its hours, note why, or take it out of the budget or out of the program entirely. It also says which resources the activity is crewed with and how many of each. Everything you edit is keyed on the Activity ID and survives every import; everything P6 owns is read-only. |
@@ -67,10 +67,19 @@ year by year and month by month across the whole project. The year is named for 
 calendar year it ends in, so with a July start Jul-26 to Jun-27 reads as FY27; set
 the start month in **Settings**.
 
+**Fiscal years still ahead** does the same for the work that is left: what the
+current schedule still plans to earn in each year, broken out by group, and what
+earning it will cost at the rate each group has actually achieved. A group that has
+booked no hours yet shows a dash rather than a cost, because there is no rate to
+project with. Opening a group under **Forecast by resource** shows both directions
+at once — the years it has been through and the years it still has ahead.
+
 The exported workbook carries the same cuts, so the detail survives the trip to a
 meeting: `Earned_vs_Actual` (every month), `Fiscal_Year` (the year totals),
 `FY_By_Group` (each group inside each year), `FY_By_Group_Month` (the grid those
-totals are made of) and `Forecast_By_Group` (each group's estimate at completion).
+totals are made of), `Forecast_By_Group` (each group's estimate at completion), and
+`FY_Forecast`, `FY_Forecast_By_Group` and `FY_Forecast_By_Month` for the years still
+to come.
 
 ## Percentages, not just hours
 

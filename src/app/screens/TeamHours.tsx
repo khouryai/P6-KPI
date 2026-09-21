@@ -12,10 +12,14 @@ import { href } from '../router';
 import { readWorkbook, workbookGrid } from '../../engine/workbook';
 import {
   fiscalYearDetail,
+  forecastYears,
   fyStart,
   fiscalYearOf,
   monthsForResource,
   type FiscalYearDetail,
+  type ForecastResourceMonth,
+  type ForecastYear,
+  type ForecastYearResource,
   type ResourceMonth,
   type ResourceYearDetail,
 } from '../../engine/fiscal';
@@ -72,11 +76,68 @@ function coreColumns<T>(pick: (r: T) => { earned: number; built: number; varianc
   ];
 }
 
+/** A cost that only exists where the group has a rate to project with. */
+function Projected({ v }: { v: number | null }) {
+  if (v === null) return <span className="text-[var(--text-subtle)]" title="Nothing built yet, so there is no rate to forecast with.">—</span>;
+  return <>{fmtHours(v)}</>;
+}
+
+/**
+ * The columns a forward-looking table shares: what is left to earn, what it will
+ * cost at the rate achieved, and the gap between them.
+ *
+ * Deliberately NOT `coreColumns`. Those report two measurements and the ratio
+ * between them; these report one measurement and one projection, and giving them
+ * the same headings would invite somebody to read a forecast as an actual.
+ */
+function forecastColumnsFor<T>(
+  pick: (r: T) => { earned: number; built: number | null; variance: number | null },
+): Column<T>[] {
+  return [
+    {
+      key: 'left',
+      label: 'Budget left',
+      value: (r) => pick(r).earned,
+      num: true,
+      hint: 'Budget hours the current schedule plans to earn in this period. What the remaining work is worth.',
+      render: (r) => fmtHours(pick(r).earned),
+    },
+    {
+      key: 'cost',
+      label: 'Forecast cost',
+      value: (r) => pick(r).built ?? null,
+      num: true,
+      hint: 'What earning it costs at the rate this group has actually achieved. A group converting 0.69 hours of value per hour spent needs half again as many hours as its budget says.',
+      render: (r) => <Projected v={pick(r).built} />,
+    },
+    {
+      key: 'gap',
+      label: 'Over / under',
+      value: (r) => pick(r).variance ?? null,
+      num: true,
+      hint: 'Budget left minus forecast cost. Negative is the overrun this period is heading for if nothing changes.',
+      render: (r) => {
+        const v = pick(r).variance;
+        return v === null ? <span className="text-[var(--text-subtle)]">—</span> : <Variance v={v} />;
+      },
+    },
+  ];
+}
+
 /** The months a single group ran through, for the row that was expanded. */
 function ResourceMonthTable({ rows }: { rows: ResourceMonth[] }) {
   const columns: Column<ResourceMonth>[] = [
     { key: 'month', label: 'Month', value: (r) => r.month, render: (r) => <span className="mono">{monthLabel(r.month)}</span> },
     ...coreColumns<ResourceMonth>((r) => r),
+  ];
+  return <SortableTable rows={rows} columns={columns} rowKey={(r) => r.month} defaultSort={{ key: 'month', dir: 'asc' }} maxHeight="240px" />;
+}
+
+/** One group's future months, for the row that was expanded. */
+function ForecastMonthTable({ rows }: { rows: ForecastResourceMonth[] }) {
+  const columns: Column<ForecastResourceMonth>[] = [
+    { key: 'month', label: 'Month', value: (r) => r.month, render: (r) => <span className="mono">{monthLabel(r.month)}</span> },
+    ...forecastColumnsFor<ForecastResourceMonth>((r) => ({ earned: r.earned, built: r.built, variance: r.built === null ? null : r.earned - r.built })),
   ];
   return <SortableTable rows={rows} columns={columns} rowKey={(r) => r.month} defaultSort={{ key: 'month', dir: 'asc' }} maxHeight="240px" />;
 }
@@ -107,6 +168,8 @@ export function TeamHours() {
   const [openYearGroup, setOpenYearGroup] = useState<string | null>(null);
   /** The group whose whole-project detail is open, under the forecast table. */
   const [openForecast, setOpenForecast] = useState<string | null>(null);
+  /** The future fiscal year whose group breakdown is open. */
+  const [openFutureYear, setOpenFutureYear] = useState<string | null>(null);
   const [hideQuiet, setHideQuiet] = useState(true);
   /** '' is every year; otherwise the fiscal year the screen is narrowed to. */
   const [fy, setFy] = useState<string>('');
@@ -232,6 +295,24 @@ export function TeamHours() {
    */
   const years: FiscalYearDetail[] = useMemo(() => fiscalYearDetail(burn.months, fyMonth), [burn.months, fyMonth]);
   const selectedYear = fy ? years.find((y) => String(y.fy) === fy) ?? null : null;
+  /*
+   * The same cut, forward. `burn.forecastMonths` is the budget still to earn laid
+   * across the months the current schedule plans it in; grouping it by fiscal year
+   * answers the question the actual years cannot — what does each group still need,
+   * and in which funding year does it need it.
+   */
+  const future: ForecastYear[] = useMemo(() => forecastYears(burn.forecastMonths, fyMonth), [burn.forecastMonths, fyMonth]);
+  const openedFutureYear = openFutureYear === null ? null : (future.find((y) => String(y.fy) === openFutureYear) ?? null);
+  /** The opened forecast group's future years, so one group reads year by year. */
+  const forecastFutureYears = useMemo(
+    () =>
+      openForecast === null
+        ? []
+        : future
+            .map((y) => ({ year: y, r: y.resources.find((x) => x.code === openForecast) ?? null }))
+            .filter((x): x is { year: ForecastYear; r: ForecastYearResource } => x.r !== null),
+    [openForecast, future],
+  );
 
   /*
    * A long project has stretches where nothing was earned and nothing was built.
@@ -259,7 +340,7 @@ export function TeamHours() {
     [openForecast, burn.months],
   );
   /** The same group's fiscal years, so its story reads a year at a time as well. */
-  const forecastYears = useMemo(
+  const forecastActualYears = useMemo(
     () =>
       openForecast === null
         ? []
@@ -411,6 +492,50 @@ export function TeamHours() {
     },
   ];
 
+  /** Years still ahead, whole project. Each one opens into its groups. */
+  const futureYearColumns: Column<ForecastYear>[] = [
+    {
+      key: 'fy',
+      label: 'Fiscal year',
+      locked: true,
+      value: (r) => r.fy,
+      render: (r) => (
+        <button className="btn-link" title={`Break ${r.label} down by ${TERMS.subsystemLower}`} onClick={() => setOpenFutureYear(openFutureYear === String(r.fy) ? null : String(r.fy))}>
+          <b>{r.label}</b> <span className="font-normal text-[var(--text-muted)]">{r.span}</span>
+        </button>
+      ),
+    },
+    { key: 'months', label: 'Months', value: (r) => r.months.length, num: true, optional: true },
+    { key: 'groupCount', label: 'Groups', value: (r) => r.resources.length, num: true, hint: 'How many resource groups have work left in this year.' },
+    ...forecastColumnsFor<ForecastYear>((r) => r),
+    {
+      key: 'open',
+      label: '',
+      value: () => '',
+      hint: '',
+      render: (r) => (
+        <button className="btn-link text-[11px] font-normal" onClick={() => setOpenFutureYear(openFutureYear === String(r.fy) ? null : String(r.fy))}>
+          {openFutureYear === String(r.fy) ? 'hide' : `by group (${r.resources.length})`}
+        </button>
+      ),
+    },
+  ];
+
+  /** One group inside one future year. */
+  const futureGroupColumns: Column<ForecastYearResource>[] = [
+    { key: 'code', label: TERMS.subsystem, locked: true, value: (r) => r.label || 'zzz', render: (r) => <span className="mono font-semibold">{r.code || 'Unassigned'}</span> },
+    ...forecastColumnsFor<ForecastYearResource>((r) => r),
+    {
+      key: 'share',
+      label: 'Share',
+      value: (r) => r.shareOfEarned,
+      num: true,
+      hint: 'This group as a share of everything the year has left to earn.',
+      render: (r) => <span className="tabular-nums text-[var(--text-muted)]">{fmtPct(r.shareOfEarned, 0)}</span>,
+    },
+    { key: 'active', label: 'Months', value: (r) => r.months.length, num: true, hint: 'Months inside the year this group has work in.' },
+  ];
+
   const keyedColumns: Column<TeamActual>[] = [
     { key: 'month', label: 'Month', value: (r) => r.month, render: (r) => <CellInput value={r.month} placeholder="2026-08" onCommit={(v) => editRow(r.id, { month: v.trim() })} /> },
     {
@@ -469,6 +594,19 @@ export function TeamHours() {
         <Notice tone="warn">
           {fmtHours(burn.unphasedEarned)} earned hours belong to no month, because those activities have no usable dates. The monthly rows below are that much short of the
           {' '}{fmtHours(burn.totalEarned)} h total, though the forecast underneath uses the full figure.
+        </Notice>
+      )}
+      {burn.unphasedRemaining > 0.5 && (
+        <Notice tone="warn">
+          {fmtHours(burn.unphasedRemaining)} hours of remaining budget belong to no future month, because those activities have no usable dates on the current
+          schedule. The years ahead are that much short of the {fmtHours(project.remainingHours)} h still to earn. Give them dates in P6, or key their actual dates
+          on <a href={href('progress')}>Progress</a>.
+        </Notice>
+      )}
+      {burn.overdueRemaining > 0.5 && (
+        <Notice tone="warn">
+          {fmtHours(burn.overdueRemaining)} hours of remaining budget sit on activities the current schedule says should already have finished. They are counted in
+          the first month ahead, because that is when the work is owed — but a forecast built on dates that have passed is a forecast worth re-baselining.
         </Notice>
       )}
       {burn.builtWithNoBudget.length > 0 && (
@@ -668,6 +806,52 @@ export function TeamHours() {
         </Panel>
       )}
 
+      {future.length > 0 && (
+        <Panel
+          title="Fiscal years still ahead"
+          meta={
+            <span className="flex flex-wrap items-center gap-3">
+              <span>
+                What the current schedule has left to earn in each year, and what earning it costs at the rate each group has actually achieved.
+              </span>
+              <span>Click a year to break it down by {TERMS.subsystemLower}.</span>
+            </span>
+          }
+          className="mb-3"
+        >
+          <SortableTable
+            tableId="burn-future"
+            rows={future}
+            columns={futureYearColumns}
+            rowKey={(r) => String(r.fy)}
+            defaultSort={{ key: 'fy', dir: 'asc' }}
+            maxHeight="300px"
+            rowClass={(r) => (openFutureYear === String(r.fy) ? 'row-warn' : '')}
+          />
+          {openedFutureYear && (
+            <div className="mt-3">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                {openedFutureYear.label} by {TERMS.subsystemLower} — {openedFutureYear.span}
+              </div>
+              <SortableTable
+                tableId="burn-future-group"
+                rows={openedFutureYear.resources}
+                columns={futureGroupColumns}
+                rowKey={(r) => r.code || '(unassigned)'}
+                defaultSort={{ key: 'left', dir: 'desc' }}
+                maxHeight="280px"
+              />
+            </div>
+          )}
+          <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">
+            <b>Budget left</b> is a fact about the schedule: the hours it still plans to earn, spread calendar-linearly across each activity's remaining window.{' '}
+            <b>Forecast cost</b> is arithmetic on an assumption — that each group keeps converting hours at the rate it has managed so far — so a group that has
+            built nothing yet shows a dash rather than a number that would look measured. Work the schedule says should already have finished is counted in the
+            first month ahead, because that is when it is owed. The same rows are in the workbook export as <span className="mono">FY_Forecast_By_Group</span>.
+          </p>
+        </Panel>
+      )}
+
       {burn.totalBuilt > 0 && (
         <Panel
           title={`Forecast by ${TERMS.subsystemLower}`}
@@ -689,11 +873,11 @@ export function TeamHours() {
                 <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                   {openForecast || 'Unassigned'} by fiscal year
                 </div>
-                {forecastYears.length === 0 ? (
+                {forecastActualYears.length === 0 ? (
                   <Notice tone="info">This group has earned and spent nothing in any month, so there is no year to break out.</Notice>
                 ) : (
                   <SortableTable
-                    rows={forecastYears}
+                    rows={forecastActualYears}
                     columns={[
                       {
                         key: 'fy',
@@ -723,7 +907,53 @@ export function TeamHours() {
               </div>
               <div>
                 <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                  {openForecast || 'Unassigned'} month by month
+                  {openForecast || 'Unassigned'} — fiscal years still ahead
+                </div>
+                {forecastFutureYears.length === 0 ? (
+                  <Notice tone="info">
+                    Nothing is left for this {TERMS.subsystemLower} on the current schedule, so there is no future year to show.
+                  </Notice>
+                ) : (
+                  <>
+                    <SortableTable
+                      rows={forecastFutureYears}
+                      columns={[
+                        {
+                          key: 'fy',
+                          label: 'Fiscal year',
+                          value: (x) => x.year.fy,
+                          render: (x) => (
+                            <span>
+                              <b>{x.year.label}</b> <span className="font-normal text-[var(--text-muted)]">{x.year.span}</span>
+                            </span>
+                          ),
+                        },
+                        ...forecastColumnsFor<{ year: ForecastYear; r: ForecastYearResource }>((x) => x.r),
+                        {
+                          key: 'share',
+                          label: 'Share of year',
+                          value: (x) => x.r.shareOfEarned,
+                          num: true,
+                          hint: 'This group as a share of everything that fiscal year has left to earn.',
+                          render: (x) => <span className="tabular-nums text-[var(--text-muted)]">{fmtPct(x.r.shareOfEarned, 0)}</span>,
+                        },
+                      ]}
+                      rowKey={(x) => String(x.year.fy)}
+                      defaultSort={{ key: 'fy', dir: 'asc' }}
+                      maxHeight="240px"
+                    />
+                    <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                      {openForecast || 'Unassigned'} — months still ahead
+                    </div>
+                    <div className="mt-1">
+                      <ForecastMonthTable rows={forecastFutureYears.flatMap((x) => x.r.months)} />
+                    </div>
+                  </>
+                )}
+              </div>
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  {openForecast || 'Unassigned'} month by month, to date
                 </div>
                 {forecastMonths.length === 0 ? (
                   <Notice tone="info">No month carries anything for this group.</Notice>
