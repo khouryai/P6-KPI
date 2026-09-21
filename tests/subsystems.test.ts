@@ -20,7 +20,7 @@ import { DEFAULT_SETTINGS, type LibraryEntry, type TeamActual } from '../src/eng
 import { makeActivity } from './helpers';
 
 const S = { ...DEFAULT_SETTINGS, dataDate: '2026-08-31', statusDate: '2026-08-31' };
-const base = { settings: S, locations: [], overrides: [], testProgress: [], baseline: null, snapshots: [] };
+const base = { settings: S, locations: [], overrides: [], testProgress: [], baseline: null };
 
 describe('crew composition', () => {
   it('prices one ATS plus one IXL the same as a crew of two', () => {

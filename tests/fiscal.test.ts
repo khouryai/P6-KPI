@@ -6,7 +6,7 @@
  * quietly, so the boundary cases are pinned rather than assumed.
  */
 import { describe, it, expect } from 'vitest';
-import { fiscalYearOf, fiscalYearRange, fiscalYearLabel, fiscalYearSpan, fyStart, groupByFiscalYear, resourcesInYear } from '../src/engine/fiscal';
+import { fiscalYearOf, fiscalYearRange, fiscalYearLabel, fiscalYearSpan, fyStart, groupByFiscalYear, resourcesInYear, monthsForResource, resourceCodes, fiscalYearDetail } from '../src/engine/fiscal';
 import type { BurnRow } from '../src/engine/types';
 
 const row = (month: string, earned: number, built: number, cumEarned: number, cumBuilt: number): BurnRow => ({
@@ -172,5 +172,102 @@ describe('resources inside one year', () => {
     const [year] = groupByFiscalYear(months.map((m, i) => ({ ...m, earned: [40, 25][i], built: [45, 25][i] })), 7);
     expect(resourcesInYear(year.months).reduce((s, r) => s + r.earned, 0)).toBe(year.earned);
     expect(resourcesInYear(year.months).reduce((s, r) => s + r.built, 0)).toBe(year.built);
+  });
+});
+
+/**
+ * The by-group detail, which the screen and the exported workbook both read.
+ *
+ * The figures are the same ones `resourcesInYear` already reports; what is pinned
+ * here is that cutting them the other way round — a group holding its months rather
+ * than a month holding its groups — loses nothing and invents nothing.
+ */
+describe('a group, month by month', () => {
+  const cell = (code: string, earned: number, built: number) => ({
+    code,
+    label: code || 'Unassigned',
+    earned,
+    built,
+    variance: earned - built,
+    factor: built ? earned / built : null,
+  });
+  const withCells = (month: string, cells: ReturnType<typeof cell>[]): BurnRow => ({ ...row(month, 0, 0, 0, 0), bySubsystem: cells });
+  const months = [
+    withCells('2026-06', [cell('ATS', 10, 12), cell('IXL', 4, 4)]),
+    withCells('2026-07', [cell('ATS', 30, 20), cell('IXL', 10, 25)]),
+    withCells('2026-08', [cell('ATS', 20, 20)]),
+    withCells('2026-09', [cell('ATS', 0, 0), cell('IXL', 6, 3)]),
+  ];
+
+  it('gives a group only the months it appears in, in order', () => {
+    expect(monthsForResource(months, 'IXL').map((m) => m.month)).toEqual(['2026-06', '2026-07', '2026-09']);
+  });
+
+  it('drops a month where a group did nothing, rather than reporting a zero it did not report', () => {
+    // ATS is listed in 2026-09 carrying nothing at all. A row of zeros in a group's
+    // own timeline reads as "we worked and earned nothing", which is not what happened.
+    expect(monthsForResource(months, 'ATS').map((m) => m.month)).toEqual(['2026-06', '2026-07', '2026-08']);
+  });
+
+  it('adds back to what the year says that group earned', () => {
+    const [year] = groupByFiscalYear(months.filter((m) => m.month >= '2026-07'), 7);
+    const ats = resourcesInYear(year.months).find((r) => r.code === 'ATS')!;
+    const byMonth = monthsForResource(year.months, 'ATS');
+    expect(byMonth.reduce((s, m) => s + m.earned, 0)).toBe(ats.earned);
+    expect(byMonth.reduce((s, m) => s + m.built, 0)).toBe(ats.built);
+  });
+
+  it('lists every group that appears anywhere, biggest first', () => {
+    expect(resourceCodes(months).map((r) => r.code)).toEqual(['ATS', 'IXL']);
+  });
+
+  it('carries an unnamed group as Unassigned rather than losing it', () => {
+    const codes = resourceCodes([withCells('2026-07', [cell('', 5, 5)])]);
+    expect(codes).toEqual([{ code: '', label: 'Unassigned' }]);
+  });
+});
+
+describe('the fiscal year detail the screen and the workbook share', () => {
+  const cell = (code: string, earned: number, built: number) => ({
+    code,
+    label: code || 'Unassigned',
+    earned,
+    built,
+    variance: earned - built,
+    factor: built ? earned / built : null,
+  });
+  const months: BurnRow[] = [
+    { ...row('2026-06', 14, 16, 14, 16), bySubsystem: [cell('ATS', 10, 12), cell('IXL', 4, 4)] },
+    { ...row('2026-07', 40, 45, 54, 61), bySubsystem: [cell('ATS', 30, 20), cell('IXL', 10, 25)] },
+    { ...row('2026-08', 20, 20, 74, 81), bySubsystem: [cell('ATS', 20, 20)] },
+  ];
+  const detail = fiscalYearDetail(months, 7);
+
+  it('splits on the fiscal boundary and keeps every year', () => {
+    expect(detail.map((y) => y.fy)).toEqual([2026, 2027]);
+  });
+
+  it('breaks each year down by group, and each group down by month', () => {
+    const fy27 = detail.find((y) => y.fy === 2027)!;
+    expect(fy27.resources.map((r) => r.code)).toEqual(['ATS', 'IXL']);
+    expect(fy27.resources.find((r) => r.code === 'ATS')!.months.map((m) => m.month)).toEqual(['2026-07', '2026-08']);
+    // June belongs to FY26 and must not leak into the FY27 group detail.
+    expect(fy27.resources.find((r) => r.code === 'IXL')!.months.map((m) => m.month)).toEqual(['2026-07']);
+  });
+
+  it('keeps the group rows adding back to the year they sit under', () => {
+    for (const y of detail) {
+      expect(y.resources.reduce((s, r) => s + r.earned, 0)).toBeCloseTo(y.months.reduce((s, m) => s + m.bySubsystem.reduce((t, c) => t + c.earned, 0), 0), 9);
+      expect(y.resources.reduce((s, r) => s + r.built, 0)).toBeCloseTo(y.months.reduce((s, m) => s + m.bySubsystem.reduce((t, c) => t + c.built, 0), 0), 9);
+    }
+  });
+
+  it('carries the year totals through untouched, cumulatives included', () => {
+    const fy27 = detail.find((y) => y.fy === 2027)!;
+    expect(fy27.earned).toBe(60);
+    expect(fy27.built).toBe(65);
+    // Taken from the last month, never summed: these are already running totals.
+    expect(fy27.cumEarned).toBe(74);
+    expect(fy27.cumBuilt).toBe(81);
   });
 });

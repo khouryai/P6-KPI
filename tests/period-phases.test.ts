@@ -47,7 +47,6 @@ describe('the phases of a window', () => {
       settings: S,
       locations: [],
       overrides: [],
-      snapshots: [],
       baseline: null,
       library: [{ matchKey: 'Test Type', crewSize: 1 }],
       testProgress: acts.map((a) => ({ activityId: a.activityId, pctOverride: 0.5, updatedAt: '' })),

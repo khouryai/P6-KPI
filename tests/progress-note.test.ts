@@ -35,17 +35,17 @@ describe('the progress note', () => {
     // The Two-Week Log writes it ...
     setTestProgress(update, 'A-1', { note: 'Waiting on the CTC cutover' });
     expect(noteOf(box, 'A-1')).toBe('Waiting on the CTC cutover');
-    // ... and Test Progress edits that same one, rather than adding a second row.
+    // ... and the Progress screen edits that same one, rather than adding a second row.
     setTestProgress(update, 'A-1', { note: 'Cutover done, retest booked' });
     expect(box.testProgress).toHaveLength(1);
     expect(noteOf(box, 'A-1')).toBe('Cutover done, retest booked');
   });
 
-  it('sits beside the test counts without disturbing them', () => {
+  it('sits beside the percent complete without disturbing it', () => {
     const { box, update } = harness();
-    setTestProgress(update, 'A-1', { testsTotal: 40, testsComplete: 12 });
+    setTestProgress(update, 'A-1', { pctOverride: 0.3 });
     setTestProgress(update, 'A-1', { note: 'Four cases blocked by access' });
-    expect(box.testProgress[0]).toMatchObject({ testsTotal: 40, testsComplete: 12, note: 'Four cases blocked by access' });
+    expect(box.testProgress[0]).toMatchObject({ pctOverride: 0.3, note: 'Four cases blocked by access' });
   });
 
   it('is cleared by emptying it, and takes the row with it when nothing else is keyed', () => {
@@ -55,13 +55,13 @@ describe('the progress note', () => {
     expect(box.testProgress).toEqual([]);
   });
 
-  it('keeps the row when the note goes but the counts stay', () => {
+  it('keeps the row when the note goes but the percent stays', () => {
     const { box, update } = harness();
-    setTestProgress(update, 'A-1', { testsTotal: 10, note: 'Worth a look' });
+    setTestProgress(update, 'A-1', { pctOverride: 0.6, note: 'Worth a look' });
     setTestProgress(update, 'A-1', { note: '' });
     expect(box.testProgress).toHaveLength(1);
     expect(noteOf(box, 'A-1')).toBeUndefined();
-    expect(box.testProgress[0].testsTotal).toBe(10);
+    expect(box.testProgress[0].pctOverride).toBe(0.6);
   });
 
   it('is trimmed on the way in, so a stray space is not a note', () => {

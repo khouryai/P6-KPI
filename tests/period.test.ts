@@ -94,7 +94,6 @@ function scenario(): ModelInput {
       act('A-P2-TC-X10-FA-0004', '2026-08-21', '2026-08-26', false, false, 3),
       act('A-P2-TC-X10-FA-0005', '2026-08-21', '2026-08-23', false, false, 4),
     ],
-    snapshots: [],
   };
 }
 
@@ -167,7 +166,6 @@ function earlyFinish(): ModelInput {
     testProgress: [{ activityId: id, pctOverride: 1, updatedAt: 'x' }],
     current: [act('2026-08-24', '2026-09-02', true)],
     baseline: [act('2026-08-31', '2026-09-10', false)],
-    snapshots: [],
   };
 }
 
@@ -308,7 +306,6 @@ function stalled(progressAsOf?: string): ModelInput {
     testProgress: [{ activityId: id, pctOverride: 0.5, ...(progressAsOf ? { progressAsOf } : {}), updatedAt: 'x' }],
     current: [act('2026-07-24', '2026-11-30', true)],
     baseline: [act('2026-07-24', '2026-08-14', false)],
-    snapshots: [],
   };
 }
 

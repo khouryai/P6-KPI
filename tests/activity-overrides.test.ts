@@ -32,7 +32,6 @@ function scenario(overrides: ActivityOverride[] = [], testProgress: TestProgress
     testProgress,
     current,
     baseline: null,
-    snapshots: [],
     ...extra,
   };
 }
@@ -245,16 +244,15 @@ describe('edits survive a re-import', () => {
   });
 });
 
-describe('test progress checks say what a keyed row actually is', () => {
-  const keyed = (activityId: string): TestProgress => ({ activityId, testsTotal: 10, testsComplete: 4, updatedAt: '2026-08-01T00:00:00Z' });
+describe('progress checks say what a keyed row actually is', () => {
+  const keyed = (activityId: string): TestProgress => ({ activityId, pctOverride: 0.4, updatedAt: '2026-08-01T00:00:00Z' });
 
   it('an ID in no schedule is named as such and carries what would be lost', () => {
     const c = computeModel(scenario([], [keyed('A-P2-TC-X10-FA-9999')])).testProgressChecks[0];
     expect(c.status).toBe('not in extract');
     expect(c.inBudget).toBe(false);
     expect(c.activityName).toBeNull();
-    expect(c.testsTotal).toBe(10);
-    expect(c.testsComplete).toBe(4);
+    expect(c.pctOverride).toBe(0.4);
     expect(c.reason).toMatch(/No activity with this ID is in the current schedule/i);
   });
 

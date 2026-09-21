@@ -1,5 +1,5 @@
 import { forwardRef } from 'react';
-import { ComposedChart, Line, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import type { CurvePoint } from '../../engine/types';
 import { fmtHours, fmtPct, fmtDate } from '../format';
 
@@ -10,7 +10,6 @@ import { fmtHours, fmtPct, fmtDate } from '../format';
  * values, so the curves match the portal's charts.
  */
 const INK = '#1a1a1a';
-const BRAND = '#e60012';
 const AMBER = '#d97706';
 const GOOD = '#00875a';
 const GRID = '#e4e7ec';
@@ -82,7 +81,6 @@ export const CurveChart = forwardRef<
     planned: scale(c.planned),
     forecast: scale(c.forecast),
     earned: scale(c.earned),
-    snapshot: scale(c.snapshot),
     label: c.periodEnd.slice(0, 7),
   }));
   const axisTick = { fontSize: 10.5, fill: AXIS, fontFamily: "'IBM Plex Mono', ui-monospace, Menlo, monospace" };
@@ -114,7 +112,6 @@ export const CurveChart = forwardRef<
           <Line type="monotone" dataKey="planned" legendType="plainline" name="Planned (baseline)" stroke={INK} strokeWidth={2} dot={false} isAnimationActive={false} />
           <Line type="monotone" dataKey="forecast" legendType="plainline" name="Forecast (current)" stroke={AMBER} strokeWidth={2} dot={false} strokeDasharray="6 3" isAnimationActive={false} />
           <Line type="monotone" dataKey="earned" legendType="plainline" name="Earned (actual dates)" stroke={GOOD} strokeWidth={2.5} dot={false} connectNulls={false} isAnimationActive={false} />
-          <Scatter dataKey="snapshot" name="Snapshot (status date)" fill={BRAND} shape="diamond" legendType="diamond" isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

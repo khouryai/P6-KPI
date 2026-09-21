@@ -1,11 +1,11 @@
 /**
- * Keying test progress against an activity, from wherever the person happens to be.
+ * Keying progress against an activity, from wherever the person happens to be.
  *
- * The Test Progress screen is the home of this data, but it is not the only place a
- * person is holding the answer: at a fortnightly review the counts are being read
- * out activity by activity, and making somebody leave the log, find the row again
- * on another screen and key it there is how a review ends with nothing keyed at
- * all. So the upsert lives here rather than inside one screen, and both write
+ * The Progress screen is the home of this data, but it is not the only place a
+ * person is holding the answer: at a fortnightly review the percentages are being
+ * read out activity by activity, and making somebody leave the log, find the row
+ * again on another screen and key it there is how a review ends with nothing keyed
+ * at all. So the upsert lives here rather than inside one screen, and both write
  * through it — one file, one shape, one set of rules about when a row is created
  * and when it is dropped.
  */
@@ -16,7 +16,7 @@ import type { DataUpdater } from './state';
 /** Drop undefined and empty fields so the stored JSON stays tidy. */
 export function tidyTestProgress(t: TestProgress): TestProgress {
   const out: TestProgress = { activityId: t.activityId.trim(), updatedAt: t.updatedAt };
-  for (const k of ['testsTotal', 'testsComplete', 'pctOverride', 'testStartOverride', 'testEndOverride', 'progressAsOf', 'note'] as const) {
+  for (const k of ['pctOverride', 'testStartOverride', 'testEndOverride', 'progressAsOf', 'note'] as const) {
     const v = typeof t[k] === 'string' ? (t[k] as string).trim() : t[k];
     if (v !== undefined && v !== null && v !== '') (out as Record<string, unknown>)[k] = v;
   }
@@ -26,8 +26,6 @@ export function tidyTestProgress(t: TestProgress): TestProgress {
 /** True when nothing is keyed against this activity any more. */
 function isEmpty(t: TestProgress): boolean {
   return (
-    t.testsTotal === undefined &&
-    t.testsComplete === undefined &&
     t.pctOverride === undefined &&
     t.testStartOverride === undefined &&
     t.testEndOverride === undefined &&

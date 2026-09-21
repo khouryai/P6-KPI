@@ -15,8 +15,8 @@ type StateFilter = 'all' | 'missing' | 'keyed' | 'started' | 'done' | 'nowindow'
 
 const STATE_LABEL: Record<StateFilter, string> = {
   all: 'All budgeted activities',
-  missing: 'No counts keyed yet',
-  keyed: 'Counts keyed',
+  missing: 'No percent keyed yet',
+  keyed: 'Percent keyed',
   started: 'Started, not finished',
   done: 'Complete',
   nowindow: 'Earning, but in no month',
@@ -31,7 +31,7 @@ export function TestProgress({ route }: { route: Route }) {
   const [stateFilter, setStateFilter] = useState<StateFilter>(route.params.get('flag') === 'missing' ? 'missing' : 'all');
   const [text, setText] = useState('');
   const [paste, setPaste] = useState('');
-  const [bulkTotal, setBulkTotal] = useState('');
+  const [bulkPct, setBulkPct] = useState('');
   const [showOrphans, setShowOrphans] = useState(false);
   /** Bulk tools are the exception, not the routine, so they stay folded away. */
   const [showBulk, setShowBulk] = useState(false);
@@ -98,36 +98,40 @@ export function TestProgress({ route }: { route: Route }) {
 
   /*
    * Both of these go through `src/app/testProgress.ts`, which is also what the
-   * Two-Week Log writes with. One upsert path, so a count keyed in a review and a
-   * count keyed here are the same act on the same file.
+   * Two-Week Log writes with. One upsert path, so a percent keyed in a review and a
+   * percent keyed here are the same act on the same file.
    */
   const setField = (activityId: string, patch: Partial<TP>) => setTestProgress(actions.update, activityId, patch);
 
   const clearRow = (activityId: string) => clearTestProgress(actions.update, activityId);
 
-  const markComplete = (r: Row) => {
-    if (r.testsTotal && r.testsTotal > 0) setField(r.activityId, { testsComplete: r.testsTotal });
-    else setField(r.activityId, { pctOverride: 1 });
-  };
+  const markComplete = (r: Row) => setField(r.activityId, { pctOverride: 1 });
 
-  const applyBulkTotal = () => {
-    const n = num(bulkTotal);
-    if (n === undefined || n <= 0) return;
+  /**
+   * Set the same percent across everything the filters are showing.
+   *
+   * The case this exists for is a whole location or phase that moved together — a
+   * pack signed off, a stage handed over. It applies to the rows on screen and
+   * nothing else, so what it will touch is what you can see.
+   */
+  const applyBulkPct = () => {
+    const n = asFraction(num(bulkPct));
+    if (n === undefined || n < 0) return;
     const ids = rows.map((r) => r.activityId);
     actions.update('testProgress', (tps) => {
       const next = [...tps];
       for (const id of ids) {
         const i = next.findIndex((t) => normKey(t.activityId) === normKey(id));
-        if (i >= 0) next[i] = tidy({ ...next[i], testsTotal: n, updatedAt: now() });
-        else next.push(tidy({ activityId: id, testsTotal: n, updatedAt: now() }));
+        if (i >= 0) next[i] = tidy({ ...next[i], pctOverride: n, updatedAt: now() });
+        else next.push(tidy({ activityId: id, pctOverride: n, updatedAt: now() }));
       }
       return next;
     });
-    setBulkTotal('');
-    actions.notify('ok', `Set tests total to ${n} on ${ids.length} activities. Save to write.`);
+    setBulkPct('');
+    actions.notify('ok', `Set percent complete to ${fmtPct(n, 0)} on ${ids.length} activities. Save to write.`);
   };
 
-  /** Bulk load: Activity ID, total, complete, then optional % override and window dates. */
+  /** Bulk load: Activity ID, percent complete, then optional actual dates, note and as-at. */
   const applyGrid = (grid: unknown[][], sourceLabel: string) => {
     let added = 0;
     let updated = 0;
@@ -137,15 +141,13 @@ export function TestProgress({ route }: { route: Route }) {
     for (const cells of grid) {
       const id = String(cells[0] ?? '').trim();
       if (!id || /^(p6_)?activity[ _]?id$/i.test(id)) continue;
-      const tot = num(String(cells[1] ?? ''));
-      const comp = num(String(cells[2] ?? ''));
-      const pct = asFraction(num(String(cells[3] ?? '')));
-      const ts = parseP6Date(cells[4] ?? '').iso ?? undefined;
-      const te = parseP6Date(cells[5] ?? '').iso ?? undefined;
-      const note = String(cells[6] ?? '').trim() || undefined;
-      const asOf = parseP6Date(cells[7] ?? '').iso ?? undefined;
+      const pct = asFraction(num(String(cells[1] ?? '')));
+      const ts = parseP6Date(cells[2] ?? '').iso ?? undefined;
+      const te = parseP6Date(cells[3] ?? '').iso ?? undefined;
+      const note = String(cells[4] ?? '').trim() || undefined;
+      const asOf = parseP6Date(cells[5] ?? '').iso ?? undefined;
       if (!budgetedIds.has(normKey(id))) unknown += 1;
-      const patch = tidy({ activityId: id, testsTotal: tot, testsComplete: comp, pctOverride: pct, testStartOverride: ts, testEndOverride: te, note, progressAsOf: asOf, updatedAt: now() });
+      const patch = tidy({ activityId: id, pctOverride: pct, testStartOverride: ts, testEndOverride: te, note, progressAsOf: asOf, updatedAt: now() });
       const i = next.findIndex((t) => normKey(t.activityId) === normKey(id));
       if (i >= 0) {
         next[i] = { ...next[i], ...patch };
@@ -157,7 +159,7 @@ export function TestProgress({ route }: { route: Route }) {
     }
     actions.update('testProgress', () => next);
     setPaste('');
-    if (added === 0 && updated === 0) actions.notify('error', `No usable rows found in ${sourceLabel}. Expected Activity ID, tests total, tests complete.`);
+    if (added === 0 && updated === 0) actions.notify('error', `No usable rows found in ${sourceLabel}. Expected an Activity ID and a percent complete.`);
     else actions.notify(unknown ? 'info' : 'ok', `${sourceLabel}: ${added} added, ${updated} updated${unknown ? `, ${unknown} not a budgeted activity` : ''}. Save to write.`);
   };
 
@@ -177,7 +179,7 @@ export function TestProgress({ route }: { route: Route }) {
   /** Delete a set of keyed rows, naming what is going so the confirm is informed. */
   const removeChecks = (list: TestProgressCheck[], what: string) => {
     if (list.length === 0) return;
-    if (!confirm(`Delete the test counts keyed against ${list.length} ${what} ${list.length === 1 ? 'activity' : 'activities'}? The keying cannot be recovered.`)) return;
+    if (!confirm(`Delete the progress keyed against ${list.length} ${what} ${list.length === 1 ? 'activity' : 'activities'}? The keying cannot be recovered.`)) return;
     const ids = new Set(list.map((c) => normKey(c.activityId)));
     actions.update('testProgress', (tps) => tps.filter((t) => !ids.has(normKey(t.activityId))));
     actions.notify('ok', `Removed ${list.length} keyed ${list.length === 1 ? 'row' : 'rows'}. Save to write.`);
@@ -212,17 +214,16 @@ export function TestProgress({ route }: { route: Route }) {
     {
       key: 'keyed',
       label: 'Keyed',
-      value: (c) => c.testsTotal ?? c.pctOverride ?? 0,
-      hint: 'What you would lose by deleting this row: the test counts, the percent override, the window dates and the progress note keyed against it.',
+      value: (c) => c.pctOverride ?? 0,
+      hint: 'What you would lose by deleting this row: the percent complete, the actual dates and the progress note keyed against it.',
       render: (c) => (
         <span className="text-[12px]">
-          {c.testsTotal !== null && <>{c.testsComplete ?? 0}/{c.testsTotal} tests</>}
-          {c.pctOverride !== null && <>{c.testsTotal !== null ? ', ' : ''}{fmtPct(c.pctOverride, 0)} override</>}
+          {c.pctOverride !== null && <>{fmtPct(c.pctOverride, 0)} complete</>}
           {c.testStartOverride && <>, from {c.testStartOverride}</>}
           {c.testEndOverride && <> to {c.testEndOverride}</>}
           {c.progressAsOf && <>, progress as at {c.progressAsOf}</>}
           {c.note && <>, a note: <span title={c.note}>“{c.note.length > 40 ? `${c.note.slice(0, 40)}…` : c.note}”</span></>}
-          {c.testsTotal === null && c.pctOverride === null && !c.testStartOverride && !c.testEndOverride && !c.progressAsOf && !c.note && (
+          {c.pctOverride === null && !c.testStartOverride && !c.testEndOverride && !c.progressAsOf && !c.note && (
             <span className="text-[var(--text-subtle)]">nothing</span>
           )}
         </span>
@@ -250,12 +251,10 @@ export function TestProgress({ route }: { route: Route }) {
     },
   ];
 
-  const covered = budgeted.filter((r) => r.hasTestCounts || r.pctSource === 'OVERRIDE').length;
-  const testsTotal = budgeted.reduce((s, r) => s + (r.testsTotal ?? 0), 0);
-  const testsDone = budgeted.reduce((s, r) => s + (r.testsComplete ?? 0), 0);
+  const covered = budgeted.filter((r) => r.pctSource === 'OVERRIDE').length;
   const heroStats: HeroStat[] = [
-    { label: 'Coverage', value: `${covered}/${budgeted.length}`, tone: covered === budgeted.length ? 'good' : 'amber' },
-    { label: 'Test cases', value: `${testsDone}/${testsTotal}`, tone: 'muted' },
+    { label: 'Percent keyed', value: `${covered}/${budgeted.length}`, tone: covered === budgeted.length ? 'good' : 'amber' },
+    { label: 'On P6 duration', value: budgeted.length - covered, tone: budgeted.length - covered > 0 ? 'amber' : 'good' },
     { label: 'Earned', value: fmtPct(model.summary.pctComplete, 0), tone: 'blue' },
   ];
 
@@ -318,36 +317,6 @@ export function TestProgress({ route }: { route: Route }) {
     },
     { key: 'od', label: 'OD', value: (r) => r.activity.originalDuration, num: true, optional: true },
     {
-      key: 'total',
-      label: 'Tests total',
-      value: (r) => r.testsTotal,
-      num: true,
-      render: (r) => (
-        <CellInput
-          type="number"
-          className="cell-input text-right"
-          value={r.entry?.testsTotal?.toString() ?? ''}
-          placeholder="—"
-          onCommit={(v) => setField(r.activityId, { testsTotal: num(v) })}
-        />
-      ),
-    },
-    {
-      key: 'done',
-      label: 'Complete',
-      value: (r) => r.testsComplete,
-      num: true,
-      render: (r) => (
-        <CellInput
-          type="number"
-          className="cell-input text-right"
-          value={r.entry?.testsComplete?.toString() ?? ''}
-          placeholder="—"
-          onCommit={(v) => setField(r.activityId, { testsComplete: num(v) })}
-        />
-      ),
-    },
-    {
       key: 'pct',
       label: '% complete',
       value: (r) => r.pctComplete,
@@ -364,16 +333,17 @@ export function TestProgress({ route }: { route: Route }) {
     { key: 'src', label: 'Source', value: (r) => r.pctSource, render: (r) => <Badge tone={statusTone(r.pctSource)}>{r.pctSource}</Badge> },
     {
       key: 'ov',
-      label: '% override',
+      label: '% keyed',
       value: (r) => r.entry?.pctOverride ?? null,
       num: true,
+      hint: 'The percent complete you type. It is the only thing that beats P6’s durations, and clearing it hands the activity back to them. 0 to 1, or a percentage.',
       render: (r) => (
         <CellInput
           type="number"
           className="cell-input text-right"
           value={r.entry?.pctOverride?.toString() ?? ''}
           placeholder="—"
-          title="Beats the test counts. 0 to 1, or a percentage."
+          title="Your own percent complete. Beats P6’s durations. 0 to 1, or a percentage."
           onCommit={(v) => setField(r.activityId, { pctOverride: asFraction(num(v)) })}
         />
       ),
@@ -478,7 +448,7 @@ export function TestProgress({ route }: { route: Route }) {
       render: (r) => (
         <span className="flex gap-2">
           {r.pctComplete < 1 && (
-            <button className="btn-link text-[11px]" title="Set complete to the total, or 100% when there is no total" onClick={() => markComplete(r)}>
+            <button className="btn-link text-[11px]" title="Key this activity as 100% complete" onClick={() => markComplete(r)}>
               done
             </button>
           )}
@@ -495,8 +465,8 @@ export function TestProgress({ route }: { route: Route }) {
   return (
     <Page
       eyebrow="Progress"
-      title="Test Progress"
-      subtitle="Every budgeted activity is already listed. Key the test case counts against the ones you track; anything left blank falls back to P6 duration."
+      title="Progress"
+      subtitle="Every budgeted activity is already listed. Type a percent complete against the ones you track; anything left blank falls back to P6 duration."
       stats={heroStats}
       toolbar={
         <>
@@ -535,10 +505,10 @@ export function TestProgress({ route }: { route: Route }) {
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text)]">Two separate facts</div>
             <p className="mt-1">
-              <b>How much</b> is done comes from this screen: the test counts, or a % override. <b>When</b> it was done comes from the actual dates, which are P6's until
-              you type over them in Actual start and Actual finish — here or on the <a href={href('period')}>Two-Week Log</a>, which edits the same field. Marking a row
-              <b> done</b> sets the count, not a date. It stamps nothing, and the date you clicked it is recorded for the audit trail only — no curve, no month and no
-              snapshot ever reads it.
+              <b>How much</b> is done comes from this screen: the percent complete you type, and nothing else. <b>When</b> it was done comes from the actual dates, which
+              are P6's until you type over them in Actual start and Actual finish — here or on the <a href={href('period')}>Two-Week Log</a>, which edits the same field.
+              Marking a row <b>done</b> sets the percent, not a date. It stamps nothing, and the date you clicked it is recorded for the audit trail only: no curve and no
+              month ever reads it.
             </p>
           </div>
           <div>
@@ -565,12 +535,9 @@ export function TestProgress({ route }: { route: Route }) {
             <p className="mt-1">
               A current-schedule import rewrites P6's dates and durations, and nothing else. An activity that read IN PROGRESS against the data date last month, and comes
               back carrying a real actual finish, becomes P6 ACTUAL — so its window ends on the day it really finished and its hours <b>re-spread across the months
-              retrospectively</b>. The S-curve and the Earned vs Actual rows for earlier months can therefore move on an import. Anything you keyed here — counts, %
-              override, test window — is untouched and keeps overriding P6.
-            </p>
-            <p className="mt-1">
-              Snapshots are the exception, and the reason to take one: a snapshot is frozen on the day it is written and is the only record of what the numbers said at the
-              time.
+              retrospectively</b>. The S-curve and the Earned vs Actual rows for earlier months can therefore move on an import. Anything you keyed here — the percent
+              complete and the actual dates — is untouched and keeps overriding P6. Export the workbook from <a href={href('settings')}>Settings</a> when you need a copy
+              of what the numbers said on a given day.
             </p>
           </div>
           <div className="lg:col-span-2">
@@ -590,8 +557,8 @@ export function TestProgress({ route }: { route: Route }) {
           <Notice tone="warn">
             <b>{noWindow.length} {noWindow.length === 1 ? 'activity has' : 'activities have'} progress but no date to hang it on.</b> They have a percent complete, so their
             hours count in the project total, but P6 has never actually started them and no test window is keyed — so those hours land in no month, appear on no point of
-            the S-curve, and are what Earned vs Actual reports as unphased. Give each one a <b>Test start</b> and <b>Test end</b>, or wait for the P6 import that carries its
-            actual dates.{' '}
+            the S-curve, and are what Earned vs Actual reports as unphased. Give each one an <b>Actual start</b> and <b>Actual finish</b>, or wait for the P6 import that carries
+            them.{' '}
             <button className="btn-link" onClick={() => setStateFilter('nowindow')}>show them</button>
           </Notice>
         </div>
@@ -607,19 +574,19 @@ export function TestProgress({ route }: { route: Route }) {
 
       {showBulk && (
       <div className="mb-4 grid gap-4 lg:grid-cols-3">
-        <Panel title="Set a test count across the filter">
+        <Panel title="Set a percent across the filter">
           <p className="mb-2 text-[11.5px] text-[var(--text-subtle)]">
-            Applies to the {rows.length} activities currently shown. Use it when a whole location or phase runs the same test pack.
+            Applies to the {rows.length} activities currently shown. Use it when a whole location or phase moved together. 0 to 1, or a percentage.
           </p>
           <div className="flex gap-2">
-            <input className="input w-28" type="number" placeholder="Tests total" value={bulkTotal} onChange={(e) => setBulkTotal(e.target.value)} />
-            <button className="btn" disabled={!num(bulkTotal) || rows.length === 0} onClick={applyBulkTotal}>
+            <input className="input w-28" type="number" placeholder="% complete" value={bulkPct} onChange={(e) => setBulkPct(e.target.value)} />
+            <button className="btn" disabled={num(bulkPct) === undefined || rows.length === 0} onClick={applyBulkPct}>
               Apply to {rows.length}
             </button>
           </div>
         </Panel>
 
-        <Panel title="Load counts from a file or a paste" className="lg:col-span-2">
+        <Panel title="Load percentages from a file or a paste" className="lg:col-span-2">
           <div
             className="dropzone p-3"
             onDragOver={(e) => e.preventDefault()}
@@ -630,14 +597,14 @@ export function TestProgress({ route }: { route: Route }) {
             }}
           >
             <p className="text-[11.5px] text-[var(--text-subtle)]">
-              Columns: Activity ID, tests total, tests complete, then optional % override, actual start, actual finish, progress note, progress as at. Drop an .xlsx or .csv here, or paste below.
+              Columns: Activity ID, percent complete, then optional actual start, actual finish, progress note, progress as at. Drop an .xlsx or .csv here, or paste below.
             </p>
             <input className="mt-2 block text-[12px]" type="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void applyFile(f); }} />
             <textarea
               className="input mt-2 h-14 w-full font-mono text-[11px]"
               value={paste}
               onChange={(e) => setPaste(e.target.value)}
-              placeholder={'0-P2-TC-W40-FA-0100\t120\t46'}
+              placeholder={'0-P2-TC-W40-FA-0100\t45%'}
             />
             <button className="btn btn-mini mt-2" disabled={!paste.trim()} onClick={() => applyGrid(parseDelimitedText(paste), 'Pasted block')}>
               Apply pasted block
@@ -650,8 +617,8 @@ export function TestProgress({ route }: { route: Route }) {
       {orphans.length > 0 && (
         <div className="mb-4">
           <Notice tone="warn">
-            <b>{orphans.length} keyed {orphans.length === 1 ? 'row is' : 'rows are'} doing nothing.</b> The counts are stored but the activity they name carries no budget
-            hours, so nothing can be earned from them. They are not all the same problem, and the ones worth keeping are not the ones worth deleting — open the list to see
+            <b>{orphans.length} keyed {orphans.length === 1 ? 'row is' : 'rows are'} doing nothing.</b> The progress is stored but the activity it names carries no budget
+            hours, so nothing can be earned from it. They are not all the same problem, and the ones worth keeping are not the ones worth deleting — open the list to see
             what each one actually is.{' '}
             <button className="btn-link" onClick={() => setShowOrphans((v) => !v)}>
               {showOrphans ? 'hide the detail' : `show all ${orphans.length}`}
@@ -691,7 +658,7 @@ export function TestProgress({ route }: { route: Route }) {
           />
           <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">
             <b>Not in extract</b> and <b>WBS</b> rows are safe to delete: no activity can ever claim them. A <b>REVIEW</b> or <b>EXCLUDED</b> row is the opposite — the
-            activity is really there and your counts are real, and it is the Activity Library or the Show column that is stopping it earning. Fix that and the counts start
+            activity is really there and your percent is real, and it is the Activity Library or the Show column that is stopping it earning. Fix that and it starts
             working; delete the row and you lose the keying.
           </p>
         </Panel>

@@ -142,7 +142,6 @@ const inputs = {
     defaultShiftHours: 8,
     defaultComplexity: 1.0,
     dataDate: '2026-08-31',
-    statusDate: '2026-08-31',
   },
   locations: [
     { code: 'A10', name: 'Alpha Interlocking' },
@@ -176,25 +175,15 @@ const inputs = {
   ],
   overrides: [{ activityId: '0-P2-TC-B20-FA-0060', overrideHours: 400, note: 'Hammock, agreed allowance' }],
   testProgress: [
-    { activityId: '0-P2-TC-A10-FA-0010', testsTotal: 30, testsComplete: 30, updatedAt: '2026-08-31T00:00:00Z' },
+    { activityId: '0-P2-TC-A10-FA-0010', pctOverride: 1, updatedAt: '2026-08-31T00:00:00Z' },
     { activityId: '0-P2-TC-A10-FA-0020', pctOverride: 1, testStartOverride: '2025-04-07', testEndOverride: '2025-04-25', updatedAt: '2026-08-31T00:00:00Z' },
-    { activityId: '0-P2-TC-A10-FA-0030', testsTotal: 10, testsComplete: 7, updatedAt: '2026-08-31T00:00:00Z' },
-    { activityId: '0-P2-TC-C30-FA-0050', testsTotal: 4, testsComplete: 4, updatedAt: '2026-08-31T00:00:00Z' },
-    { activityId: '0-P2-TC-E50-FA-0010', testsTotal: 20, testsComplete: 5, updatedAt: '2026-08-31T00:00:00Z' },
-    { activityId: '  Phase 2', testsTotal: 100, testsComplete: 40, updatedAt: '2026-08-31T00:00:00Z' },
-    { activityId: '0-P2-TC-Z99-FA-0010', testsTotal: 10, testsComplete: 1, updatedAt: '2026-08-31T00:00:00Z' },
-  ],
-  snapshots: [
-    {
-      statusDate: '2026-07-31',
-      takenAt: '2026-08-01T09:00:00Z',
-      note: 'July status',
-      lines: [
-        { activityId: '0-P2-TC-A10-FA-0010', pctComplete: 1, budgetHours: 80, earnedHours: 80 },
-        { activityId: '0-P2-TC-A10-FA-0020', pctComplete: 1, budgetHours: 80, earnedHours: 80 },
-        { activityId: '0-P2-TC-C30-FA-0050', pctComplete: 1, budgetHours: 50, earnedHours: 50 },
-      ],
-    },
+    { activityId: '0-P2-TC-A10-FA-0030', pctOverride: 0.7, updatedAt: '2026-08-31T00:00:00Z' },
+    { activityId: '0-P2-TC-C30-FA-0050', pctOverride: 1, updatedAt: '2026-08-31T00:00:00Z' },
+    { activityId: '0-P2-TC-E50-FA-0010', pctOverride: 0.25, updatedAt: '2026-08-31T00:00:00Z' },
+    // A WBS header and an Activity ID in no schedule: both keyed, both earning
+    // nothing, and both there so the orphan checks have something to report.
+    { activityId: '  Phase 2', pctOverride: 0.4, updatedAt: '2026-08-31T00:00:00Z' },
+    { activityId: '0-P2-TC-Z99-FA-0010', pctOverride: 0.1, updatedAt: '2026-08-31T00:00:00Z' },
   ],
 };
 writeFileSync(resolve(outDir, 'fixture-inputs.json'), JSON.stringify(inputs, null, 2) + '\n');

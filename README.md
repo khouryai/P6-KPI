@@ -6,8 +6,9 @@ budget and track Testing and Commissioning man hours on the BART CBTC program.
 - Reads Primavera P6 exports directly: **`.xer` (P6's own format), `.xlsx` or `.csv`**.
   Excel is never needed, and the column order does not have to match.
 - Derives a man hour budget for every activity from a small reusable rate library.
-- Tracks earned value from test case completion counts rather than P6 duration.
-- Plots planned, forecast and earned cumulative curves with snapshot markers.
+- Tracks earned value from a percent complete you key by hand, falling back to P6
+  duration only where nobody has keyed one.
+- Plots planned, forecast and earned cumulative curves.
 - Keeps all state as plain JSON in a OneDrive folder. No server, no database, no account,
   no network call at runtime.
 - **Runs on a laptop with no Node.js, no installer and no admin rights.**
@@ -43,10 +44,9 @@ The workbook never has to be opened again, and neither does Excel:
 | Per-location complexity | **Locations** |
 | Edit one activity | **Budget Master**: rename it, set its discipline, override its hours, note why, or take it out of the budget or out of the program entirely. It also says which resources the activity is crewed with and how many of each. Everything you edit is keyed on the Activity ID and survives every import; everything P6 owns is read-only. |
 | Get rid of REVIEW rows you will never price | **Budget Master**: filter to *Needing REVIEW*, then **Hide**. Hidden activities leave every total, curve and export, nothing is deleted, and the Hidden view brings them back. |
-| Test case counts | **Test Progress**: every budgeted activity is already listed. Key counts inline, bulk-fill across a filter, or drop a spreadsheet. Each row also carries the **actual dates** and the **progress note** the Two-Week Log writes — the same fields, editable from either screen. Keyed rows that earn nothing are listed with the name, the type and a sentence on why — and on whether deleting one costs you anything. |
+| Percent complete | **Progress**: every budgeted activity is already listed. Type a percent inline, apply one across a filter, or drop a spreadsheet. Anything left blank falls back to P6 duration. Each row also carries the **actual dates** and the **progress note** the Two-Week Log writes — the same fields, editable from either screen. Keyed rows that earn nothing are listed with the name, the type and a sentence on why — and on whether deleting one costs you anything. |
 | Progress per phase or location | **By Phase & Location**: rollups by phase, location, subsystem or work type, with drill-through into a filtered Budget Master. An activity worked by two subsystems puts half its hours under each, so the groups still add back to the budget. |
-| A fortnightly review | **Two-Week Log**: what the baseline planned for the period, what was actually achieved, and every activity behind it — completed, started, continued, missed or never started. Outcomes are read off the actual dates, so an activity that beat its baseline reads **COMPLETED** in the fortnight it finished and **COMPLETED EARLY** in a later one its baseline ran on into, instead of reappearing as still running. **Actual start** and **Actual finish** are editable on the row — they write the same dates Test Progress holds, so a correction made at the review moves the earn window, the curve and the outcome with it. Each row says what it put into its own phase and into the job. Every missed activity gets a **why**, picked from a list you extend from the dropdown itself and prune under **Reasons** (anything nobody has used yet can be deleted, the app's own suggestions included); the answer stays with the Activity ID rather than the exact end date, and the reasons are totalled on the screen. Each row also takes a **progress note**, which is the same field Test Progress shows and is separate from the Budget Master note. An activity that has started and not finished spreads its hours to the data date, so it shows movement in every period until somebody says when the work actually happened — those rows are flagged, and one **Progress as at** date on the row puts the hours in the weeks they were earned. Test counts can be keyed straight from a row. Steps period by period and stays on the period you left it on, and copies as text for a report. |
-| Status snapshots | **Snapshots**: take one, take it off the S-curve while keeping the record, or delete one that should never have been written. |
+| A fortnightly review | **Two-Week Log**: what the baseline planned for the period, what was actually achieved, and every activity behind it — completed, started, continued, missed or never started. Outcomes are read off the actual dates, so an activity that beat its baseline reads **COMPLETED** in the fortnight it finished and **COMPLETED EARLY** in a later one its baseline ran on into, instead of reappearing as still running. **Actual start** and **Actual finish** are editable on the row — they write the same dates the Progress screen holds, so a correction made at the review moves the earn window, the curve and the outcome with it. Each row says what it put into its own phase and into the job. Every missed activity gets a **why**, picked from a list you extend from the dropdown itself and prune under **Reasons** (anything nobody has used yet can be deleted, the app's own suggestions included); the answer stays with the Activity ID rather than the exact end date, and the reasons are totalled on the screen. Each row also takes a **progress note**, which is the same field the Progress screen shows and is separate from the Budget Master note. An activity that has started and not finished spreads its hours to the data date, so it shows movement in every period until somebody says when the work actually happened — those rows are flagged, and one **Progress as at** date on the row puts the hours in the weeks they were earned. The percent complete can be keyed straight from a row. Steps period by period and stays on the period you left it on, and copies as text for a report. |
 | Defaults, dates, storage, backups | **Settings** |
 | Hand a spreadsheet to project controls | **Settings → Export workbook**, plus curve CSV and chart PNG on the Dashboard. |
 
@@ -61,9 +61,16 @@ setting shared by both screens, remembered per machine.
 
 **Earned vs Actual** rolls the months up by fiscal year, with earned, actual,
 variance, factor and how complete the job was at each year end. Click a year to
-narrow the monthly table to it and to break that year down by resource. The year is named for the calendar year it ends in,
-so with a July start Jul-26 to Jun-27 reads as FY27; set the start month in
-**Settings**.
+narrow the screen to it and break it out **by resource group**; open a group to see
+its own months inside that year. Under the forecast table, opening a group shows it
+year by year and month by month across the whole project. The year is named for the
+calendar year it ends in, so with a July start Jul-26 to Jun-27 reads as FY27; set
+the start month in **Settings**.
+
+The exported workbook carries the same cuts, so the detail survives the trip to a
+meeting: `Earned_vs_Actual` (every month), `Fiscal_Year` (the year totals),
+`FY_By_Group` (each group inside each year), `FY_By_Group_Month` (the grid those
+totals are made of) and `Forecast_By_Group` (each group's estimate at completion).
 
 ## Percentages, not just hours
 
@@ -119,7 +126,7 @@ The only schedule data in the repo is the anonymised fixture in `fixtures/`, reb
 src/engine     pure calculation engine (no storage, no UI)
 src/storage    StorageAdapter: File System Access, IndexedDB, memory; atomic writes, lock, conflicts
 src/app        React screens: Dashboard, Import, Library, Locations, Budget Master,
-               Test Progress, Snapshots, Settings
+               Progress, Two-Week Log, Earned vs Actual, Settings
 server/        serve.ps1 (no-install Windows server), serve.mjs (Node equivalent),
                build plugins for the service worker and the single-file bundle
 dist/          built application, committed

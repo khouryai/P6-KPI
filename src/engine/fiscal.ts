@@ -102,6 +102,51 @@ export function resourcesInYear(months: BurnRow[]): ResourceYear[] {
     .sort((a, b) => b.earned - a.earned || b.built - a.built);
 }
 
+/** One resource in one month: the cell a "by group, by month" grid is made of. */
+export type ResourceMonth = {
+  month: string;
+  earned: number;
+  built: number;
+  variance: number;
+  factor: number | null;
+};
+
+/**
+ * Every month a resource appears in, in order.
+ *
+ * The monthly rows are keyed by month and hold a cell per resource; reading them
+ * the other way round — a resource holding its months — is what lets one group's
+ * run of months be read as a story rather than hunted for down forty rows. The
+ * months handed in decide the span, so passing one fiscal year's months gives that
+ * year's detail and passing them all gives the whole project's.
+ */
+export function monthsForResource(months: BurnRow[], code: string): ResourceMonth[] {
+  const out: ResourceMonth[] = [];
+  for (const m of months) {
+    const cell = m.bySubsystem.find((c) => c.code === code);
+    if (!cell) continue;
+    if (Math.abs(cell.earned) < 1e-9 && Math.abs(cell.built) < 1e-9) continue;
+    out.push({ month: m.month, earned: cell.earned, built: cell.built, variance: cell.variance, factor: cell.factor });
+  }
+  return out.sort((a, b) => a.month.localeCompare(b.month));
+}
+
+/** Every resource that appears anywhere in the months handed in, biggest earner first. */
+export function resourceCodes(months: BurnRow[]): { code: string; label: string }[] {
+  const acc = new Map<string, { label: string; weight: number }>();
+  for (const m of months) {
+    for (const c of m.bySubsystem) {
+      const prev = acc.get(c.code) ?? { label: c.label, weight: 0 };
+      prev.weight += Math.abs(c.earned) + Math.abs(c.built);
+      if (c.label) prev.label = c.label;
+      acc.set(c.code, prev);
+    }
+  }
+  return [...acc.entries()]
+    .sort((a, b) => b[1].weight - a[1].weight || a[0].localeCompare(b[0]))
+    .map(([code, v]) => ({ code, label: v.label }));
+}
+
 export type FiscalYear = {
   fy: number;
   label: string;
@@ -161,4 +206,24 @@ export function groupByFiscalYear(months: BurnRow[], startMonth: number): Fiscal
         cumBuilt: lastMonth?.cumBuilt ?? 0,
       };
     });
+}
+
+/** One resource inside one fiscal year, with the months that made it up. */
+export type ResourceYearDetail = ResourceYear & { months: ResourceMonth[] };
+
+/** A fiscal year with its groups broken out, each carrying its own months. */
+export type FiscalYearDetail = FiscalYear & { resources: ResourceYearDetail[] };
+
+/**
+ * The whole by-group-by-year picture in one pass.
+ *
+ * The screen and the workbook both need it, and deriving it twice is how the two
+ * drift apart: a spreadsheet that disagreed with the screen it was exported from
+ * would be worse than no spreadsheet. So it is computed here once and both read it.
+ */
+export function fiscalYearDetail(months: BurnRow[], startMonth: number): FiscalYearDetail[] {
+  return groupByFiscalYear(months, startMonth).map((y) => ({
+    ...y,
+    resources: resourcesInYear(y.months).map((r) => ({ ...r, months: monthsForResource(y.months, r.code) })),
+  }));
 }

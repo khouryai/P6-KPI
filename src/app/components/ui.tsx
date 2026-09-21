@@ -17,7 +17,6 @@ export function statusTone(s: string): Tone {
     case 'IN BUDGET':
     case 'SET':
     case 'BASELINE':
-    case 'TESTS':
     case 'OVERRIDE':
     case 'P6 ACTUAL':
     case 'TEST WINDOW':
@@ -721,7 +720,7 @@ export function Select({
  *
  * The date shown is the one the whole app works off: the test window date where one
  * was keyed, otherwise P6's, and only where P6 flags it actual. Typing here writes
- * the test window override on Test Progress — the same field, not a second copy —
+ * the test window override on Progress — the same field, not a second copy —
  * so a date corrected at a review immediately moves the earn window, the percent
  * complete's month, the S-curve and this log's own outcome. Clearing it hands the
  * date back to P6, and typing P6's own date back in is read as exactly that rather
@@ -750,8 +749,8 @@ export function ActualDateCell({
   const title = keyed
     ? `Keyed by you. It overrides P6, which ${p6 ? `has ${fmtDate(p6)}` : `has no actual ${what}`}. Clear the box to hand the date back to P6.`
     : p6
-      ? `P6's actual ${what}. Type a date to override it; it is stored as the test ${what === 'start' ? 'start' : 'end'} on Test Progress, where the same field can be edited.`
-      : `No actual ${what} yet. Type one to record it — it is stored as the test ${what === 'start' ? 'start' : 'end'} on Test Progress, and drives the earn window from then on.`;
+      ? `P6's actual ${what}. Type a date to override it; it is stored as the test ${what === 'start' ? 'start' : 'end'} on Progress, where the same field can be edited.`
+      : `No actual ${what} yet. Type one to record it — it is stored as the test ${what === 'start' ? 'start' : 'end'} on Progress, and drives the earn window from then on.`;
   return (
     <span className="flex items-center gap-1" title={title}>
       <CellInput

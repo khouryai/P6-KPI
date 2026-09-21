@@ -35,8 +35,8 @@ export function Dashboard() {
   const rows = useMemo(() => (selected === null ? model.rows : model.rows.filter((r) => r.phase === selected)), [model.rows, selected]);
   const totals = useMemo(() => rowTotals(rows), [rows]);
   const curve = useMemo(
-    () => (selected === null ? model.curve : buildCurve(rows, state.data.snapshots, dataDate).curve),
-    [selected, model.curve, rows, state.data.snapshots, dataDate],
+    () => (selected === null ? model.curve : buildCurve(rows, dataDate).curve),
+    [selected, model.curve, rows, dataDate],
   );
 
   const exportPng = async () => {
@@ -78,8 +78,8 @@ export function Dashboard() {
     { label: 'Activities with no dates at all', count: s.noDates, to: href('budget', { flag: 'nodates' }), note: 'Hours count in the total but appear on no curve.' },
     { label: 'In-budget activities on no curve', count: s.onNoCurve, to: href('budget', { flag: 'nocurve' }), note: 'A start or finish is missing or unparseable on both schedules.' },
     { label: 'Baseline missing, using current dates', count: s.baselineFallback, to: href('budget', { flag: 'blcurrent' }), note: 'Plan equals forecast for these by default, not by agreement.' },
-    { label: 'Percent complete still from P6 duration', count: s.pctFromP6, to: href('budget', { flag: 'pctp6' }), note: 'Add test case counts to move these to earned tests.' },
-    { label: 'Test progress rows not matching an activity', count: s.testProgressNotMatching, to: href('progress', { flag: 'unmatched' }), note: 'Open the list: it says what each one is and whether losing it costs anything.' },
+    { label: 'Percent complete still from P6 duration', count: s.pctFromP6, to: href('budget', { flag: 'pctp6' }), note: 'Key a percent complete to replace P6’s duration arithmetic with what you know.' },
+    { label: 'Progress rows not matching an activity', count: s.testProgressNotMatching, to: href('progress', { flag: 'unmatched' }), note: 'Open the list: it says what each one is and whether losing it costs anything.' },
     { label: 'Your edits pointing at an activity that is gone', count: s.staleOverrides, to: href('budget'), note: 'Kept in case the Activity ID comes back. Doing nothing until it does.' },
   ];
   const attention = quality.reduce((n, q) => n + (q.count > 0 ? 1 : 0), 0);
@@ -88,7 +88,7 @@ export function Dashboard() {
   // that resolves it, so the app tells you where to go rather than leaving you to
   // guess the order.
   const budgeted = model.rows.filter((r) => r.status === 'IN BUDGET');
-  const covered = budgeted.filter((r) => r.hasTestCounts || r.pctSource === 'OVERRIDE').length;
+  const covered = budgeted.filter((r) => r.pctSource === 'OVERRIDE').length;
   const steps: { title: string; note: string; done: boolean; optional?: boolean; to: string }[] = [
     {
       title: 'Import the current P6 schedule',
@@ -123,23 +123,16 @@ export function Dashboard() {
       to: href('library', { flag: s.typesNeedingShifts > 0 ? 'shifts' : 'default' }),
     },
     {
-      title: 'Key the test case counts',
+      title: 'Key the percent complete',
       note:
         budgeted.length === 0
           ? 'Nothing budgeted yet'
           : covered === budgeted.length
-            ? `All ${budgeted.length} budgeted activities covered`
-            : `${covered} of ${budgeted.length} covered. The rest fall back to P6 duration`,
+            ? `All ${budgeted.length} budgeted activities have a percent you keyed`
+            : `${covered} of ${budgeted.length} keyed. The rest fall back to P6 duration`,
       done: budgeted.length > 0 && covered === budgeted.length,
       optional: true,
       to: href('progress', { flag: 'missing' }),
-    },
-    {
-      title: 'Take a snapshot',
-      note: s.latestStatusDate ? `Last taken for ${fmtDate(s.latestStatusDate)}` : 'Records percent complete for the audit trail',
-      done: !!s.latestStatusDate,
-      optional: true,
-      to: href('snapshots'),
     },
   ];
   const outstanding = steps.filter((x) => !x.done);
@@ -175,7 +168,8 @@ export function Dashboard() {
     ['Activities with P6 actual dates', s.p6Actual],
     ['Activities on a test window', s.testWindow],
     ['Activities not started', s.notStarted],
-    ['Latest snapshot status date', s.latestStatusDate ? fmtDate(s.latestStatusDate) : 'none yet'],
+    ['Percent complete keyed by you', s.pctFromOverride],
+    ['Percent complete from P6 duration', s.pctFromP6],
   ];
 
   return (
@@ -281,7 +275,7 @@ export function Dashboard() {
               tone="good"
               sub={totals.inBudget ? `${fmtPct(totals.finished / totals.inBudget, 0)} of the activities` : undefined}
             />
-            <Stat label="In progress" value={totals.inProgress} sub={`${totals.pctFromTests} measured by test counts`} />
+            <Stat label="In progress" value={totals.inProgress} sub={`${totals.pctKeyed} of ${totals.inBudget} on a percent you keyed`} />
           </>
         ) : (
           <>
@@ -290,7 +284,7 @@ export function Dashboard() {
               label="Earned"
               value={`${fmtHours(totals.earnedHours)} h`}
               tone="good"
-              sub={`${fmtPct(totals.pctComplete, 1)} of the budget · ${totals.pctFromTests} from tests, ${totals.pctFromP6} from P6 duration`}
+              sub={`${fmtPct(totals.pctComplete, 1)} of the budget · ${totals.pctKeyed} from a keyed percent, ${totals.pctFromP6} from P6 duration`}
             />
             <Stat
               label="Remaining"
@@ -313,9 +307,6 @@ export function Dashboard() {
                 ? 'Planned, forecast and earned man hours'
                 : `Planned, forecast and earned man hours — ${selectedLabel}`
           }
-          meta={`Calendar-linear spread, ignores the P6 work calendar. Earned stops at the data date. Diamonds are snapshots.${
-            selected === null ? '' : ` Percentages are of ${selectedLabel}'s own budget.`
-          }`}
         >
           {curve.length ? (
             <CurveChart ref={chartRef} curve={curve} dataDate={dataDate} percent={percent} total={totals.budgetHours} />

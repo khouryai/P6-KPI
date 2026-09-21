@@ -28,8 +28,6 @@ import type {
   Settings,
   GroupDim,
   GroupStat,
-  Snapshot,
-  SnapshotMarker,
   Summary,
   TestProgress,
   TestProgressCheck,
@@ -310,15 +308,16 @@ export function excelRound(x: number): number {
 // Percent complete
 // ---------------------------------------------------------------------------
 
-/** Effective pct from a test progress row, or null if it says nothing (workbook Test_Progress column E). */
+/**
+ * The percent complete somebody keyed against an activity, or null when nobody has.
+ *
+ * One source, typed by hand. Anything not keyed falls back to P6's durations, and
+ * the row says which of the two it used rather than leaving it to be guessed.
+ */
 export function testPctEffective(tp: TestProgress | undefined): { pct: number; source: PctSource } | null {
   if (!tp) return null;
   if (tp.pctOverride !== undefined && tp.pctOverride !== null && Number.isFinite(tp.pctOverride)) {
-    return { pct: tp.pctOverride, source: 'OVERRIDE' };
-  }
-  if (tp.testsTotal !== undefined && tp.testsTotal !== null && tp.testsTotal > 0) {
-    const pct = Math.max(0, Math.min(1, (tp.testsComplete ?? 0) / tp.testsTotal));
-    return { pct, source: 'TESTS' };
+    return { pct: Math.max(0, Math.min(1, tp.pctOverride)), source: 'OVERRIDE' };
   }
   return null;
 }
@@ -352,22 +351,22 @@ function checkReason(
     case 'not in extract':
       return 'No activity with this ID is in the current schedule. Either it was renumbered or removed in P6, or the ID was mistyped. Keeping it costs nothing and it starts counting again if the activity comes back.';
     case 'hidden':
-      return 'You hid this activity, so it is out of the budget and these counts do nothing. Unhide it on Budget Master to put them back to work, or clear the row.';
+      return 'You hid this activity, so it is out of the budget and what you keyed does nothing. Unhide it on Budget Master to put it back to work, or clear the row.';
     case 'not budgeted':
       return a?.rowType === 'WBS'
-        ? 'This is a WBS summary header, not an activity. It can never carry hours or test counts. Safe to remove.'
+        ? 'This is a WBS summary header, not an activity. It can never carry hours or a percent complete. Safe to remove.'
         : 'This ID is in the schedule but produced no budget row, which should not happen. Worth reporting.';
     case 'REVIEW':
-      return `Its activity type "${row?.activityType ?? ''}" is not priced in the Activity Library, so it budgets zero hours and nothing can be earned. Price the type and these counts start working. Do not remove it.`;
+      return `Its activity type "${row?.activityType ?? ''}" is not priced in the Activity Library, so it budgets zero hours and nothing can be earned. Price the type and what you keyed starts working. Do not remove it.`;
     case 'EXCLUDED':
       return row?.visibility === 'EXCLUDED'
-        ? 'You marked this activity excluded, so it carries no hours. The counts are kept and do nothing until you put it back in the budget.'
+        ? 'You marked this activity excluded, so it carries no hours. What you keyed is kept and does nothing until you put it back in the budget.'
         : 'Its activity type is set to exclude in the Activity Library, so it carries no hours. Include the type, or force this one activity in from Budget Master.';
     case 'DELETED':
     case 'CANCELLED':
       return `P6 marks this activity ${status.toLowerCase()} in its name, so it is out of the budget. If it is really live work, force it in from Budget Master.`;
     case 'IN BUDGET':
-      return 'This activity is in the budget but carries zero hours, so the counts change nothing. Check its rate in the Activity Library.';
+      return 'This activity is in the budget but carries zero hours, so the percent changes nothing. Check its rate in the Activity Library.';
     default:
       return '';
   }
@@ -388,14 +387,6 @@ function firstByKey<T>(items: T[], key: (t: T) => string): Map<string, T> {
 
 export function computeModel(input: ModelInput): Model {
   const { settings, overrides, testProgress, current } = input;
-  /*
-   * A snapshot the user has taken off the curve is dropped here, once, before
-   * anything reads it. That keeps it out of the markers, out of the curve's
-   * `snapshot` column and out of the date range the curve spans — a hidden snapshot
-   * must not be able to stretch the chart to a month nothing else reaches. The
-   * record itself is untouched on disk.
-   */
-  const snapshots = input.snapshots.filter((s) => !s.hidden);
   const notes: string[] = [];
   const libIdx = indexLibrary(input.library);
   const locIdx = firstByKey<Location>(input.locations, (l) => l.code);
@@ -544,9 +535,6 @@ export function computeModel(input: ModelInput): Model {
       currentFinish: a.finishDate,
       pctComplete,
       pctSource,
-      testsTotal: tp?.testsTotal ?? null,
-      testsComplete: tp?.testsComplete ?? null,
-      hasTestCounts: !!tp && tp.testsTotal !== undefined && tp.testsTotal !== null && tp.testsTotal > 0,
       earnedHours,
       remainingHours: budgetHours - earnedHours,
       actualStart,
@@ -666,8 +654,6 @@ export function computeModel(input: ModelInput): Model {
       activityType: row?.activityType ?? a?.activityType ?? '',
       matchKey: row ? row.matchKey : null,
       budgetHours: row ? row.budgetHours : null,
-      testsTotal: t.testsTotal ?? null,
-      testsComplete: t.testsComplete ?? null,
       pctOverride: t.pctOverride ?? null,
       testStartOverride: t.testStartOverride ?? null,
       testEndOverride: t.testEndOverride ?? null,
@@ -692,19 +678,13 @@ export function computeModel(input: ModelInput): Model {
 
   // Curves.
   const totalBudget = rows.reduce((s, r) => s + r.budgetHours, 0);
-  const snapshotMarkers: SnapshotMarker[] = snapshots.map((s) => ({
-    statusDate: s.statusDate,
-    earnedHours: s.lines.reduce((x, l) => x + l.earnedHours, 0),
-    budgetHours: s.lines.reduce((x, l) => x + l.budgetHours, 0),
-  }));
-  const { curve, periods } = buildCurve(rows, snapshots, dataDate);
+  const { curve, periods } = buildCurve(rows, dataDate);
 
   // Summary.
   const acts = visibleActs;
   const count = (pred: (r: BudgetRow) => boolean) => rows.filter(pred).length;
   const earnedTotal = rows.reduce((s, r) => s + r.earnedHours, 0);
   const tpMatched = testProgress.filter((t) => rowIdx.has(normKey(t.activityId))).length;
-  const latestStatus = snapshots.map((s) => s.statusDate).filter(isValidISO).sort().pop() ?? null;
   const summary: Summary = {
     extractRows: current.length - hiddenRows.length,
     wbsRows: current.filter((a) => a.rowType === 'WBS').length,
@@ -724,7 +704,6 @@ export function computeModel(input: ModelInput): Model {
     baselineMatched: count((r) => r.baselineSource === 'BASELINE'),
     baselineFallback: count((r) => r.baselineSource === 'CURRENT'),
     noDates: count((r) => r.baselineSource === 'NONE'),
-    pctFromTests: count((r) => r.pctSource === 'TESTS' || r.pctSource === 'OVERRIDE'),
     pctFromP6: count((r) => r.pctSource === 'P6' && r.status === 'IN BUDGET'),
     pctFromOverride: count((r) => r.pctSource === 'OVERRIDE'),
     inProgress: count((r) => r.earnWindowSource === 'IN PROGRESS'),
@@ -736,7 +715,6 @@ export function computeModel(input: ModelInput): Model {
     testProgressUsingOverride: testProgress.filter((t) => t.pctOverride !== undefined && t.pctOverride !== null).length,
     rateNeedsShifts: count((r) => r.needsShifts),
     onNoCurve: count((r) => r.status === 'IN BUDGET' && r.budgetHours > 0 && !r.onPlannedCurve && !r.onForecastCurve),
-    latestStatusDate: latestStatus,
     typesWithCrewSplit: libraryStats.filter((l) => l.crewEffLines.length > 0).length,
     unassignedHours: rows.reduce((s, r) => s + (r.subsystemHours[UNASSIGNED] ?? 0), 0),
     hidden: hiddenRows.length,
@@ -793,7 +771,6 @@ export function computeModel(input: ModelInput): Model {
     library: libraryStats,
     locations: locationStats,
     curve,
-    snapshotMarkers,
     summary,
     testProgressChecks,
     notes,
@@ -809,11 +786,7 @@ export function computeModel(input: ModelInput): Model {
  * percentages are of the subset's own budget, because a phase at 40 per cent of its
  * own scope is the number anyone asking for a phase curve wants.
  */
-export function buildCurve(
-  rows: BudgetRow[],
-  snapshots: Snapshot[],
-  dataDate: string | null,
-): { curve: CurvePoint[]; periods: string[] } {
+export function buildCurve(rows: BudgetRow[], dataDate: string | null): { curve: CurvePoint[]; periods: string[] } {
   const dates: string[] = [];
   for (const r of rows) {
     for (const d of [r.baselineStart, r.baselineFinish, r.currentStart, r.currentFinish, r.earnStart, r.earnEnd]) {
@@ -821,19 +794,7 @@ export function buildCurve(
     }
   }
   if (dataDate) dates.push(dataDate);
-  for (const s of snapshots) if (isValidISO(s.statusDate)) dates.push(s.statusDate);
   if (!dates.length) return { curve: [], periods: [] };
-
-  // A snapshot records every activity that was in budget when it was taken. Cutting it
-  // down to the rows on this curve keeps the diamonds comparable with the line they sit
-  // against, instead of marking the whole project on a single phase's chart.
-  const ids = new Set(rows.map((r) => normKey(r.activityId)));
-  const snapByDate = new Map<string, number>();
-  for (const s of snapshots) {
-    const earned = s.lines.reduce((x, l) => x + (ids.has(normKey(l.activityId)) ? l.earnedHours : 0), 0);
-    if (earned === 0 && !s.lines.some((l) => ids.has(normKey(l.activityId)))) continue;
-    snapByDate.set(s.statusDate, (snapByDate.get(s.statusDate) ?? 0) + earned);
-  }
 
   const totalBudget = rows.reduce((s, r) => s + r.budgetHours, 0);
   dates.sort();
@@ -856,7 +817,6 @@ export function buildCurve(
       earned: earnedOrNull,
       plannedPct: totalBudget ? planned / totalBudget : 0,
       earnedPct: earnedOrNull === null ? null : totalBudget ? earnedOrNull / totalBudget : 0,
-      snapshot: snapByDate.get(p) ?? null,
     };
   });
   return { curve, periods };
@@ -876,7 +836,8 @@ export type RowTotals = {
   notStarted: number;
   inProgress: number;
   finished: number;
-  pctFromTests: number;
+  /** In-budget activities whose percent complete somebody keyed by hand. */
+  pctKeyed: number;
   pctFromP6: number;
 };
 
@@ -897,7 +858,7 @@ export function rowTotals(rows: BudgetRow[]): RowTotals {
     notStarted: n((r) => r.earnWindowSource === 'NOT STARTED'),
     inProgress: n((r) => r.earnWindowSource === 'IN PROGRESS'),
     finished: n((r) => r.earnWindowSource === 'P6 ACTUAL' || r.earnWindowSource === 'TEST WINDOW'),
-    pctFromTests: n((r) => r.pctSource === 'TESTS' || r.pctSource === 'OVERRIDE'),
+    pctKeyed: n((r) => r.pctSource === 'OVERRIDE'),
     pctFromP6: n((r) => r.pctSource === 'P6'),
   };
 }
@@ -979,9 +940,7 @@ export function groupRows(rows: BudgetRow[], dim: GroupDim): GroupStat[] {
       notStarted: inBudgetRows.filter((r) => r.earnWindowSource === 'NOT STARTED').length,
       inProgress: inBudgetRows.filter((r) => r.earnWindowSource === 'IN PROGRESS').length,
       finished: inBudgetRows.filter((r) => r.earnWindowSource === 'P6 ACTUAL' || r.earnWindowSource === 'TEST WINDOW').length,
-      withCounts: inBudgetRows.filter((r) => r.hasTestCounts).length,
-      testsTotal: list.reduce((s, r) => s + (r.testsTotal ?? 0), 0),
-      testsComplete: list.reduce((s, r) => s + (r.testsComplete ?? 0), 0),
+      withKeyedPct: inBudgetRows.filter((r) => r.pctSource === 'OVERRIDE').length,
       earliestStart: starts[0] ?? null,
       latestFinish: finishes[finishes.length - 1] ?? null,
     });
@@ -1238,22 +1197,5 @@ export function burnSummary(
     ),
     bySubsystem,
     builtWithNoBudget: [...builtBy.keys()].filter((c) => (budgetBy.get(c) ?? 0) === 0 && builtBy.get(c)! > 0),
-  };
-}
-
-/** Build the snapshot that a "take snapshot" action would write, without writing it. */
-export function buildSnapshot(model: Model, statusDate: string, note?: string, takenAt = new Date().toISOString()): Snapshot {
-  return {
-    statusDate,
-    takenAt,
-    note,
-    lines: model.rows
-      .filter((r) => r.status === 'IN BUDGET')
-      .map((r) => ({
-        activityId: r.activityId,
-        pctComplete: r.pctComplete,
-        budgetHours: r.budgetHours,
-        earnedHours: r.earnedHours,
-      })),
   };
 }
