@@ -557,6 +557,33 @@ export function SortableTable<T>({
     });
   }, [rows, columns, sort]);
   const toggle = (key: string) => setSort((s) => (s && s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+
+  /**
+   * A React key per row that is unique even when `rowKey` is not.
+   *
+   * Tables here are keyed on the Activity ID, and a P6 export can carry the same
+   * Activity ID twice — the import screen says so, and the engine takes the first
+   * occurrence for everything that matches by ID. That is survivable in the
+   * arithmetic and fatal in the DOM: React reconciles by key, so two rows claiming
+   * the same key leave stale <tr> elements behind. The symptom is not a crash, it
+   * is a table that stops obeying. Filter it and the row count goes UP; sort it and
+   * ascending and descending draw the same thing. Both were reported as "the
+   * filters don't work" and "sorting doesn't work", on every screen at once,
+   * because every screen keys on the Activity ID.
+   *
+   * Repeats get an occurrence suffix. A table with no duplicates — every table, on
+   * a clean export — gets exactly the keys it got before.
+   */
+  const keys = useMemo(() => {
+    const seen = new Map<string, number>();
+    return sorted.map((r) => {
+      const k = rowKey(r);
+      const n = (seen.get(k) ?? 0) + 1;
+      seen.set(k, n);
+      return n === 1 ? k : `${k}#${n}`;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sorted]);
   return (
     <div className="table-shell">
       {tableId && (
@@ -622,8 +649,8 @@ export function SortableTable<T>({
           </tr>
         </thead>
         <tbody>
-          {sorted.map((r) => (
-            <tr key={rowKey(r)} className={rowClass?.(r)}>
+          {sorted.map((r, i) => (
+            <tr key={keys[i]} className={rowClass?.(r)}>
               {columns.map((c) => (
                 <td
                   key={c.key}

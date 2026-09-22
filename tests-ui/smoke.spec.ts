@@ -140,7 +140,7 @@ test('the status report starts with no whole-project curve, and draws one when a
   await expect(page.locator('.report text', { hasText: /^DATA DATE / })).toHaveCount(1);
 });
 
-test('the status report saves its graphs as a PNG', async ({ page }) => {
+test('the status report saves the whole page as a PNG, not only the curves', async ({ page }) => {
   await open(page);
   await importSchedule(page, 'current', schedule({ finished: 4, ahead: 4 }));
   await page.goto('/#/report');
@@ -148,14 +148,41 @@ test('the status report saves its graphs as a PNG', async ({ page }) => {
   await expect(page.locator('.report .recharts-wrapper')).toHaveCount(1);
 
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Save graphs as PNG' }).click();
+  await page.getByRole('button', { name: 'Save as PNG' }).click();
   const file = await download;
-  expect(file.suggestedFilename()).toMatch(/^status-report-curves-.*\.png$/);
-  const path = await file.path();
-  const bytes = readFileSync(path!);
-  // A real PNG, and big enough to be a chart rather than an empty canvas.
+  expect(file.suggestedFilename()).toMatch(/^status-report-.*\.png$/);
+  const bytes = readFileSync((await file.path())!);
   expect(bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  expect(bytes.length).toBeGreaterThan(10_000);
+  // A picture of a chart alone would be a fraction of this. The page carries the
+  // heading, the fortnight's cards, its activities and the curve.
+  expect(bytes.length).toBeGreaterThan(60_000);
+});
+
+/**
+ * The fortnight is the review, so it leads; the curves follow it; the phase table
+ * is the closing position. Somebody handed the page reads it in that order.
+ */
+test('the status report puts the fortnight first and the phase table last', async ({ page }) => {
+  await open(page);
+  await importSchedule(page, 'baseline', schedule({ finished: 3, ahead: 2 }));
+  await importSchedule(page, 'current', schedule({ finished: 3, ahead: 2 }));
+  await page.goto('/#/report');
+  await page.locator('.no-print input[type=date]').fill('2026-01-16');
+  await page.locator('.no-print').getByRole('button', { name: 'Whole project' }).click();
+  await expect(page.locator('.report .recharts-wrapper')).toHaveCount(1);
+
+  const order = await page.locator('.report').evaluate((el) => {
+    const marks = [
+      ['log', '[data-paint="activities"]'],
+      ['curve', '.recharts-wrapper'],
+      ['phases', '[data-paint="phases"]'],
+    ] as const;
+    return marks.map(([name, sel]) => [name, el.querySelector(sel)] as const)
+      .filter(([, node]) => !!node)
+      .sort((a, b) => (a[1]!.compareDocumentPosition(b[1]!) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+      .map(([name]) => name);
+  });
+  expect(order).toEqual(['log', 'curve', 'phases']);
 });
 
 /**
@@ -184,3 +211,37 @@ test('the dashboard orders phases numerically, whole project first', async ({ pa
   const numbers = names.slice(1).map((n) => Number(n.replace('Phase ', '')));
   expect([...numbers].sort((a, b) => a - b)).toEqual(numbers);
 });
+
+/**
+ * A P6 export can carry the same Activity ID twice. That used to make every table
+ * on every screen stop obeying: React reconciles rows by key, so duplicate keys
+ * left stale <tr> elements behind — filter the table and the row count went UP,
+ * sort it and ascending and descending drew the same thing.
+ */
+test('a schedule with duplicate Activity IDs still filters and sorts', async ({ page }) => {
+  await open(page);
+  const rows: unknown[][] = [['Activity ID', 'Activity Name', 'Original Duration', 'Remaining Duration', 'Start', 'Finish']];
+  for (let i = 0; i < 4; i++) rows.push(['0-P2-TC-A10-FA-0010', `[T&C] A10 - Core Network Test ${i}`, 10 + i, 0, '05-Jan-26 A', '16-Jan-26 A']);
+  for (let i = 0; i < 4; i++) rows.push(['0-P5-TC-B20-FA-0010', `[T&C] B20 - Core Network Test ${i}`, 20 + i, 10, new Date(2027, 2, 1), new Date(2027, 2, 20)]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows, { cellDates: true }), 'P6_Extract');
+  await importSchedule(page, 'current', XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellDates: true }) as Buffer);
+
+  await page.goto('/#/progress');
+  const body = page.locator('.tbl tbody tr');
+  await expect(body).toHaveCount(8);
+  // Filtering to one phase must SHOW one phase, not leave the other phase's rows
+  // stranded in the DOM.
+  await page.locator('.page-toolbar select').first().selectOption('P2');
+  await expect(body).toHaveCount(4);
+  await page.locator('.page-toolbar select').first().selectOption('');
+  await expect(body).toHaveCount(8);
+
+  const th = page.locator('.tbl thead th').filter({ hasText: /budget h/i }).first();
+  const col = async () => (await page.locator('.tbl tbody tr td:nth-child(4)').allInnerTexts()).map((t) => t.trim());
+  await th.click();
+  const asc = await col();
+  await th.click();
+  expect(await col()).toEqual([...asc].reverse());
+});
+
