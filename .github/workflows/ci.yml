@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The staleness check below walks history, so a shallow clone will not do.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -30,12 +33,34 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: UI tests
         run: npm run test:ui
-      # dist/ and standalone/ are committed build output. If a build here changes
-      # them, the committed copy is stale and whoever pulls it runs old code.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
+      # dist/ and standalone/ are committed build output. If source has moved on
+      # since they were last rebuilt, the committed copy is stale and whoever pulls
+      # it runs old code.
+      #
+      # This cannot be a diff of a fresh build against the committed one: every
+      # build inlines its own timestamp, which changes the content hash in every
+      # asset filename, so two builds of identical source never match byte for
+      # byte. What is checkable is the history — has any source commit landed since
+      # the build was last committed?
       - name: Committed build is current
         run: |
-          if ! git diff --quiet -- dist standalone; then
-            echo "::error::dist/ or standalone/ is stale. Run 'npm run build' and commit the result."
-            git diff --stat -- dist standalone
+          built=$(git log -1 --format=%H -- dist standalone)
+          if [ -z "$built" ]; then
+            echo "::error::No commit in history touches dist/ or standalone/."
             exit 1
           fi
+          since=$(git rev-list "$built"..HEAD -- src index.html server vite.config.ts package.json package-lock.json)
+          if [ -n "$since" ]; then
+            echo "::error::dist/ and standalone/ were last built at $(git log -1 --format=%h\ %s "$built"), and source has changed since. Run 'npm run build' and commit the result."
+            git log --oneline "$built"..HEAD -- src index.html server vite.config.ts package.json package-lock.json
+            exit 1
+          fi
+          echo "dist/ and standalone/ are current as of $(git log -1 --format=%h "$built")."

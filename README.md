@@ -50,7 +50,7 @@ The workbook never has to be opened again, and neither does Excel:
 | An Activity ID that parses wrong | **Activity ID Rules**: say that any ID containing `HTT` is at location HTT, or that `LMA` means Phase 1. First match wins, each rule reports how many activities it actually catches, and the import is never rewritten — delete the rule and everything goes back. |
 | What a new import changes | **Import**: before you confirm, the preview says which activities slipped and by how many days, which were pulled in, which completed, which are new and which are gone. |
 | Staffing the work ahead | **Capacity**: what the forecast asks of each group in each fiscal year or month, against the headcount you key. Says which periods are short, and by how many hours. |
-| A page to hand over | **Status Report**: pick which phase curves go on it and which parts of the Two-Week Log, then print or save as PDF. |
+| A page to hand over | **Status Report**: pick which phase curves go on it, how big they are, and which parts of the Two-Week Log. It reads as the Two-Week Log reads — the same KPI cards, the same tables, the reason an activity was missed on the activity's own row. The whole job's position is off unless you ask for it. Print it, save it as a PDF, or save the graphs as one PNG. |
 | Defaults, dates, storage, backups | **Settings** |
 | Hand a spreadsheet to project controls | **Settings → Export workbook**, plus curve CSV and chart PNG on the Dashboard. |
 
@@ -136,6 +136,7 @@ npm install
 npm test               # engine, storage and import-format suites
 npm run dev            # dev server on http://localhost:47800
 npm run build          # rebuilds BOTH dist/ and standalone/ — commit them together
+npm run test:ui        # playwright smoke tests; needs a build, serves it on 127.0.0.1:4173
 TC_WORKBOOK=path/to/TC_P6_Budget_SCurve.xlsx npm test   # parity against the real workbook
 ```
 

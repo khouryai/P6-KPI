@@ -190,6 +190,10 @@ export const GLOSSARY: Record<string, string> = {
   Person: 'Who the hours were charged by. Optional: the rollup works per group either way, but per person is how most timesheet exports come.',
   'Needing REVIEW': 'Activities whose type has no rate library entry yet, so they carry no hours. Price the type and they join the budget.',
   'Activities needing REVIEW': 'Activities whose type has no rate library entry yet, so they carry no hours. Price the type and they join the budget.',
+  Finished: 'Activities in this group that have reached 100%.',
+  Running: 'Activities in this group that have started and not finished. Their hours accrue across the window they are working through.',
+  'Not started': 'Activities in this group that carry hours and have not begun. Nothing of their budget has been earned.',
+  Curves: 'How many S-curves are on the report: the whole project, a phase, or several of each, in the order they were picked.',
 };
 
 /** The definition for a column label, if there is one. Case and spacing tolerant. */

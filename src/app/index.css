@@ -1240,116 +1240,54 @@ hr.rule { border: 0; border-top: 1px solid var(--line-soft); margin: 0; }
   white-space: nowrap;
 }
 
-.rep-figs {
+/*
+ * KPI cards, and the row they sit in.
+ *
+ * Deliberately the same box as `.outcome-tile` on the Two-Week Log: same border,
+ * same 3px tone edge, same mono label over a tabular figure. That screen is where
+ * the review happens, and a report that looked like a different application would
+ * have to be re-read by everybody who checks it before it goes out. The one
+ * difference is that nothing here is a button, because on a report nothing filters.
+ */
+.stat-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 0.75rem 1.25rem;
-  margin-top: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 8px;
 }
-.rep-figs-tight {
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--gray-200);
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-soft);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--card-bg);
 }
-.rep-fig-label {
-  font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+.stat-tile-n { font-size: 22px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat-tile-l {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
-.rep-fig-value {
-  margin-top: 1px;
-  font-size: 21px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.15;
-}
+.stat-tile-s { font-size: 11px; color: var(--text-subtle); }
+.stat-tile.tone-good { border-left-color: var(--good); }
+.stat-tile.tone-info { border-left-color: var(--brand-blue); }
+.stat-tile.tone-warn { border-left-color: var(--warn); }
+.stat-tile.tone-bad { border-left-color: var(--bad); }
+.stat-tile.tone-muted { border-left-color: var(--gray-600); }
+.stat-tile.tone-good .stat-tile-n { color: var(--good); }
+.stat-tile.tone-bad .stat-tile-n { color: var(--bad); }
+.stat-tile.tone-warn .stat-tile-n { color: var(--warn); }
 
-.rep-block {
-  margin-top: 1.1rem;
-  break-inside: avoid;
-}
-.rep-h2 {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  border-bottom: 1px solid var(--gray-300);
-  padding-bottom: 3px;
-  margin-bottom: 0.5rem;
-  font-size: 13px;
-  font-weight: 700;
-}
-.rep-h2-note {
-  font-size: 11.5px;
-  font-weight: 400;
-  color: var(--text-muted);
-}
 .rep-empty {
   padding: 1.5rem 0;
   text-align: center;
   font-size: 12px;
   color: var(--text-subtle);
-}
-
-.rep-counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem 1.1rem;
-  margin-bottom: 0.5rem;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.rep-count b {
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-}
-
-.rep-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
-}
-.rep-table th {
-  border-bottom: 1px solid var(--gray-300);
-  padding: 3px 6px 3px 0;
-  text-align: left;
-  font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.rep-table td {
-  border-bottom: 1px solid var(--gray-100);
-  padding: 3px 6px 3px 0;
-  vertical-align: top;
-}
-.rep-table .num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.rep-table-tight {
-  width: auto;
-  min-width: min(24rem, 100%);
-  margin-bottom: 0.6rem;
-}
-.rep-id {
-  display: block;
-  font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
-  font-size: 9.5px;
-  color: var(--text-muted);
-}
-.rep-name {
-  display: block;
-  max-width: 26rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1410,22 +1348,48 @@ hr.rule { border: 0; border-top: 1px solid var(--line-soft); margin: 0; }
     padding: 0 !important;
     background: transparent !important;
   }
+  .card + .card,
+  .report .card {
+    margin-top: 0.9rem !important;
+  }
+
+  /*
+   * The report is built from the application's own tables now, and those are a
+   * scrolling box with a toolbar over it. Neither survives paper: the toolbar is
+   * chrome, and a box that scrolls prints only whatever fits in it — which is how
+   * a 60-row log becomes a 12-row log nobody notices is truncated.
+   */
+  .table-tools {
+    display: none !important;
+  }
+  .table-shell,
+  .table-wrap {
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  .tbl {
+    font-size: 9.5px;
+  }
+  .tbl thead {
+    display: table-header-group;
+  }
+  .tbl thead th {
+    position: static !important;
+  }
+  .tbl tr {
+    break-inside: avoid;
+  }
+  /* A tile's tone edge is the only thing saying which figure is which. */
+  .stat-tile,
+  .outcome-tile {
+    break-inside: avoid;
+  }
 
   .report {
     font-size: 11px;
-  }
-  .rep-block {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-  .rep-table {
-    font-size: 9.5px;
-  }
-  .rep-table thead {
-    display: table-header-group;
-  }
-  .rep-table tr {
-    break-inside: avoid;
   }
 
   /* Tone still has to survive the printer, which defaults to dropping it. */

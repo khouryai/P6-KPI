@@ -264,7 +264,34 @@ timesheets are monthly and a fortnightly grid would key two rows to the same mon
 and silently halve one. `CurveChart` keys on the full period end rather than the
 month, and draws the marker at the last period at or before the data date — which
 is the data date itself once the curve is anchored on it, and still the honest place
-for the line when it is not.
+for the line when it is not. The marker carries the date, not just the words DATA
+DATE: on a printed page or a PNG pasted into a mail nobody can hover the line, and
+"as at when?" is the first question anybody asks of an S-curve.
+
+## The status report looks like the Two-Week Log on purpose
+
+The report was first built with its own quiet print styling: small figures, hairline
+tables, no tone. It read well on paper and badly everywhere else — nobody could check
+it against the screen it came from, because it did not look like that screen. It now
+uses the application's own KPI cards and its own tables, and the print stylesheet does
+the rest: the table toolbar is chrome and is hidden, and the scrolling box the table
+normally lives in is unwound, or a sixty-row log prints as whatever twelve rows
+happened to fit in the viewport with nothing saying the rest were dropped.
+
+Two things follow from that decision. The reason an activity was missed sits in the
+activity's own row rather than in a tally above the table — a tally is unanswerable
+on a handed-over page, because the reader is looking at the activity that slipped and
+cannot tell which of the three reasons is its one. And the whole-project position is
+off by default: a report is written about a phase and a fortnight, the job's headline
+figure is on the Dashboard for anybody who wants it, and a section nobody asked for is
+the easiest thing to leave switched on by accident.
+
+The graphs save as one PNG, composed from the chart SVGs the screen is drawing at
+their real size. Not a screenshot: what comes out is as sharp as the curves are, and
+it does not depend on where the page happened to be scrolled to. Rasterising the whole
+report instead would mean a DOM-to-canvas library that has to be kept honest about
+every style rule in the application; printing to PDF already does that job properly,
+through the browser.
 
 ## When the Activity ID is wrong
 
