@@ -7,7 +7,7 @@ import { periodLog, addDays, OUTCOMES, type PeriodActivity, type PeriodOutcome }
 import { trendFrom } from '../../engine/trend';
 import { effectiveReasonFor, tallyReasons } from '../missedReasons';
 import { downloadBytes, stamp } from '../export';
-import { paintReport, paintTableFromDom, type PaintBlock, type PaintTone } from '../reportPaint';
+import { paintReport, paintTableFromDom, PAINT_TARGETS, paintChartWidth, type PaintBlock, type PaintTone } from '../reportPaint';
 import { fmtHours, fmtPct, fmtDate, todayISO } from '../format';
 import { isValidISO } from '../../engine/dates';
 import { useUnit } from '../units';
@@ -108,6 +108,8 @@ export function StatusReport() {
   const [showLogActivities, setShowLogActivities] = useState(true);
   const [logOutcomes, setLogOutcomes] = useState<PeriodOutcome[]>(['MISSED', 'COMPLETED']);
   const [showTrend, setShowTrend] = useState(false);
+  /** What the picture is meant to be dropped into, which sets how big its type comes out. */
+  const [pngTarget, setPngTarget] = useState<keyof typeof PAINT_TARGETS>('landscape');
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
 
@@ -195,16 +197,41 @@ export function StatusReport() {
    * to be able to read the fortnight's figures and the activities behind them
    * without being sent back to the application for the half that did not come.
    */
+  /**
+   * Lay the curves out at the width they will occupy in the picture.
+   *
+   * A chart captured at screen width and scaled down takes its axis labels with it,
+   * and they end up a third the size of everything else on the page. Recharts sizes
+   * itself from its container, so the container is set to the target width for as
+   * long as the capture takes and then handed back.
+   */
+  const layOutChartsAt = async (px: number | null) => {
+    for (const el of charts.current.values()) {
+      if (px === null) el.style.removeProperty('width');
+      else el.style.width = `${px}px`;
+    }
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 140))));
+  };
+
   const exportPng = async () => {
+    const target = PAINT_TARGETS[pngTarget];
     setBusy(true);
     try {
-      const bytes = await paintReport(blocks());
-      const name = `status-report-${stamp()}.png`;
-      if (state.adapterKind === 'filesystem') actions.notify('ok', `Written to ${await actions.writeExport(name, bytes)}`);
-      else downloadBytes(name, bytes, 'image/png');
+      await layOutChartsAt(paintChartWidth(target));
+      const pages = await paintReport(blocks(), { target });
+      const at = stamp();
+      const written: string[] = [];
+      for (let i = 0; i < pages.length; i++) {
+        const name = pages.length === 1 ? `status-report-${at}.png` : `status-report-${at}-${i + 1}of${pages.length}.png`;
+        if (state.adapterKind === 'filesystem') written.push(await actions.writeExport(name, pages[i]));
+        else downloadBytes(name, pages[i], 'image/png');
+      }
+      if (written.length) actions.notify('ok', `Written to ${written[0]}${written.length > 1 ? ` and ${written.length - 1} more` : ''}`);
+      else if (pages.length > 1) actions.notify('ok', `${pages.length} pages saved, each sized to fit the page you chose.`);
     } catch (err) {
       actions.notify('error', (err as Error).message);
     } finally {
+      await layOutChartsAt(null);
       setBusy(false);
     }
   };
@@ -263,6 +290,7 @@ export function StatusReport() {
       label: percent ? 'Planned' : 'Planned h',
       value: (a) => a.plannedHours,
       num: true,
+      optional: true,
       render: (a) => <span className="text-[var(--text-muted)]">{val(a.plannedHours, 1)}</span>,
     },
     {
@@ -292,12 +320,14 @@ export function StatusReport() {
       ),
     },
     { key: 'blf', label: 'BL finish', value: (a) => a.baselineFinish, render: (a) => fmtDate(a.baselineFinish) },
+
     { key: 'af', label: 'Actual finish', value: (a) => a.actualFinish, render: (a) => fmtDate(a.actualFinish) },
     {
       key: 'var',
       label: 'Days late',
       value: (a) => a.finishVarianceDays,
       num: true,
+      optional: true,
       render: (a) =>
         a.finishVarianceDays === null ? (
           <span className="text-[var(--text-subtle)]">—</span>
@@ -555,6 +585,23 @@ export function StatusReport() {
               <label className="flex cursor-pointer items-center gap-1.5">
                 <input type="checkbox" checked={showTrend} onChange={(e) => setShowTrend(e.target.checked)} /> Direction of travel
               </label>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px]">
+              <span className="text-[var(--text-muted)]">Picture for</span>
+              <select
+                className="input"
+                value={pngTarget}
+                onChange={(e) => setPngTarget(e.target.value as keyof typeof PAINT_TARGETS)}
+                title="How wide the PNG is meant to sit once it is on a page. A narrower target lays the same report out narrower, which makes every figure on it proportionally bigger."
+              >
+                {Object.entries(PAINT_TARGETS).map(([k, t]) => (
+                  <option key={k} value={k}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="mt-1.5 text-[11.5px] text-[var(--text-subtle)]">
+              The picture comes out one image per page, sized and stamped so Word places it at that width without shrinking it. It carries the columns the tables
+              below are showing, in that order — hiding columns with <b>Columns</b> makes what is left bigger on the page.
             </div>
           </div>
 
