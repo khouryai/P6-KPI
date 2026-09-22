@@ -22,3 +22,7 @@ TC-Budget/
 **/TC-Budget/
 *.lock
 local/
+
+# Playwright's own output. The suite itself is committed; its reports are not.
+/test-results/
+/playwright-report/

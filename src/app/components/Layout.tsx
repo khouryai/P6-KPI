@@ -31,11 +31,16 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
       { id: 'progress', label: 'Progress' },
       { id: 'period', label: 'Two-Week Log' },
       { id: 'team', label: `Earned vs ${TERMS.built}` },
+      { id: 'capacity', label: 'Capacity' },
+      { id: 'report', label: 'Status Report' },
     ],
   },
   {
     section: 'Setup',
-    items: [{ id: 'settings', label: 'Settings' }],
+    items: [
+      { id: 'idrules', label: 'Activity ID Rules' },
+      { id: 'settings', label: 'Settings' },
+    ],
   },
 ];
 

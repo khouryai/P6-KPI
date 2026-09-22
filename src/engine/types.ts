@@ -2,6 +2,11 @@
  * Domain types. These are serialised as-is to the JSON files in the OneDrive store.
  * Dates are ISO calendar dates (YYYY-MM-DD) unless stated otherwise.
  */
+import type { Cadence } from './dates';
+import type { CapacitySettings } from './capacity';
+
+export type { Cadence };
+export type { CapacitySettings, Headcount } from './capacity';
 
 export type Basis = 'RATE' | 'DUR';
 
@@ -13,11 +18,28 @@ export type Settings = {
   defaultComplexity: number; // 1.00
   dataDate: string; // ISO date, end of the earned curve
   /**
+   * How often the S-curve reports: month ends, or every two weeks or every week
+   * anchored on the data date. Optional, because every store written before the
+   * curve could report fortnightly has no such key, and month ends are what it did.
+   */
+  curveCadence?: Cadence;
+  /**
+   * The import id of the baseline to measure against, when it should not simply be
+   * the newest one. Absent means the newest, which is what the app did before more
+   * than one baseline could be kept.
+   */
+  baselineImportId?: string;
+  /**
    * The calendar month a fiscal year starts in, 1-12. 7 (July) is the usual
    * transit-agency year; 1 makes a fiscal year a calendar year. Optional, because
    * every store written before fiscal years existed has no such key.
    */
   fiscalYearStartMonth?: number;
+  /**
+   * What one person is worth in a month, for the capacity view. Absent in every
+   * store written before it existed, and defaulted rather than assumed to be zero.
+   */
+  capacity?: CapacitySettings;
 };
 
 /**
@@ -58,6 +80,35 @@ export type LibraryEntry = {
   notes?: string;
   /** A key the user retired. Never re-added by import; its activities show as REVIEW. */
   retired?: boolean;
+};
+
+/**
+ * A rule that overrides what an Activity ID is read as.
+ *
+ * The ID is parsed positionally — location is the 4th dash-delimited segment, phase
+ * the 2nd — which works until a schedule carries a family that does not follow the
+ * convention. Then the choice is to mis-report it forever or to hard-code an
+ * exception in the parser, and the second is worse: the next one needs a code
+ * change, and nobody outside the repository can see why an activity groups where it
+ * does.
+ *
+ * So the exceptions are data. A rule says "an ID containing HTT is at location HTT",
+ * and it is listed, editable and removable by the person who found the discrepancy.
+ */
+export type IdRuleField = 'location' | 'phase';
+
+export type IdRule = {
+  id: string;
+  /** Text to find in the Activity ID. Case-insensitive, matched anywhere in it. */
+  match: string;
+  /** Which reading of the ID this rule replaces. */
+  field: IdRuleField;
+  /** The location code, or the phase code (`P1`; a bare number is read as one). */
+  value: string;
+  /** Off without being deleted, so a rule can be tried and put aside. */
+  disabled?: boolean;
+  /** Why this exception exists, for whoever reads the list next. */
+  note?: string;
 };
 
 export type RowType = 'WBS' | 'ACTIVITY';
@@ -309,8 +360,12 @@ export type BudgetRow = {
    */
   hidden: boolean;
   location: string;
+  /** True when a rule decided the location rather than the ID's own 4th segment. */
+  locationFromRule: boolean;
   /** Raw 2nd segment of the Activity ID, e.g. "P2". Derived, never stored. */
   phase: string;
+  /** True when a rule decided the phase rather than the ID's own 2nd segment. */
+  phaseFromRule: boolean;
   /** "P2" shown as "Phase 2". */
   phaseName: string;
   /** Raw 3rd segment, e.g. "TC" or "AC". */
@@ -730,6 +785,21 @@ export type Model = {
   notes: string[];
 };
 
+/**
+ * The model before the timesheets are folded in.
+ *
+ * Everything here is a function of the schedule, the library and the user's edits.
+ * `attachBurn` adds the earned-against-built half, which depends on team hours and
+ * on nothing this carries — which is exactly why the two are computed separately.
+ */
+export type ModelBase = Omit<Model, 'burn'> & {
+  /** The subsystem definitions the rollups were built with, for the burn to reuse. */
+  subsystemDefs: Subsystem[];
+  /** Month ends spanning the schedule: the grid the monthly burn is laid on. */
+  periods: string[];
+  dataDate: string | null;
+};
+
 export type ModelInput = {
   settings: Settings;
   locations: Location[];
@@ -744,6 +814,8 @@ export type ModelInput = {
   testProgress: TestProgress[];
   current: P6Activity[];
   baseline: P6Activity[] | null;
+  /** Exceptions to how an Activity ID is read. Absent in every older store. */
+  idRules?: IdRule[];
 };
 
 export const DEFAULT_SETTINGS: Settings = {

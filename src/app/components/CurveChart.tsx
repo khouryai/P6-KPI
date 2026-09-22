@@ -73,16 +73,36 @@ export const CurveChart = forwardRef<
     percent?: boolean;
     /** The divisor for percent mode: the whole budget these curves are drawn from. */
     total?: number;
+    /** Month-end periods label as YYYY-MM; anything finer needs the day. */
+    monthly?: boolean;
   }
->(function CurveChart({ curve, dataDate, height = 380, percent = false, total = 0 }, ref) {
+>(function CurveChart({ curve, dataDate, height = 380, percent = false, total = 0, monthly = true }, ref) {
   const scale = percent && total > 0 ? (v: number | null) => (v === null ? null : v / total) : (v: number | null) => v;
+  /*
+   * The tick is the period end itself, not the month it falls in.
+   *
+   * A month label was fine while every period WAS a month end. On a fortnightly
+   * curve two periods share a month, so a month label puts two points on one tick
+   * and — worse — the DATA DATE marker, which is matched against this label, lands
+   * on whichever of them Recharts drew last rather than on the data date. The full
+   * date is unambiguous, and the axis formats it short.
+   */
   const data = curve.map((c) => ({
     ...c,
     planned: scale(c.planned),
     forecast: scale(c.forecast),
     earned: scale(c.earned),
-    label: c.periodEnd.slice(0, 7),
+    label: c.periodEnd,
   }));
+  /*
+   * The marker sits on a period the axis actually has. With the curve anchored on
+   * the data date that is the data date itself; where it is not — a curve still on
+   * month ends, or a data date outside the schedule — the last period at or before
+   * it is the honest place for the line, rather than no line at all.
+   */
+  const marker = dataDate
+    ? (curve.filter((c) => c.periodEnd <= dataDate).pop()?.periodEnd ?? null)
+    : null;
   const axisTick = { fontSize: 10.5, fill: AXIS, fontFamily: "'IBM Plex Mono', ui-monospace, Menlo, monospace" };
   return (
     <div ref={ref} className="w-full" style={{ height }}>
@@ -90,7 +110,15 @@ export const CurveChart = forwardRef<
         {/* The top margin is the DATA DATE label's room: at 8 it was cropped by the frame. */}
         <ComposedChart data={data} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={{ stroke: GRID }} interval="preserveStartEnd" minTickGap={28} />
+          <XAxis
+            dataKey="label"
+            tick={axisTick}
+            tickLine={false}
+            axisLine={{ stroke: GRID }}
+            interval="preserveStartEnd"
+            minTickGap={28}
+            tickFormatter={(v: string) => (monthly ? v.slice(0, 7) : fmtDate(v))}
+          />
           <YAxis
             tick={axisTick}
             tickLine={false}
@@ -101,9 +129,9 @@ export const CurveChart = forwardRef<
           />
           <Tooltip content={<CurveTooltip percent={percent} />} cursor={{ stroke: '#cfd5df', strokeDasharray: '3 3' }} />
           <Legend wrapperStyle={{ fontSize: 11.5, paddingTop: 8 }} />
-          {dataDate && (
+          {marker && (
             <ReferenceLine
-              x={dataDate.slice(0, 7)}
+              x={marker}
               stroke="#cfd5df"
               strokeDasharray="4 4"
               label={{ value: 'DATA DATE', position: 'top', fontSize: 9.5, fill: AXIS, letterSpacing: '0.1em' }}

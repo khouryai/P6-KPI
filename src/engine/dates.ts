@@ -153,6 +153,57 @@ export function monthEndsBetween(fromIso: string, toIso: string): string[] {
   return out;
 }
 
+/**
+ * How often the S-curve reports. Not a property of the data — a property of the
+ * meeting it is read in.
+ */
+export type Cadence = 'month' | 'fortnight' | 'week';
+
+export const CADENCE_DAYS: Record<Exclude<Cadence, 'month'>, number> = { fortnight: 14, week: 7 };
+
+/** Add days to an ISO date. */
+export function addDaysISO(iso: string, days: number): string {
+  return msToISO(isoToMs(iso) + days * 86_400_000);
+}
+
+/**
+ * The period ends a curve is plotted at, anchored so one of them IS the data date.
+ *
+ * Month ends are the obvious cadence and the wrong one for a fortnightly review. A
+ * data date of Wed 23 Sep against month-end periods puts the last earned point at
+ * 31 Aug — three weeks of reported progress missing from the line — and the DATA
+ * DATE marker on 30 Sep, because the nearest period is the one the data date falls
+ * inside rather than the date itself. Nothing is stale; the grid is simply too
+ * coarse to land on the day being reported.
+ *
+ * Anchoring on the data date fixes both at once: stepping out from it in both
+ * directions guarantees a period exactly there, so the earned line runs to the day
+ * it was measured and the marker sits on it. Without a data date there is nothing
+ * to anchor to, and the cadence falls back to month ends.
+ */
+export function periodEndsBetween(fromIso: string, toIso: string, cadence: Cadence = 'month', anchor: string | null = null): string[] {
+  if (cadence === 'month' || !anchor || !isValidISO(anchor)) return monthEndsBetween(fromIso, toIso);
+  const step = CADENCE_DAYS[cadence];
+  // Walk back from the anchor to the first period at or before the span's start, so
+  // the series always contains the anchor however far back the schedule reaches.
+  let first = anchor;
+  while (first > fromIso) first = addDaysISO(first, -step);
+  const out: string[] = [];
+  for (let p = first; p <= toIso; p = addDaysISO(p, step)) out.push(p);
+  /*
+   * One step past the end, unless the last period already covers it. A month-end
+   * series always ends after the last date in the schedule; a fixed step usually
+   * does not, and a curve whose final period falls short of the last finish never
+   * reaches 100% — which reads as a plan that does not complete rather than as a
+   * grid that stopped early.
+   */
+  if (out.length && out[out.length - 1] < toIso) out.push(addDaysISO(out[out.length - 1], step));
+  // A span ending before the anchor would otherwise stop short of it, leaving the
+  // data date off its own chart.
+  if (!out.length || out[out.length - 1] < anchor) out.push(anchor);
+  return out;
+}
+
 export function maxISO(a: string, b: string): string {
   return a >= b ? a : b;
 }

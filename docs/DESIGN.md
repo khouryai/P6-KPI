@@ -11,7 +11,8 @@ show. It reproduces the source workbook's numbers exactly; see
 Order of resolution per activity:
 
 1. Row type: blank Activity Name is a WBS row. Parsed, stored, never budgeted.
-2. Location: 4th dash-delimited segment of the trimmed Activity ID.
+2. Location: 4th dash-delimited segment of the trimmed Activity ID, unless an
+   Activity ID Rule overrules it.
 3. Activity type: everything after the first `" - "` in the name.
 4. Exclude reason: `(Deleted)` or `(Cancelled)` anywhere in the name, case-insensitive.
 5. Match key: exact (case-insensitive) library key, else the type with its last
@@ -238,6 +239,162 @@ start" means the export dropped the flag rather than that the work has not begun
 and zeroing every row on the strength of a flag that was never written would be the
 same class of mistake pointing the other way. The flag is the better witness only
 where the flag exists.
+
+## How often the curve reports
+
+Month ends were the only cadence, and they are the wrong one for a fortnightly
+review. A data date of Wed 23 Sep against month-end periods put the last earned
+point at 31 Aug — three weeks of reported progress off the end of the line — and
+the DATA DATE marker on 30 Sep, because the marker was matched on `YYYY-MM` and the
+nearest period was the one the data date fell *inside*. Nothing was stale. The grid
+was too coarse to land on the day being reported, and two symptoms that looked like
+separate bugs were one.
+
+`periodEndsBetween(from, to, cadence, anchor)` steps out from the **data date** in
+both directions, so a period lands exactly on it and the earned line ends where it
+was measured. With no anchor, or on `month`, it is `monthEndsBetween` unchanged. The
+series is extended one step past the end of the span, because a fixed step rarely
+lands on the last finish and a curve whose final period falls short never reaches
+100% — which reads as a plan that does not complete rather than as a grid that
+stopped early.
+
+Two grids come out of `computeModel`, on purpose. The curve runs at the review's
+cadence; `monthlyEarned` and `monthlyRemaining` stay on month ends, because
+timesheets are monthly and a fortnightly grid would key two rows to the same month
+and silently halve one. `CurveChart` keys on the full period end rather than the
+month, and draws the marker at the last period at or before the data date — which
+is the data date itself once the curve is anchored on it, and still the honest place
+for the line when it is not.
+
+## When the Activity ID is wrong
+
+The ID is parsed positionally: location is the 4th dash-delimited segment, phase the
+2nd. That holds until a schedule carries a family that does not follow the
+convention — `HTT` naming a location that is not in the 4th segment, `LMA` standing
+for a phase. The two obvious answers are both bad: live with the mis-grouping, or
+hard-code the exception in `parse.ts`, which means a code change for every new one
+and no way for the person who found it to see why an activity groups where it does.
+
+So the exceptions are data. `IdRule` says "if the Activity ID contains this text,
+set its location (or phase) to that", first match wins, edited on the **Activity ID
+Rules** screen and stored in `id-rules.json`.
+
+They are applied in `computeModel`, not at import, and that placement is the point:
+a rule added now re-groups the schedule already loaded, with nothing re-imported.
+The import is never touched — `row.activity.location` still says exactly what P6
+said, and deleting the rule puts everything back. `BudgetRow` carries
+`locationFromRule` / `phaseFromRule` so a screen can say the reading was overruled.
+
+Two consequences worth stating, both of which a rule applied later would have got
+wrong. The rule resolves at the **top** of the row loop, before the complexity
+factor is looked up, so an activity moved to another location prices at that
+location's factor. And a location a rule invents is appended to the location stats,
+because `locations.json` only ever learns codes discovery found — without it a code
+rows were grouped under would be missing from the Locations screen and unable to
+carry a factor at all.
+
+The screen counts what each rule actually catches against the live schedule, with
+the rules above it applied first. A rule matching nothing is the common mistake, and
+it is silent: it reads exactly like one that is working.
+
+## What changed on import
+
+`diffSchedules(before, after)` compares the incoming file against the schedule of
+the same kind already in use, and the Import screen shows it **before** the confirm
+button — while it is still a decision rather than a fact. It reports only what P6
+owns: dates, durations, the name, and whether a date became actual. Nothing the
+user keyed is involved, because an import cannot touch it.
+
+WBS rows are excluded. They carry rolled-up durations that move whenever anything
+underneath them does, and including them would bury every real change under a
+hundred summary rows that say nothing on their own. Duplicate Activity IDs resolve
+first-wins, as every other join in the application does.
+
+The slip list sorts worst first, which is the order somebody reading a change report
+actually wants. "Newly finished" and "newly started" are separate lists rather than
+one: an activity is not both.
+
+## Which baseline
+
+`data.baseline` is the newest baseline import and remains the default. A programme
+that re-baselines still has to report variance against the baseline it was approved
+on, so `settings.baselineImportId` can pin an earlier import and the planned curve,
+the two-week log and every variance follow it.
+
+Only the baselines that might be needed are read into memory — the newest, plus the
+pinned one when that is a different import. Every baseline ever imported stays in
+`imports/` and in the index; reading forty full schedules to populate a dropdown
+would be absurd. A pinned id that is no longer in the index falls back to the newest
+and says so rather than silently reporting against nothing.
+
+## Capacity is the one thing the app cannot derive
+
+The forecast already says what each group still has to do and what it will cost at
+the rate that group achieves. Turning that into a staffing answer needs one more
+fact — how many people are in the group — and no schedule contains it. So headcount
+is keyed, per group, optionally from a month, and everything in `capacity.ts` is
+arithmetic on it.
+
+Two decisions worth stating. Demand is the forecast **cost**, not the budget: a
+group converting at 0.7 needs half again as many hours as its work is worth, and
+staffing against the budget would under-staff it by that much. Where a group has no
+rate yet the budget is used instead, which is the only figure available. And a group
+nobody has keyed a headcount for reports demand and **no verdict** — null supply,
+null gap, null load — because "nobody has said" and "nobody is available" are
+different claims and only one of them is true.
+
+## Trend is read, not stored
+
+`trendFrom` takes the monthly earned-against-built rows, which are already history,
+and reports the last N active months against the N before them. Nothing has to be
+snapshotted for it to exist.
+
+Two window means rather than a fitted slope, deliberately: a regression through four
+noisy months invites more confidence than four noisy months deserve. Months where
+nothing was earned and nothing was built are dropped **before** the windows are
+taken — otherwise a programme with a shutdown December reports a collapsing rate
+every January, which is a fact about the calendar presented as a fact about the
+work. And a pace of zero yields a null projection rather than a division that would
+produce a finish date out of nothing moving.
+
+## The status report
+
+One page, printed or saved as PDF, for somebody who was not at the review. What goes
+on it is a choice — which phase curves, whether the two-week log is included and
+which outcomes from it — because the audience changes: a phase lead wants their own
+curve and the fortnight's misses, a programme meeting wants the whole job.
+
+The page carries almost no prose, and that is the point. Everything else in this
+application explains itself as you work, through hints, notes under figures and a
+glossary on every abbreviated heading. A printed page is read at a glance by someone
+who cannot hover anything and will not read a paragraph, so it states figures and
+names and leaves the explaining to whoever is presenting it.
+
+Printing is CSS rather than a second rendering path. `@media print` drops the
+sidebar, the save strips, the toasts, the page hero and everything marked
+`.no-print` — which is the report builder — and unwinds the flex-column-at-viewport
+-height layout the application uses into ordinary block flow, because paper has no
+viewport. Chart tooltips are hidden too: a tooltip is wherever the cursor happened
+to be, and on paper it is a box of numbers obscuring the chart it belongs to.
+
+## Bulk edits take the filter as the selection
+
+Budget Master's bulk panel applies to whatever the filters are showing. There is no
+checkbox column, on purpose: it would be a second way to say what the row of
+dropdowns already says, and the two would disagree the moment a filter changed under
+a set of ticks. What you can see is what it touches, the count is in the button, and
+the confirm says the number back. An override left with nothing in it is deleted
+rather than kept as an empty row.
+
+## Phases read in their own order
+
+Every other rollup sorts by hours, biggest first, because the question there is
+where the money is. The dashboard's phase buttons sort **numerically** on the `P<n>`
+code, with the whole project first and non-numeric codes last. A row of phase
+buttons is a place in the programme, and somebody looking for Phase 5 should find it
+between 4 and 6 rather than wherever its budget puts it. It is a string sort only in
+the sense that `P10` must come after `P9`, which is exactly what a string sort gets
+wrong.
 
 
 `test-progress.json` still stores only the activities someone actually keyed something

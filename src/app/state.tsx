@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { Model, ModelInput, ScheduleImport, ImportKind, ImportIndexEntry, P6Activity } from '../engine/types';
-import { computeModel } from '../engine/compute';
+import type { Model, ModelBase, ScheduleImport, ImportKind, ImportIndexEntry, P6Activity } from '../engine/types';
+import { attachBurn, computeBase } from '../engine/compute';
 import { discoverLibrary, discoverLocations } from '../engine/discover';
 import type { StorageAdapter } from '../storage/adapter';
 import { FileSystemAdapter } from '../storage/fileSystemAdapter';
@@ -507,7 +507,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const b = bundle.data;
     // A backup taken before subsystems existed has neither key. Default them so a
     // restore from an old file does not write "undefined" over a newer store.
-    for (const key of ['settings', 'locations', 'library', 'overrides', 'testProgress', 'subsystems', 'teamActuals'] as const) {
+    for (const key of ['settings', 'locations', 'library', 'overrides', 'testProgress', 'subsystems', 'teamActuals', 'idRules', 'headcounts'] as const) {
       await store.saveFile(key, b[key] ?? (key === 'settings' ? b.settings : []));
     }
     // Its own line: unlike every other file this one is an object, so the empty
@@ -534,21 +534,48 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [commitImport, readImport],
   );
 
-  const model = useMemo<Model>(() => {
-    const d = state.data;
-    const input: ModelInput = {
-      settings: d.settings,
-      locations: d.locations,
-      library: d.library,
-      overrides: d.overrides,
-      testProgress: d.testProgress,
-      subsystems: d.subsystems,
-      teamActuals: d.teamActuals,
-      current: d.current?.activities ?? [],
-      baseline: d.baseline?.activities ?? null,
-    };
-    return computeModel(input);
-  }, [state.data]);
+  /*
+   * The model in two stages, because its halves change at different times.
+   *
+   * `computeBase` is the schedule: a thousand rows priced, dated, rolled up and
+   * plotted. `attachBurn` is the timesheets laid against it. Keying a month of team
+   * hours cannot move an activity or bend a curve, and the screen where people
+   * paste team hours is the one that would otherwise pay for a full rebuild on
+   * every paste. Each stage depends on exactly the store files it reads, so an edit
+   * to one leaves the other's work alone.
+   */
+  const d = state.data;
+  /*
+   * Which baseline the job is measured against.
+   *
+   * `data.baseline` is the newest import of that kind, and that is the default. A
+   * programme that re-baselines still has to be able to show variance against the
+   * one it was approved on, so Settings can pin an earlier import and everything
+   * downstream — the planned curve, the two-week log, every variance — follows it.
+   * A pinned id that no longer exists falls back to the newest rather than to none.
+   */
+  const chosenBaseline = useMemo(() => {
+    const pinned = d.settings.baselineImportId;
+    if (!pinned || d.baseline?.id === pinned) return d.baseline;
+    return d.baselines.find((b) => b.id === pinned) ?? d.baseline;
+  }, [d.settings.baselineImportId, d.baseline, d.baselines]);
+
+  const base = useMemo<ModelBase>(
+    () =>
+      computeBase({
+        settings: d.settings,
+        locations: d.locations,
+        library: d.library,
+        overrides: d.overrides,
+        testProgress: d.testProgress,
+        subsystems: d.subsystems,
+        idRules: d.idRules,
+        current: d.current?.activities ?? [],
+        baseline: chosenBaseline?.activities ?? null,
+      }),
+    [d.settings, d.locations, d.library, d.overrides, d.testProgress, d.subsystems, d.idRules, d.current, chosenBaseline],
+  );
+  const model = useMemo<Model>(() => attachBurn(base, d.teamActuals), [base, d.teamActuals]);
 
   const writeExport = useCallback(async (name: string, bytes: Uint8Array) => {
     const store = storeRef.current;

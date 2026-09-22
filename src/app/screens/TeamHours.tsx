@@ -23,6 +23,7 @@ import {
   type ResourceMonth,
   type ResourceYearDetail,
 } from '../../engine/fiscal';
+import { trendFrom, direction } from '../../engine/trend';
 import { TERMS } from '../../engine/vocab';
 
 const GRID = '#e4e7ec';
@@ -191,6 +192,17 @@ export function TeamHours() {
     },
     { label: 'Factor', value: project.factor === null ? '—' : project.factor.toFixed(2), tone: project.factor === null ? 'muted' : project.factor >= 1 ? 'good' : 'amber' },
   ];
+
+  /*
+   * Direction, not position.
+   *
+   * Read off the monthly rows that already exist, so nothing has to be kept for it.
+   * Two window means rather than a fitted slope: a slope through four noisy months
+   * invites more confidence than four noisy months deserve.
+   */
+  const trend = useMemo(() => trendFrom(burn.months, project.budgetHours), [burn.months, project.budgetHours]);
+  const factorDir = direction(trend.recentFactor, trend.priorFactor, 0.03);
+  const paceDir = direction(trend.recentPctPerMonth, trend.priorPctPerMonth, 0.002);
 
   const chart = useMemo(
     () => burn.months.map((m) => ({
@@ -647,6 +659,71 @@ export function TeamHours() {
               </div>
               <div className="text-[12px] text-[var(--text-muted)]">
                 {(project.varianceAtCompletion ?? 0) >= 0 ? 'Forecast to come in under budget.' : 'The overrun if the current rate holds. Re-forecast.'}
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {trend.points.length >= 2 && (
+        <Panel
+          className="mb-3"
+          title="Which way it is moving"
+          meta={`The last ${trend.window} active ${trend.window === 1 ? 'month' : 'months'} against the ${trend.window} before them. Every other figure on this screen is a position; this is the direction.`}
+        >
+          <div className="grid gap-3 md:grid-cols-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Factor, recent</div>
+              <div className={`text-[26px] font-semibold ${trend.recentFactor === null ? '' : trend.recentFactor >= 1 ? 'tone-good' : 'tone-bad'}`}>
+                {trend.recentFactor === null ? '—' : trend.recentFactor.toFixed(2)}
+              </div>
+              <div className="text-[12px] text-[var(--text-muted)]">
+                {trend.priorFactor === null ? (
+                  'Nothing before it to compare with yet.'
+                ) : (
+                  <>
+                    Against {trend.priorFactor.toFixed(2)} before —{' '}
+                    <b className={`tone-${factorDir === 'better' ? 'good' : factorDir === 'worse' ? 'bad' : 'muted'}`}>
+                      {factorDir === 'better' ? 'improving' : factorDir === 'worse' ? 'getting worse' : 'holding'}
+                    </b>
+                    .
+                  </>
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Progress a month</div>
+              <div className="text-[26px] font-semibold">{trend.recentPctPerMonth === null ? '—' : fmtPct(trend.recentPctPerMonth, 2)}</div>
+              <div className="text-[12px] text-[var(--text-muted)]">
+                {trend.priorPctPerMonth === null ? (
+                  'Nothing before it to compare with yet.'
+                ) : (
+                  <>
+                    Against {fmtPct(trend.priorPctPerMonth, 2)} before —{' '}
+                    <b className={`tone-${paceDir === 'better' ? 'good' : paceDir === 'worse' ? 'bad' : 'muted'}`}>
+                      {paceDir === 'better' ? 'speeding up' : paceDir === 'worse' ? 'slowing down' : 'steady'}
+                    </b>
+                    .
+                  </>
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">At this pace</div>
+              <div className="text-[26px] font-semibold">
+                {trend.monthsToFinish === null ? '—' : `${Math.ceil(trend.monthsToFinish)} mo`}
+              </div>
+              <div className="text-[12px] text-[var(--text-muted)]">
+                {trend.monthsToFinish === null
+                  ? 'Nothing is being earned, so there is no pace to project.'
+                  : `to finish the remaining ${fmtPct(1 - (trend.latest?.pctComplete ?? 0), 1)}, from ${monthLabel(trend.latest?.month ?? '')}.`}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Latest month</div>
+              <div className="text-[26px] font-semibold">{trend.latest ? monthLabel(trend.latest.month) : '—'}</div>
+              <div className="text-[12px] text-[var(--text-muted)]">
+                {trend.latest ? <>{fmtHours(trend.latest.earned)} h earned against {fmtHours(trend.latest.built)} h {TERMS.builtLower}.</> : null}
               </div>
             </div>
           </div>

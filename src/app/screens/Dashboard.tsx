@@ -18,9 +18,27 @@ export function Dashboard() {
   const chartRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const dataDate = state.data.settings.dataDate || null;
+  const cadence = state.data.settings.curveCadence ?? 'month';
 
   const { percent, setUnit } = useUnit();
-  const phaseGroups: GroupStat[] = model.groups.phase.filter((g) => g.inBudget > 0);
+  /*
+   * Phases read in their own order, not in budget order.
+   *
+   * Every other rollup sorts by hours, biggest first, because the question there is
+   * "where is the money". A row of phase buttons is a place in the programme, and a
+   * reader looking for Phase 5 should find it between 4 and 6 rather than wherever
+   * its budget happens to put it. Codes that are not P<n> keep their own order and
+   * go last, since there is no number to sort them by.
+   */
+  const phaseGroups: GroupStat[] = useMemo(() => {
+    const n = (key: string) => {
+      const m = /^P(\d+)$/i.exec(key.trim());
+      return m ? Number(m[1]) : Number.POSITIVE_INFINITY;
+    };
+    return [...model.groups.phase]
+      .filter((g) => g.inBudget > 0)
+      .sort((a, b) => n(a.key) - n(b.key) || a.label.localeCompare(b.label));
+  }, [model.groups.phase]);
 
   /**
    * Which phase the screen is showing. The whole project is the default, because the
@@ -35,8 +53,8 @@ export function Dashboard() {
   const rows = useMemo(() => (selected === null ? model.rows : model.rows.filter((r) => r.phase === selected)), [model.rows, selected]);
   const totals = useMemo(() => rowTotals(rows), [rows]);
   const curve = useMemo(
-    () => (selected === null ? model.curve : buildCurve(rows, dataDate).curve),
-    [selected, model.curve, rows, dataDate],
+    () => (selected === null ? model.curve : buildCurve(rows, dataDate, cadence).curve),
+    [selected, model.curve, rows, dataDate, cadence],
   );
 
   const exportPng = async () => {
@@ -309,7 +327,7 @@ export function Dashboard() {
           }
         >
           {curve.length ? (
-            <CurveChart ref={chartRef} curve={curve} dataDate={dataDate} percent={percent} total={totals.budgetHours} />
+            <CurveChart ref={chartRef} curve={curve} dataDate={dataDate} percent={percent} total={totals.budgetHours} monthly={cadence === 'month'} />
           ) : (
             <div className="py-14 text-center text-[var(--text-subtle)]">No dated activities to plot.</div>
           )}

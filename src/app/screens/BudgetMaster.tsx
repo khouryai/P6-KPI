@@ -157,11 +157,17 @@ export function BudgetMaster({ route }: { route: Route }) {
     if (v === 'INCLUDED') reportPriceable(ensurePriceable([row.activityType]), 1);
   };
 
-  /** Set the same visibility on everything currently filtered into view. */
-  const setVisibilityOnShown = (v: ActivityVisibility | undefined) => {
+  /**
+   * Apply the same edit to everything currently filtered into view.
+   *
+   * The filters ARE the selection. A checkbox column would be a second way to say
+   * what a row of dropdowns already says, and the two would disagree the moment a
+   * filter changed under a set of ticks. What you can see is what it touches, the
+   * count is in the button, and the confirm says the number back.
+   */
+  const applyToShown = (patch: Partial<ActivityOverride>, verb: string) => {
     const ids = rows.map((r) => r.activityId);
     if (ids.length === 0) return;
-    const verb = v === 'HIDDEN' ? 'Hide' : v === 'EXCLUDED' ? 'Exclude' : v === 'INCLUDED' ? 'Force into the budget' : 'Put back to automatic';
     if (!confirm(`${verb}: ${ids.length} ${ids.length === 1 ? 'activity' : 'activities'}. Nothing is deleted and this can be undone here. Continue?`)) return;
     const stamp = new Date().toISOString();
     actions.update('overrides', (ovs) => {
@@ -169,7 +175,9 @@ export function BudgetMaster({ route }: { route: Route }) {
       for (const id of ids) {
         const i = next.findIndex((o) => normKey(o.activityId) === normKey(id));
         const base: ActivityOverride = i >= 0 ? next[i] : { activityId: id };
-        const merged = tidyOverride({ ...base, visibility: v, updatedAt: stamp });
+        const merged = tidyOverride({ ...base, ...patch, updatedAt: stamp });
+        // An override with nothing left in it is not an override. Dropping the row
+        // keeps `activity-overrides.json` to the decisions somebody actually made.
         const empty =
           merged.overrideHours === undefined &&
           merged.nameOverride === undefined &&
@@ -183,9 +191,19 @@ export function BudgetMaster({ route }: { route: Route }) {
       }
       return next;
     });
-    if (v === 'INCLUDED') reportPriceable(ensurePriceable(rows.map((r) => r.activityType)), ids.length);
-    else actions.notify('ok', `${verb.toLowerCase()}: ${ids.length} ${ids.length === 1 ? 'activity' : 'activities'}. Save to write.`);
+    if (patch.visibility === 'INCLUDED') reportPriceable(ensurePriceable(rows.map((r) => r.activityType)), ids.length);
+    else actions.notify('ok', `${verb}: ${ids.length} ${ids.length === 1 ? 'activity' : 'activities'}. Save to write.`);
   };
+
+  const setVisibilityOnShown = (v: ActivityVisibility | undefined) => {
+    const verb = v === 'HIDDEN' ? 'Hide' : v === 'EXCLUDED' ? 'Exclude' : v === 'INCLUDED' ? 'Force into the budget' : 'Put back to automatic';
+    applyToShown({ visibility: v }, verb);
+  };
+
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkDiscipline, setBulkDiscipline] = useState('');
+  const [bulkHours, setBulkHours] = useState('');
+  const [bulkNote, setBulkNote] = useState('');
 
   const dropStale = () => {
     const ids = new Set(model.staleOverrides.map((o) => normKey(o.activityId)));
@@ -476,6 +494,9 @@ export function BudgetMaster({ route }: { route: Route }) {
             <option value="">No quality filter</option>
             {Object.entries(FLAGS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}
           </select>
+          <button className={`btn btn-mini${showBulk ? ' btn-primary' : ''}`} onClick={() => setShowBulk((v) => !v)}>
+            Bulk edit
+          </button>
           <span className="ml-auto flex items-center gap-2">
             {view === 'active' ? (
               <>
@@ -495,6 +516,79 @@ export function BudgetMaster({ route }: { route: Route }) {
         </>
       }
     >
+      <datalist id="budget-disciplines">
+        {[...new Set(model.rows.flatMap((r) => r.disciplines))].filter(Boolean).sort().map((d) => (
+          <option key={d} value={d} />
+        ))}
+      </datalist>
+
+      {showBulk && (
+        <Panel
+          title={`Edit all ${rows.length} activities in view`}
+          meta="The filters above are the selection. Each box applies on its own button, and a blank box clears that field rather than leaving it."
+          className="mb-3"
+        >
+          <div className="grid gap-4 md:grid-cols-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{TERMS.subsystem}</div>
+              <div className="mt-1 flex gap-2">
+                <input
+                  className="input w-40"
+                  list="budget-disciplines"
+                  placeholder="ATS, IXL"
+                  value={bulkDiscipline}
+                  onChange={(e) => setBulkDiscipline(e.target.value)}
+                />
+                <button
+                  className="btn"
+                  disabled={rows.length === 0}
+                  onClick={() => applyToShown({ discipline: bulkDiscipline.trim() || undefined }, bulkDiscipline.trim() ? `Set ${TERMS.subsystemLower} to "${bulkDiscipline.trim()}"` : `Clear the ${TERMS.subsystemLower}`)}
+                >
+                  Apply
+                </button>
+              </div>
+              <div className="mt-1 text-[11.5px] text-[var(--text-subtle)]">
+                Overrides the Activity Library for these activities only. Several groups can be named at once — they split the hours evenly.
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Budget hours</div>
+              <div className="mt-1 flex gap-2">
+                <input className="input w-28" type="number" step="any" placeholder="hours" value={bulkHours} onChange={(e) => setBulkHours(e.target.value)} />
+                <button
+                  className="btn"
+                  disabled={rows.length === 0 || (bulkHours.trim() !== '' && num(bulkHours) === undefined)}
+                  onClick={() => applyToShown({ overrideHours: bulkHours.trim() === '' ? undefined : num(bulkHours) }, bulkHours.trim() === '' ? 'Hand the hours back to the rate' : `Set the budget to ${num(bulkHours)} h`)}
+                >
+                  Apply
+                </button>
+              </div>
+              <div className="mt-1 text-[11.5px] text-[var(--text-subtle)]">
+                Replaces the calculated figure and bypasses the complexity factor. Blank hands each activity back to its rate.
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Note</div>
+              <div className="mt-1 flex gap-2">
+                <input className="input w-48" placeholder="why" value={bulkNote} onChange={(e) => setBulkNote(e.target.value)} />
+                <button
+                  className="btn"
+                  disabled={rows.length === 0}
+                  onClick={() => applyToShown({ note: bulkNote.trim() || undefined }, bulkNote.trim() ? 'Set the note' : 'Clear the note')}
+                >
+                  Apply
+                </button>
+              </div>
+              <div className="mt-1 text-[11.5px] text-[var(--text-subtle)]">
+                Why this activity was re-priced, renamed or taken out. Not the progress note, which the Two-Week Log writes.
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
+
       {view === 'hidden' && rows.length === 0 && hiddenCount === 0 && (
         <div className="mb-3">
           <Notice tone="info">

@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { useApp } from '../state';
 import { Page, Notice } from '../components/ui';
 import type { Settings as S } from '../../engine/types';
-import { buildWorkbook, workbookBytes, downloadBytes, stamp } from '../export';
+import { downloadBytes, stamp } from '../export';
 import type { Bundle } from '../state';
-import { num, fmtDateTime } from '../format';
+import { num, fmtDate, fmtDateTime } from '../format';
 import { BUILD_COMMIT, BUILD_TIME, IS_STANDALONE, runningFrom } from '../build';
 import { applyUpdate, canSelfUpdate, useUpdateReady } from '../update';
 
@@ -13,11 +13,20 @@ export function Settings() {
   const s = state.data.settings;
   const set = (patch: Partial<S>) => actions.update('settings', (prev) => ({ ...prev, ...patch }));
   const [busy, setBusy] = useState(false);
+  /** Every baseline ever imported, newest first, for the pin to choose from. */
+  const baselines = [...state.data.importsIndex]
+    .filter((i) => i.kind === 'baseline')
+    .sort((a, b) => b.importedAt.localeCompare(a.importedAt));
+  /** The pinned import has left the index: say so rather than silently falling back. */
+  const pinnedMissing = !!s.baselineImportId && !baselines.some((b) => b.id === s.baselineImportId);
   const updateReady = useUpdateReady();
 
   const exportXlsx = async () => {
     setBusy(true);
     try {
+      // Loaded here rather than imported: the spreadsheet library is a third of
+      // the bundle and nothing before this click needs it.
+      const { buildWorkbook, workbookBytes } = await import('../workbookExport');
       const wb = buildWorkbook(model, s, state.data.current?.activities ?? [], state.data.baseline?.activities ?? [], state.data.testProgress, state.data.missedReasons);
       const bytes = workbookBytes(wb);
       const name = `TC_Budget_${stamp()}.xlsx`;
@@ -66,6 +75,38 @@ export function Settings() {
           <h2 className="card-title">Dates</h2>
           <Field label="Data date" hint="The as-of date of the current P6 export. In-progress work earns from its actual start up to this date, and the earned curve stops here. Changing it moves the end of the earned curve.">
             <input className="input" type="date" value={s.dataDate} onChange={(e) => set({ dataDate: e.target.value })} />
+          </Field>
+          {pinnedMissing && (
+            <Notice tone="warn">
+              The pinned baseline is no longer in the import history, so the newest one is being used. Pick a baseline again, or leave it on the newest.
+            </Notice>
+          )}
+          <Field
+            label="Measure against"
+            hint="Which baseline the planned curve and every variance are compared with. The newest is the default; pin an earlier one to keep reporting against the baseline the job was approved on after a re-baseline."
+          >
+            <select
+              className="input w-full"
+              value={s.baselineImportId ?? ''}
+              onChange={(e) => set({ baselineImportId: e.target.value || undefined })}
+            >
+              <option value="">The newest baseline import</option>
+              {baselines.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {fmtDate(b.importedAt.slice(0, 10))} — {b.sourceFilename} ({b.rowCount} rows)
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field
+            label="S-curve reports"
+            hint="How often the curve plots a point. Every two weeks and weekly are anchored on the data date, so one period always lands exactly on it and the earned line runs to the day you measured rather than to the month end after it."
+          >
+            <select className="input" value={s.curveCadence ?? 'month'} onChange={(e) => set({ curveCadence: e.target.value as S['curveCadence'] })}>
+              <option value="month">At each month end</option>
+              <option value="fortnight">Every two weeks, from the data date</option>
+              <option value="week">Every week, from the data date</option>
+            </select>
           </Field>
         </div>
         <div className="card space-y-3">
