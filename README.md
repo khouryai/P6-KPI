@@ -136,6 +136,7 @@ npm install
 npm test               # engine, storage and import-format suites
 npm run dev            # dev server on http://localhost:47800
 npm run build          # rebuilds BOTH dist/ and standalone/ — commit them together
+npm run test:ui        # playwright smoke tests; needs a build, serves it on 127.0.0.1:4173
 TC_WORKBOOK=path/to/TC_P6_Budget_SCurve.xlsx npm test   # parity against the real workbook
 ```
 

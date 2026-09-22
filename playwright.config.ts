@@ -21,9 +21,17 @@ export default defineConfig({
     launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM ?? undefined },
   },
   webServer: {
-    command: 'npx vite preview --port 4173 --strictPort',
-    url: 'http://127.0.0.1:4173',
+    // The application's own static server, not `vite preview`. It binds 127.0.0.1
+    // explicitly, so there is no question of the server listening on ::1 while the
+    // tests knock on 127.0.0.1, and it loads no vite config and spawns no npx — the
+    // three things that can leave a preview server silently never answering.
+    command: 'node server/serve.mjs 4173',
+    url: 'http://127.0.0.1:4173/index.html',
     reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
+    timeout: 120_000,
+    // Without these the server's output is discarded, so a server that refuses to
+    // start reads in CI as a bare timeout with no cause. That is what happened.
+    stdout: 'pipe',
+    stderr: 'pipe',
   },
 });
