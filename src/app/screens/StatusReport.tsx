@@ -6,13 +6,12 @@ import { buildCurve, rowTotals } from '../../engine/compute';
 import { periodLog, addDays, OUTCOMES, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
 import { trendFrom } from '../../engine/trend';
 import { effectiveReasonFor, tallyReasons } from '../missedReasons';
-import { chartsToPng, downloadBytes, stamp } from '../export';
+import { downloadBytes, stamp } from '../export';
+import { paintReport, paintTableFromDom, type PaintBlock, type PaintTone } from '../reportPaint';
 import { fmtHours, fmtPct, fmtDate, todayISO } from '../format';
 import { isValidISO } from '../../engine/dates';
 import { useUnit } from '../units';
 import type { GroupStat } from '../../engine/types';
-
-const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 /** Phase codes sort numerically, as they do on the dashboard. */
 function phaseOrder(key: string): number {
@@ -45,6 +44,16 @@ function Stat({ label, value, sub, tone }: { label: string; value: string; sub?:
   );
 }
 
+function Tiles({ items }: { items: { label: string; value: string; sub?: string; tone?: PaintTone }[] }) {
+  return (
+    <div className="stat-row">
+      {items.map((i) => (
+        <Stat key={i.label} {...i} />
+      ))}
+    </div>
+  );
+}
+
 /** How an achievement figure reads: at or over plan, near it, or short of it. */
 function achievedTone(a: number | null): 'good' | 'warn' | 'bad' | 'muted' {
   if (a === null) return 'muted';
@@ -72,7 +81,10 @@ const ACHIEVED = '#00875a';
 export function StatusReport() {
   const { state, model, actions } = useApp();
   const { percent } = useUnit();
+  /** The chart element of each curve on the page, for the picture. */
   const charts = useRef(new Map<string, HTMLDivElement>());
+  /** The report on screen. Its tables are what the picture is painted from. */
+  const reportRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
 
   const dataDate = state.data.settings.dataDate || null;
@@ -177,38 +189,17 @@ export function StatusReport() {
   }
 
   /**
-   * The graphs as one picture.
+   * The whole report as one picture, for pasting into a document.
    *
-   * Composed from the chart SVGs the screen is drawing, at their real size, rather
-   * than screenshotting the page: what comes out is as sharp as the curves are and
-   * does not depend on where the report happened to be scrolled to.
+   * Everything on the page, not just the curves: somebody opening a Word file has
+   * to be able to read the fortnight's figures and the activities behind them
+   * without being sent back to the application for the half that did not come.
    */
-  const exportPng = async (only?: { key: string; label: string; totals: ReturnType<typeof rowTotals> }) => {
-    const wanted = only ? curves.filter((c) => c.key === only.key) : curves;
-    const sources = wanted
-      .map((c) => ({ el: charts.current.get(c.key), c }))
-      .filter((x): x is { el: HTMLDivElement; c: (typeof curves)[number] } => !!x.el)
-      .map(({ el, c }) => ({
-        chart: el,
-        title: c.label,
-        subtitle: percent
-          ? `${fmtPct(c.totals.pctComplete, 1)} complete across ${c.totals.inBudget} activities.`
-          : `${fmtHours(c.totals.budgetHours)} h budget, ${fmtHours(c.totals.earnedHours)} h earned (${fmtPct(c.totals.pctComplete, 1)}).`,
-      }));
-    if (sources.length === 0) {
-      actions.notify('error', 'There is no curve on the page to save. Pick one under Curves.');
-      return;
-    }
+  const exportPng = async () => {
     setBusy(true);
     try {
-      const bytes = await chartsToPng(sources, {
-        heading,
-        sub: [note.trim(), dataDate ? `Data date ${fmtDate(dataDate)}` : null, `Issued ${fmtDate(todayISO())}`]
-          .filter(Boolean)
-          .join(' · '),
-        footer: showLog ? `Period ${fmtDate(from)} to ${fmtDate(end)}` : undefined,
-      });
-      const name = `status-report-${only ? slug(only.label) : 'curves'}-${stamp()}.png`;
+      const bytes = await paintReport(blocks());
+      const name = `status-report-${stamp()}.png`;
       if (state.adapterKind === 'filesystem') actions.notify('ok', `Written to ${await actions.writeExport(name, bytes)}`);
       else downloadBytes(name, bytes, 'image/png');
     } catch (err) {
@@ -347,16 +338,139 @@ export function StatusReport() {
     { key: 'ns', label: 'Not started', value: (p) => p.notStarted, num: true },
   ];
 
+  /** The tiles, defined once: the screen maps over these and so does the picture. */
+  type Tile = { label: string; value: string; sub?: string; tone?: PaintTone };
+
+  const periodStats: Tile[] = [
+    { label: 'Planned', value: val(log.plannedHours), tone: 'muted' },
+    { label: 'Achieved', value: val(log.earnedHours), tone: 'good' },
+    { label: 'Of plan', value: log.achievement === null ? '—' : fmtPct(log.achievement, 0), tone: achievedTone(log.achievement) },
+    { label: 'Against plan', value: `${variance >= 0 ? '+' : ''}${val(variance)}`, tone: variance >= 0 ? 'good' : 'bad' },
+    { label: 'Project complete', value: fmtPct(log.pctAtEnd, 1), sub: `from ${fmtPct(log.pctAtStart, 1)}`, tone: 'info' },
+    {
+      label: 'Due finishes made',
+      value: `${log.finishedOnTime}/${log.dueToFinish}`,
+      tone: log.dueToFinish === 0 ? 'muted' : log.finishedOnTime === log.dueToFinish ? 'good' : 'bad',
+    },
+  ];
+
+  const projectStats: Tile[] = [
+    { label: 'Complete', value: fmtPct(totals.pctComplete, 1), tone: 'info' },
+    ...(percent
+      ? []
+      : ([
+          { label: 'Budget h', value: fmtHours(totals.budgetHours) },
+          { label: 'Earned h', value: fmtHours(totals.earnedHours), tone: 'good' },
+          { label: 'Remaining h', value: fmtHours(totals.remainingHours) },
+        ] as Tile[])),
+    { label: 'Finished', value: `${totals.finished}/${totals.inBudget}` },
+    ...(model.burn.project.factor === null
+      ? []
+      : ([
+          {
+            label: 'Earned per hour',
+            value: model.burn.project.factor.toFixed(2),
+            tone: model.burn.project.factor >= 1 ? 'good' : 'bad',
+          },
+        ] as Tile[])),
+  ];
+
+  const trendStats: Tile[] = [
+    {
+      label: 'Factor now',
+      value: trend.recentFactor === null ? '—' : trend.recentFactor.toFixed(2),
+      tone: trend.recentFactor !== null && trend.recentFactor >= 1 ? 'good' : 'bad',
+    },
+    { label: 'Factor before', value: trend.priorFactor === null ? '—' : trend.priorFactor.toFixed(2), tone: 'muted' },
+    { label: 'Progress a month', value: trend.recentPctPerMonth === null ? '—' : fmtPct(trend.recentPctPerMonth, 2) },
+    {
+      label: 'At this pace',
+      value: trend.monthsToFinish === null ? '—' : `${Math.ceil(trend.monthsToFinish)}`,
+      sub: 'months to finish',
+    },
+  ];
+
+  /**
+   * The page, as the painter wants it: the same figures, the same order, and the
+   * tables taken from the same `Column` definitions the screen renders.
+   */
+  const blocks = (): PaintBlock[] => {
+    const out: PaintBlock[] = [
+      {
+        kind: 'title',
+        text: heading,
+        sub: note.trim() || undefined,
+        right: [`Data date ${dataDate ? fmtDate(dataDate) : 'not set'}`, `Issued ${fmtDate(todayISO())}`],
+      },
+    ];
+    if (showLog) {
+      out.push({ kind: 'section', text: `Period ${fmtDate(from)} to ${fmtDate(end)}`, meta: `${log.days} days` });
+      out.push({ kind: 'stats', items: periodStats });
+      out.push({
+        kind: 'bars',
+        rows: [
+          { label: 'Planned', value: val(log.plannedHours), pct: 1, color: PLANNED },
+          { label: 'Achieved', value: val(log.earnedHours), pct: achievedWidth / 100, color: ACHIEVED },
+        ],
+      });
+      if (activePhases.length > 0) {
+        out.push({
+          kind: 'lines',
+          items: activePhases.map(
+            (p) =>
+              `${p.label} — ${p.achievement === null ? 'nothing planned' : `${fmtPct(p.achievement, 0)} of plan`}, ` +
+              `moved ${fmtPct(p.pctAtStart, 1)} → ${fmtPct(p.pctAtEnd, 1)}`,
+          ),
+        });
+      }
+      if (showLogActivities) {
+        out.push({ kind: 'stats', items: OUTCOMES.map((o) => ({ label: o, value: String(log.counts[o]), tone: OUTCOME_TONE[o] })) });
+        const t = paintTableFromDom(reportRef.current?.querySelector('[data-paint="activities"] table.tbl') ?? null);
+        if (t) {
+          out.push(t);
+        } else {
+          out.push({ kind: 'note', text: `No activities in the chosen outcomes between ${fmtDate(from)} and ${fmtDate(end)}.` });
+        }
+      }
+    }
+    for (const c of curves) {
+      const el = charts.current.get(c.key);
+      out.push({
+        kind: 'section',
+        text: c.label,
+        meta:
+          `${fmtPct(c.totals.pctComplete, 1)} complete` +
+          (percent ? '' : ` · ${fmtHours(c.totals.earnedHours)} of ${fmtHours(c.totals.budgetHours)} h`),
+      });
+      if (el) out.push({ kind: 'chart', el });
+      else out.push({ kind: 'note', text: 'No dated activities to plot.' });
+    }
+    if (showProject) {
+      out.push({ kind: 'section', text: 'Where the job stands', meta: `${totals.inBudget} activities in budget` });
+      out.push({ kind: 'stats', items: projectStats });
+    }
+    if (showTrend && trend.points.length >= 2) {
+      out.push({ kind: 'section', text: 'Direction of travel', meta: `last ${trend.window} active months against the ${trend.window} before` });
+      out.push({ kind: 'stats', items: trendStats });
+    }
+    if (showPhaseTable && phases.length > 0) {
+      const t = paintTableFromDom(reportRef.current?.querySelector('[data-paint="phases"] table.tbl') ?? null);
+      out.push({ kind: 'section', text: 'Progress by phase' });
+      if (t) out.push(t);
+    }
+    return out;
+  };
+
   return (
     <Page
       eyebrow="Progress"
       title="Status Report"
-      subtitle="One page to hand over. Choose what goes on it, then print it, save it as a PDF, or save the graphs as a PNG."
+      subtitle="One page to hand over. Choose what goes on it, then print it, save it as a PDF, or save the whole thing as a PNG to paste into a document."
       stats={heroStats}
       actions={
         <>
-          <button className="btn btn-mini" disabled={busy || curves.length === 0} onClick={() => void exportPng()}>
-            {busy ? 'Saving…' : 'Save graphs as PNG'}
+          <button className="btn btn-mini" disabled={busy} onClick={() => void exportPng()}>
+            {busy ? 'Saving…' : 'Save as PNG'}
           </button>
           <button className="btn btn-primary" onClick={() => window.print()}>
             Print / save as PDF
@@ -459,7 +573,7 @@ export function StatusReport() {
       )}
 
       {/* ---------- the page itself ---------- */}
-      <div className="report">
+      <div className="report" ref={reportRef}>
         <header className="rep-head">
           <div>
             <h1 className="rep-title">{heading}</h1>
@@ -471,58 +585,14 @@ export function StatusReport() {
           </div>
         </header>
 
-        {showProject && (
-          <Panel className="mt-3" title="Where the job stands" meta={`${totals.inBudget} activities in budget`}>
-            <div className="stat-row">
-              <Stat label="Complete" value={fmtPct(totals.pctComplete, 1)} tone="info" />
-              {!percent && <Stat label="Budget h" value={fmtHours(totals.budgetHours)} />}
-              {!percent && <Stat label="Earned h" value={fmtHours(totals.earnedHours)} tone="good" />}
-              {!percent && <Stat label="Remaining h" value={fmtHours(totals.remainingHours)} />}
-              <Stat label="Finished" value={`${totals.finished}/${totals.inBudget}`} />
-              {model.burn.project.factor !== null && (
-                <Stat
-                  label="Earned per hour"
-                  value={model.burn.project.factor.toFixed(2)}
-                  tone={model.burn.project.factor >= 1 ? 'good' : 'bad'}
-                />
-              )}
-            </div>
-          </Panel>
-        )}
-
-        {showTrend && trend.points.length >= 2 && (
-          <Panel className="mt-3" title="Direction of travel" meta={`last ${trend.window} active months against the ${trend.window} before`}>
-            <div className="stat-row">
-              <Stat label="Factor now" value={trend.recentFactor === null ? '—' : trend.recentFactor.toFixed(2)} tone={trend.recentFactor !== null && trend.recentFactor >= 1 ? 'good' : 'bad'} />
-              <Stat label="Factor before" value={trend.priorFactor === null ? '—' : trend.priorFactor.toFixed(2)} tone="muted" />
-              <Stat label="Progress a month" value={trend.recentPctPerMonth === null ? '—' : fmtPct(trend.recentPctPerMonth, 2)} />
-              <Stat label="At this pace" value={trend.monthsToFinish === null ? '—' : `${Math.ceil(trend.monthsToFinish)}`} sub="months to finish" />
-            </div>
-          </Panel>
-        )}
-
+        {/* ---------- the fortnight, whole and together: this is the review ---------- */}
         {showLog && (
           <Panel
             className="mt-3"
             title={`Period ${fmtDate(from)} to ${fmtDate(end)}`}
             meta={`${log.days} days`}
           >
-            <div className="stat-row">
-              <Stat label="Planned" value={val(log.plannedHours)} tone="muted" />
-              <Stat label="Achieved" value={val(log.earnedHours)} tone="good" />
-              <Stat
-                label="Of plan"
-                value={log.achievement === null ? '—' : fmtPct(log.achievement, 0)}
-                tone={achievedTone(log.achievement)}
-              />
-              <Stat label="Against plan" value={`${variance >= 0 ? '+' : ''}${val(variance)}`} tone={variance >= 0 ? 'good' : 'bad'} />
-              <Stat label="Project complete" value={fmtPct(log.pctAtEnd, 1)} sub={`from ${fmtPct(log.pctAtStart, 1)}`} tone="info" />
-              <Stat
-                label="Due finishes made"
-                value={`${log.finishedOnTime}/${log.dueToFinish}`}
-                tone={log.dueToFinish === 0 ? 'muted' : log.finishedOnTime === log.dueToFinish ? 'good' : 'bad'}
-              />
-            </div>
+            <Tiles items={periodStats} />
 
             <div className="plan-bar mt-4">
               <div className="plan-bar-row">
@@ -558,22 +628,39 @@ export function StatusReport() {
           </Panel>
         )}
 
-        {/* ---------- the curves, one per row and big enough to read ---------- */}
+        {showLog && showLogActivities && (
+          <div className="mt-3" data-paint="activities">
+            <div className="mb-3">
+              <Tiles items={OUTCOMES.map((o) => ({ label: o, value: String(log.counts[o]), tone: OUTCOME_TONE[o] }))} />
+            </div>
+            {logRows.length === 0 ? (
+              <Notice tone="info">No activities in the chosen outcomes between {fmtDate(from)} and {fmtDate(end)}.</Notice>
+            ) : (
+              <SortableTable
+                tableId="status-activities"
+                exportName="status-report-activities"
+                rows={logRows}
+                columns={columns}
+                rowKey={(a) => a.activityId}
+                defaultSort={{ key: 'outcome', dir: 'asc' }}
+                maxHeight="none"
+                rowClass={(a) => (a.outcome === 'MISSED' ? 'row-bad' : a.outcome === 'NOT STARTED' ? 'row-muted' : '')}
+              />
+            )}
+          </div>
+        )}
+
+        {/* ---------- then the curves, one per row and big enough to read ---------- */}
         {curves.map((c) => (
           <Panel
             key={c.key}
             className="mt-3"
             title={c.label}
             meta={
-              <span className="flex items-center gap-3">
-                <span>
-                  {fmtPct(c.totals.pctComplete, 1)} complete
-                  {!percent && <> · {fmtHours(c.totals.earnedHours)} of {fmtHours(c.totals.budgetHours)} h</>}
-                </span>
-                <button className="btn btn-mini no-print" disabled={busy} onClick={() => void exportPng(c)}>
-                  PNG
-                </button>
-              </span>
+              <>
+                {fmtPct(c.totals.pctComplete, 1)} complete
+                {!percent && <> · {fmtHours(c.totals.earnedHours)} of {fmtHours(c.totals.budgetHours)} h</>}
+              </>
             }
           >
             {c.curve.length ? (
@@ -595,8 +682,22 @@ export function StatusReport() {
           </Panel>
         ))}
 
+        {showProject && (
+          <Panel className="mt-3" title="Where the job stands" meta={`${totals.inBudget} activities in budget`}>
+            <Tiles items={projectStats} />
+          </Panel>
+        )}
+
+        {showTrend && trend.points.length >= 2 && (
+          <Panel className="mt-3" title="Direction of travel" meta={`last ${trend.window} active months against the ${trend.window} before`}>
+            <Tiles items={trendStats} />
+          </Panel>
+        )}
+
+        {/* ---------- and the phases last, as the closing position ---------- */}
         {showPhaseTable && phases.length > 0 && (
           <Panel className="mt-3" title="Progress by phase">
+            <div data-paint="phases">
             <SortableTable
               tableId="status-phases"
               exportName="status-report-phases"
@@ -605,35 +706,10 @@ export function StatusReport() {
               rowKey={(p) => p.key || '#'}
               maxHeight="none"
             />
+            </div>
           </Panel>
         )}
 
-        {showLog && showLogActivities && (
-          <div className="mt-3">
-            <div className="mb-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
-              {OUTCOMES.map((o) => (
-                <div key={o} className={`stat-tile tone-${OUTCOME_TONE[o]}`}>
-                  <span className="stat-tile-n">{log.counts[o]}</span>
-                  <span className="stat-tile-l">{o}</span>
-                </div>
-              ))}
-            </div>
-            {logRows.length === 0 ? (
-              <Notice tone="info">No activities in the chosen outcomes between {fmtDate(from)} and {fmtDate(end)}.</Notice>
-            ) : (
-              <SortableTable
-                tableId="status-activities"
-                exportName="status-report-activities"
-                rows={logRows}
-                columns={columns}
-                rowKey={(a) => a.activityId}
-                defaultSort={{ key: 'outcome', dir: 'asc' }}
-                maxHeight="none"
-                rowClass={(a) => (a.outcome === 'MISSED' ? 'row-bad' : a.outcome === 'NOT STARTED' ? 'row-muted' : '')}
-              />
-            )}
-          </div>
-        )}
       </div>
     </Page>
   );

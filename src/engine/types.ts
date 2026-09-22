@@ -684,6 +684,13 @@ export type Summary = {
    * once, and the only other symptom is a number that looks plausible.
    */
   noRemainingDuration: number;
+  /**
+   * Activities sharing an Activity ID with another activity in the same schedule.
+   * Everything keyed by hand — a percent, an override, a missed reason — matches
+   * by ID and so reaches only the first of them, and the ID stops being a name for
+   * one row. Counted because the import screen says so once and is then gone.
+   */
+  duplicateActivityIds: number;
   pctFromP6: number; // in budget only
   pctFromOverride: number;
   inProgress: number;

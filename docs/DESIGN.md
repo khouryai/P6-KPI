@@ -268,6 +268,26 @@ for the line when it is not. The marker carries the date, not just the words DAT
 DATE: on a printed page or a PNG pasted into a mail nobody can hover the line, and
 "as at when?" is the first question anybody asks of an S-curve.
 
+## An Activity ID that is not unique
+
+A P6 export can carry the same Activity ID on two rows — a WBS row repeated, two
+projects merged, a copy-paste in the schedule. The arithmetic survives it: everything
+keyed by hand matches by ID and takes the first occurrence, and the import screen says
+so at the time.
+
+The tables did not survive it. React reconciles rows by key, every table here is keyed
+on the Activity ID, and two rows claiming the same key leave stale `<tr>` elements
+behind. The symptom is not a crash; it is a table that stops obeying. Filter it and the
+row count goes *up*. Sort it and ascending and descending draw the same thing. It was
+reported as "the filters don't work" and "sorting doesn't work", on several screens at
+once, which is exactly what it looks like from the outside.
+
+`SortableTable` now gives a repeated key an occurrence suffix, so a table with no
+duplicates gets exactly the keys it got before and one with duplicates is merely
+ordinary. The count is also surfaced on the dashboard's data-quality list, because the
+underlying fact — that the ID has stopped being a name for one row, so a percent or a
+note reaches only the first of them — outlives the import screen that mentioned it.
+
 ## The status report looks like the Two-Week Log on purpose
 
 The report was first built with its own quiet print styling: small figures, hairline
@@ -286,12 +306,23 @@ off by default: a report is written about a phase and a fortnight, the job's hea
 figure is on the Dashboard for anybody who wants it, and a section nobody asked for is
 the easiest thing to leave switched on by accident.
 
-The graphs save as one PNG, composed from the chart SVGs the screen is drawing at
-their real size. Not a screenshot: what comes out is as sharp as the curves are, and
-it does not depend on where the page happened to be scrolled to. Rasterising the whole
-report instead would mean a DOM-to-canvas library that has to be kept honest about
-every style rule in the application; printing to PDF already does that job properly,
-through the browser.
+The whole page saves as one PNG, for pasting into a document. That is painted onto
+a canvas rather than captured from the DOM, and the reason is worth writing down
+because the obvious route looks like it works. Cloning the live markup into an SVG
+`<foreignObject>` with the stylesheets inlined renders the page perfectly — and then
+Chromium refuses to let the pixels out, because it taints the canvas for **any** SVG
+image carrying a foreignObject, whatever is in it and wherever it came from. Every
+DOM-to-image library is built on that trick and hits the same wall.
+
+So `reportPaint.ts` draws the report: the heading, the KPI tiles with their tone
+edges, the bars, the tables and the rasterised charts. What keeps it from becoming a
+second, drifting layout of the same figures is where it gets its content — the tables
+are read out of the tables the screen is already showing, cell by rendered cell. Not
+from the column definitions and emphatically not from `value()`, which is the raw
+figure the table sorts and exports by: `91.42857142857142` where the page says
+`91.4 h`. Reading the rendered text also means the picture carries the columns
+somebody chose, in the order they put them, sorted the way they left it, without
+anything having to be told about any of that.
 
 ## When the Activity ID is wrong
 

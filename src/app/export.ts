@@ -78,7 +78,7 @@ function chartSurface(container: HTMLElement): SVGSVGElement | null {
 export type ChartSource = { chart: SVGSVGElement | HTMLElement; title?: string; subtitle?: string };
 
 /** One chart, measured and loaded, ready to be drawn onto a canvas. */
-type Prepared = { img: HTMLImageElement; url: string; w: number; h: number; legend: LegendItem[]; title?: string; subtitle?: string };
+export type Prepared = { img: HTMLImageElement; url: string; w: number; h: number; legend: LegendItem[]; title?: string; subtitle?: string };
 
 /**
  * Detach a chart, give it a real size, and load it as an image.
@@ -90,7 +90,7 @@ type Prepared = { img: HTMLImageElement; url: string; w: number; h: number; lege
  * the webfonts are swapped for system fonts because an SVG loaded as an image cannot
  * fetch them.
  */
-async function prepare(source: ChartSource): Promise<Prepared> {
+export async function prepareChart(source: ChartSource): Promise<Prepared> {
   const { chart } = source;
   const svg = chart instanceof SVGSVGElement ? chart : chartSurface(chart);
   if (!svg) throw new Error('No chart to export');
@@ -194,7 +194,7 @@ export async function chartsToPng(
   const gap = opts.gap ?? 22;
   const prepared: Prepared[] = [];
   try {
-    for (const s of sources) prepared.push(await prepare(s));
+    for (const s of sources) prepared.push(await prepareChart(s));
 
     const headH = (opts.heading ? 26 : 0) + (opts.sub ? 18 : 0);
     const footH = opts.footer ? 20 : 0;
@@ -239,6 +239,19 @@ export async function chartsToPng(
     for (const p of prepared) URL.revokeObjectURL(p.url);
   }
 }
+
+/*
+ * Why there is no "clone the DOM into an SVG and rasterise it" function here.
+ *
+ * That is the usual trick — `<foreignObject>` holding the real markup, with the
+ * stylesheets inlined — and it was written, and it does not work. Chromium taints
+ * the canvas for ANY SVG image carrying a foreignObject, whatever it contains and
+ * wherever it came from, so the picture draws correctly and then cannot be read
+ * back out. Every library built on that trick hits the same wall.
+ *
+ * So the report is painted instead: see `reportPaint.ts`, which draws it from the
+ * same column definitions the tables on screen are built from.
+ */
 
 export function downloadBytes(name: string, bytes: Uint8Array, type: string): void {
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));

@@ -413,6 +413,22 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
   const count = (pred: (r: BudgetRow) => boolean) => rows.filter(pred).length;
   const earnedTotal = rows.reduce((s, r) => s + r.earnedHours, 0);
   const tpMatched = testProgress.filter((t) => rowIdx.has(normKey(t.activityId))).length;
+  /*
+   * Rows whose Activity ID is not unique.
+   *
+   * The ID is the only handle anything keyed by hand has on a row, so a repeated
+   * one means a percent, an override or a note reaches the first occurrence and no
+   * other — and, until the tables were keyed defensively, made every table on every
+   * screen stop obeying its filters. Worth stating on the dashboard rather than
+   * once on the import screen that is then navigated away from.
+   */
+  const idCounts = new Map<string, number>();
+  for (const r of rows) {
+    const k = normKey(r.activityId);
+    idCounts.set(k, (idCounts.get(k) ?? 0) + 1);
+  }
+  const duplicateIdRows = rows.filter((r) => (idCounts.get(normKey(r.activityId)) ?? 0) > 1).length;
+
   const summary: Summary = {
     extractRows: current.length - hiddenRows.length,
     wbsRows: current.filter((a) => a.rowType === 'WBS').length,
@@ -435,6 +451,7 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
     noRemainingDuration: count(
       (r) => r.status === 'IN BUDGET' && r.activity.originalDuration !== null && r.activity.remainingDuration === null,
     ),
+    duplicateActivityIds: duplicateIdRows,
     pctFromP6: count((r) => r.pctSource === 'P6' && r.status === 'IN BUDGET'),
     pctFromOverride: count((r) => r.pctSource === 'OVERRIDE'),
     inProgress: count((r) => r.earnWindowSource === 'IN PROGRESS'),
@@ -469,6 +486,11 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
   if (summary.noRemainingDuration > 0) {
     notes.push(
       `${summary.noRemainingDuration} in-budget ${summary.noRemainingDuration === 1 ? 'activity has' : 'activities have'} no Remaining Duration in the import, so P6 can say nothing about their progress and they read 0% until somebody keys one. Check the Remaining Duration column was mapped on Import.`,
+    );
+  }
+  if (summary.duplicateActivityIds > 0) {
+    notes.push(
+      `${summary.duplicateActivityIds} activities share an Activity ID with another activity. The ID is what every percent, override and note is keyed on, so each of those reaches only the first of them.`,
     );
   }
   if (summary.onNoCurve > 0) {

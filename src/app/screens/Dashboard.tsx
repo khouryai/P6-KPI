@@ -98,6 +98,7 @@ export function Dashboard() {
     { label: 'Baseline missing, using current dates', count: s.baselineFallback, to: href('budget', { flag: 'blcurrent' }), note: 'Plan equals forecast for these by default, not by agreement.' },
     { label: 'Percent complete still from P6 duration', count: s.pctFromP6, to: href('budget', { flag: 'pctp6' }), note: 'Key a percent complete to replace P6’s duration arithmetic with what you know.' },
     { label: 'In-budget activities with no Remaining Duration', count: s.noRemainingDuration, to: href('import'), note: 'P6 can say nothing about their progress, so they read 0%. Usually the column was not mapped on import.' },
+    { label: 'Activities sharing an Activity ID', count: s.duplicateActivityIds, to: href('import'), note: 'The ID is what every percent, override and note is keyed on, so each of those reaches only the first of them.' },
     { label: 'Progress rows not matching an activity', count: s.testProgressNotMatching, to: href('progress', { flag: 'unmatched' }), note: 'Open the list: it says what each one is and whether losing it costs anything.' },
     { label: 'Your edits pointing at an activity that is gone', count: s.staleOverrides, to: href('budget'), note: 'Kept in case the Activity ID comes back. Doing nothing until it does.' },
   ];
