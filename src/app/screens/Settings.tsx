@@ -4,7 +4,7 @@ import { Page, Notice } from '../components/ui';
 import type { Settings as S } from '../../engine/types';
 import { downloadBytes, stamp } from '../export';
 import type { Bundle } from '../state';
-import { num, fmtDateTime } from '../format';
+import { num, fmtDate, fmtDateTime } from '../format';
 import { BUILD_COMMIT, BUILD_TIME, IS_STANDALONE, runningFrom } from '../build';
 import { applyUpdate, canSelfUpdate, useUpdateReady } from '../update';
 
@@ -13,6 +13,12 @@ export function Settings() {
   const s = state.data.settings;
   const set = (patch: Partial<S>) => actions.update('settings', (prev) => ({ ...prev, ...patch }));
   const [busy, setBusy] = useState(false);
+  /** Every baseline ever imported, newest first, for the pin to choose from. */
+  const baselines = [...state.data.importsIndex]
+    .filter((i) => i.kind === 'baseline')
+    .sort((a, b) => b.importedAt.localeCompare(a.importedAt));
+  /** The pinned import has left the index: say so rather than silently falling back. */
+  const pinnedMissing = !!s.baselineImportId && !baselines.some((b) => b.id === s.baselineImportId);
   const updateReady = useUpdateReady();
 
   const exportXlsx = async () => {
@@ -69,6 +75,28 @@ export function Settings() {
           <h2 className="card-title">Dates</h2>
           <Field label="Data date" hint="The as-of date of the current P6 export. In-progress work earns from its actual start up to this date, and the earned curve stops here. Changing it moves the end of the earned curve.">
             <input className="input" type="date" value={s.dataDate} onChange={(e) => set({ dataDate: e.target.value })} />
+          </Field>
+          {pinnedMissing && (
+            <Notice tone="warn">
+              The pinned baseline is no longer in the import history, so the newest one is being used. Pick a baseline again, or leave it on the newest.
+            </Notice>
+          )}
+          <Field
+            label="Measure against"
+            hint="Which baseline the planned curve and every variance are compared with. The newest is the default; pin an earlier one to keep reporting against the baseline the job was approved on after a re-baseline."
+          >
+            <select
+              className="input w-full"
+              value={s.baselineImportId ?? ''}
+              onChange={(e) => set({ baselineImportId: e.target.value || undefined })}
+            >
+              <option value="">The newest baseline import</option>
+              {baselines.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {fmtDate(b.importedAt.slice(0, 10))} — {b.sourceFilename} ({b.rowCount} rows)
+                </option>
+              ))}
+            </select>
           </Field>
           <Field
             label="S-curve reports"

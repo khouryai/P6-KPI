@@ -297,6 +297,95 @@ The screen counts what each rule actually catches against the live schedule, wit
 the rules above it applied first. A rule matching nothing is the common mistake, and
 it is silent: it reads exactly like one that is working.
 
+## What changed on import
+
+`diffSchedules(before, after)` compares the incoming file against the schedule of
+the same kind already in use, and the Import screen shows it **before** the confirm
+button — while it is still a decision rather than a fact. It reports only what P6
+owns: dates, durations, the name, and whether a date became actual. Nothing the
+user keyed is involved, because an import cannot touch it.
+
+WBS rows are excluded. They carry rolled-up durations that move whenever anything
+underneath them does, and including them would bury every real change under a
+hundred summary rows that say nothing on their own. Duplicate Activity IDs resolve
+first-wins, as every other join in the application does.
+
+The slip list sorts worst first, which is the order somebody reading a change report
+actually wants. "Newly finished" and "newly started" are separate lists rather than
+one: an activity is not both.
+
+## Which baseline
+
+`data.baseline` is the newest baseline import and remains the default. A programme
+that re-baselines still has to report variance against the baseline it was approved
+on, so `settings.baselineImportId` can pin an earlier import and the planned curve,
+the two-week log and every variance follow it.
+
+Only the baselines that might be needed are read into memory — the newest, plus the
+pinned one when that is a different import. Every baseline ever imported stays in
+`imports/` and in the index; reading forty full schedules to populate a dropdown
+would be absurd. A pinned id that is no longer in the index falls back to the newest
+and says so rather than silently reporting against nothing.
+
+## Capacity is the one thing the app cannot derive
+
+The forecast already says what each group still has to do and what it will cost at
+the rate that group achieves. Turning that into a staffing answer needs one more
+fact — how many people are in the group — and no schedule contains it. So headcount
+is keyed, per group, optionally from a month, and everything in `capacity.ts` is
+arithmetic on it.
+
+Two decisions worth stating. Demand is the forecast **cost**, not the budget: a
+group converting at 0.7 needs half again as many hours as its work is worth, and
+staffing against the budget would under-staff it by that much. Where a group has no
+rate yet the budget is used instead, which is the only figure available. And a group
+nobody has keyed a headcount for reports demand and **no verdict** — null supply,
+null gap, null load — because "nobody has said" and "nobody is available" are
+different claims and only one of them is true.
+
+## Trend is read, not stored
+
+`trendFrom` takes the monthly earned-against-built rows, which are already history,
+and reports the last N active months against the N before them. Nothing has to be
+snapshotted for it to exist.
+
+Two window means rather than a fitted slope, deliberately: a regression through four
+noisy months invites more confidence than four noisy months deserve. Months where
+nothing was earned and nothing was built are dropped **before** the windows are
+taken — otherwise a programme with a shutdown December reports a collapsing rate
+every January, which is a fact about the calendar presented as a fact about the
+work. And a pace of zero yields a null projection rather than a division that would
+produce a finish date out of nothing moving.
+
+## The status report
+
+One page, printed or saved as PDF, for somebody who was not at the review. What goes
+on it is a choice — which phase curves, whether the two-week log is included and
+which outcomes from it — because the audience changes: a phase lead wants their own
+curve and the fortnight's misses, a programme meeting wants the whole job.
+
+The page carries almost no prose, and that is the point. Everything else in this
+application explains itself as you work, through hints, notes under figures and a
+glossary on every abbreviated heading. A printed page is read at a glance by someone
+who cannot hover anything and will not read a paragraph, so it states figures and
+names and leaves the explaining to whoever is presenting it.
+
+Printing is CSS rather than a second rendering path. `@media print` drops the
+sidebar, the save strips, the toasts, the page hero and everything marked
+`.no-print` — which is the report builder — and unwinds the flex-column-at-viewport
+-height layout the application uses into ordinary block flow, because paper has no
+viewport. Chart tooltips are hidden too: a tooltip is wherever the cursor happened
+to be, and on paper it is a box of numbers obscuring the chart it belongs to.
+
+## Bulk edits take the filter as the selection
+
+Budget Master's bulk panel applies to whatever the filters are showing. There is no
+checkbox column, on purpose: it would be a second way to say what the row of
+dropdowns already says, and the two would disagree the moment a filter changed under
+a set of ticks. What you can see is what it touches, the count is in the button, and
+the confirm says the number back. An override left with nothing in it is deleted
+rather than kept as an empty row.
+
 ## Phases read in their own order
 
 Every other rollup sorts by hours, biggest first, because the question there is

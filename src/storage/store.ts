@@ -4,6 +4,7 @@ import type {
   LibraryEntry,
   Location,
   MissedReasonLog,
+  Headcount,
   IdRule,
   ScheduleImport,
   Settings,
@@ -25,6 +26,7 @@ export const FILES = {
   missedReasons: 'missed-reasons.json',
   subsystems: 'subsystems.json',
   idRules: 'id-rules.json',
+  headcounts: 'headcounts.json',
   teamActuals: 'team-actuals.json',
   importsIndex: 'imports/index.json',
 } as const;
@@ -47,7 +49,16 @@ export type StoreData = {
   teamActuals: TeamActual[];
   /** Exceptions to how an Activity ID is read for location and phase. */
   idRules: IdRule[];
+  /** How many people each resource group has, for capacity against demand. */
+  headcounts: Headcount[];
   importsIndex: ImportIndexEntry[];
+  /**
+   * The baselines actually loaded into memory: the newest, plus the pinned one when
+   * that is a different import. Every baseline ever imported is in `importsIndex`
+   * and on disk; only the ones the model might need are read, because each carries
+   * a full schedule and reading forty of them to show a dropdown would be absurd.
+   */
+  baselines: ScheduleImport[];
   current: ScheduleImport | null;
   baseline: ScheduleImport | null;
 };
@@ -67,7 +78,9 @@ export function emptyStoreData(): StoreData {
     subsystems: [],
     teamActuals: [],
     idRules: [],
+    headcounts: [],
     importsIndex: [],
+    baselines: [],
     current: null,
     baseline: null,
   };
@@ -127,9 +140,10 @@ const CANONICAL: RegExp[] = [
   /^subsystems\.json$/,
   /^team-actuals\.json$/,
   /^id-rules\.json$/,
+  /^headcounts\.json$/,
   /^\.lock$/,
 ];
-const STEMS = ['settings', 'locations', 'activity-library', 'activity-overrides', 'test-progress', 'missed-reasons', 'subsystems', 'team-actuals', 'id-rules'];
+const STEMS = ['settings', 'locations', 'activity-library', 'activity-overrides', 'test-progress', 'missed-reasons', 'subsystems', 'team-actuals', 'id-rules', 'headcounts'];
 const CANONICAL_IMPORT = /^(index|\d{4}-\d{2}-\d{2}T\d{4,6}(-\d+)?-(current|baseline))\.json$/;
 
 /**
@@ -201,6 +215,9 @@ export class Store {
     // Absent in every store written before an Activity ID could be overruled. No
     // rules is the correct reading of "the IDs have all parsed fine so far".
     data.idRules = parseJson<IdRule[]>(await a.read(FILES.idRules), [], FILES.idRules, problems);
+    // Absent until somebody says how many people a group has. No headcount is the
+    // right reading of "nobody has said", which the capacity view reports as such.
+    data.headcounts = parseJson<Headcount[]>(await a.read(FILES.headcounts), [], FILES.headcounts, problems);
     data.importsIndex = parseJson<ImportIndexEntry[]>(await a.read(FILES.importsIndex), [], FILES.importsIndex, problems);
     for (const kind of ['current', 'baseline'] as const) {
       const latest = [...data.importsIndex].filter((i) => i.kind === kind).sort((x, y) => x.importedAt.localeCompare(y.importedAt)).pop();
@@ -208,6 +225,19 @@ export class Store {
       const imp = parseJson<ScheduleImport | null>(await a.read(latest.file), null, latest.file, problems);
       if (imp) data[kind] = imp;
       else problems.push(`The latest ${kind} import (${latest.file}) is missing. Re-import or restore it from OneDrive.`);
+    }
+    if (data.baseline) data.baselines.push(data.baseline);
+    /*
+     * A pinned baseline that is not the newest has to be read as well, since the
+     * model measures against it. Only that one: the rest stay on disk until
+     * somebody pins them.
+     */
+    const pinned = data.settings.baselineImportId;
+    if (pinned && data.baseline?.id !== pinned) {
+      const entry = data.importsIndex.find((i) => i.kind === 'baseline' && i.id === pinned);
+      const imp = entry ? parseJson<ScheduleImport | null>(await a.read(entry.file), null, entry.file, problems) : null;
+      if (imp) data.baselines.push(imp);
+      else if (entry) problems.push(`The pinned baseline (${entry.file}) is missing, so the newest one is being used instead.`);
     }
     return { data, problems };
   }

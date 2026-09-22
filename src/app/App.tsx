@@ -23,6 +23,8 @@ const TestProgress = lazy(() => import('./screens/TestProgress').then((m) => ({ 
 const Rollup = lazy(() => import('./screens/Rollup').then((m) => ({ default: m.Rollup })));
 const Subsystems = lazy(() => import('./screens/Subsystems').then((m) => ({ default: m.Subsystems })));
 const TeamHours = lazy(() => import('./screens/TeamHours').then((m) => ({ default: m.TeamHours })));
+const StatusReport = lazy(() => import('./screens/StatusReport').then((m) => ({ default: m.StatusReport })));
+const Capacity = lazy(() => import('./screens/Capacity').then((m) => ({ default: m.Capacity })));
 const PeriodLog = lazy(() => import('./screens/PeriodLog').then((m) => ({ default: m.PeriodLog })));
 const IdRules = lazy(() => import('./screens/IdRules').then((m) => ({ default: m.IdRules })));
 const Settings = lazy(() => import('./screens/Settings').then((m) => ({ default: m.Settings })));
@@ -61,6 +63,12 @@ function Shell() {
       break;
     case 'team':
       screen = <TeamHours />;
+      break;
+    case 'report':
+      screen = <StatusReport />;
+      break;
+    case 'capacity':
+      screen = <Capacity />;
       break;
     case 'period':
       screen = <PeriodLog />;

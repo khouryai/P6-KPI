@@ -88,7 +88,7 @@ export function Page({
           {actions && <div className="ph-actions">{actions}</div>}
         </div>
       </div>
-      {toolbar && <div className="flex flex-wrap items-center gap-2 border-b border-[var(--line-soft)] bg-[var(--surface)] px-7 py-2.5">{toolbar}</div>}
+      {toolbar && <div className="page-toolbar flex flex-wrap items-center gap-2 border-b border-[var(--line-soft)] bg-[var(--surface)] px-7 py-2.5">{toolbar}</div>}
       <div className="min-h-0 flex-1 overflow-auto px-7 py-6">{children}</div>
     </div>
   );

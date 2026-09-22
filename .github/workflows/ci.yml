@@ -26,6 +26,10 @@ jobs:
         run: echo "::notice::workbook-parity is skipped in CI (TC_WORKBOOK unset). Run it locally against a copy of the workbook before releasing."
       - name: Build
         run: npm run build
+      - name: Install a browser for the UI tests
+        run: npx playwright install --with-deps chromium
+      - name: UI tests
+        run: npm run test:ui
       # dist/ and standalone/ are committed build output. If a build here changes
       # them, the committed copy is stale and whoever pulls it runs old code.
       - name: Committed build is current

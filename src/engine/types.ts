@@ -3,8 +3,10 @@
  * Dates are ISO calendar dates (YYYY-MM-DD) unless stated otherwise.
  */
 import type { Cadence } from './dates';
+import type { CapacitySettings } from './capacity';
 
 export type { Cadence };
+export type { CapacitySettings, Headcount } from './capacity';
 
 export type Basis = 'RATE' | 'DUR';
 
@@ -22,11 +24,22 @@ export type Settings = {
    */
   curveCadence?: Cadence;
   /**
+   * The import id of the baseline to measure against, when it should not simply be
+   * the newest one. Absent means the newest, which is what the app did before more
+   * than one baseline could be kept.
+   */
+  baselineImportId?: string;
+  /**
    * The calendar month a fiscal year starts in, 1-12. 7 (July) is the usual
    * transit-agency year; 1 makes a fiscal year a calendar year. Optional, because
    * every store written before fiscal years existed has no such key.
    */
   fiscalYearStartMonth?: number;
+  /**
+   * What one person is worth in a month, for the capacity view. Absent in every
+   * store written before it existed, and defaulted rather than assumed to be zero.
+   */
+  capacity?: CapacitySettings;
 };
 
 /**

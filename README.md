@@ -48,6 +48,9 @@ The workbook never has to be opened again, and neither does Excel:
 | Progress per phase or location | **By Phase & Location**: rollups by phase, location, subsystem or work type, with drill-through into a filtered Budget Master. An activity worked by two subsystems puts half its hours under each, so the groups still add back to the budget. |
 | A fortnightly review | **Two-Week Log**: what the baseline planned for the period, what was actually achieved, and every activity behind it — completed, started, continued, missed or never started. Outcomes are read off the actual dates, so an activity that beat its baseline reads **COMPLETED** in the fortnight it finished and **COMPLETED EARLY** in a later one its baseline ran on into, instead of reappearing as still running. **Actual start** and **Actual finish** are editable on the row — they write the same dates the Progress screen holds, so a correction made at the review moves the earn window, the curve and the outcome with it. Each row says what it put into its own phase and into the job. Every missed activity gets a **why**, picked from a list you extend from the dropdown itself and prune under **Reasons** (anything nobody has used yet can be deleted, the app's own suggestions included); the answer stays with the Activity ID rather than the exact end date, and the reasons are totalled on the screen. Each row also takes a **progress note**, which is the same field the Progress screen shows and is separate from the Budget Master note. An activity that has started and not finished spreads its hours to the data date, so it shows movement in every period until somebody says when the work actually happened — those rows are flagged, and one **Progress as at** date on the row puts the hours in the weeks they were earned. The percent complete can be keyed straight from a row. Steps period by period and stays on the period you left it on, and copies as text for a report. |
 | An Activity ID that parses wrong | **Activity ID Rules**: say that any ID containing `HTT` is at location HTT, or that `LMA` means Phase 1. First match wins, each rule reports how many activities it actually catches, and the import is never rewritten — delete the rule and everything goes back. |
+| What a new import changes | **Import**: before you confirm, the preview says which activities slipped and by how many days, which were pulled in, which completed, which are new and which are gone. |
+| Staffing the work ahead | **Capacity**: what the forecast asks of each group in each fiscal year or month, against the headcount you key. Says which periods are short, and by how many hours. |
+| A page to hand over | **Status Report**: pick which phase curves go on it and which parts of the Two-Week Log, then print or save as PDF. |
 | Defaults, dates, storage, backups | **Settings** |
 | Hand a spreadsheet to project controls | **Settings → Export workbook**, plus curve CSV and chart PNG on the Dashboard. |
 
@@ -89,6 +92,14 @@ it to every two weeks or every week, anchored on the **data date** — so a data
 of Wed 23 Sep puts a period exactly there, the earned line runs to the day you
 measured rather than to the month end before it, and the DATA DATE marker sits on
 it. Changing the cadence changes where the line is sampled, never what it sums to.
+
+## Which way it is moving
+
+Every other figure reports a position. **Earned vs Actual** also carries the
+direction: the factor and the progress-per-month over the last three active months
+against the three before them, and how long the rest will take at that pace. Quiet
+months are dropped before the comparison, so a shutdown December does not read as a
+collapse every January.
 
 ## Percentages, not just hours
 
@@ -141,7 +152,8 @@ The only schedule data in the repo is the anonymised fixture in `fixtures/`, reb
 ## Layout
 
 ```
-src/engine     pure calculation engine (no storage, no UI)
+src/engine     pure calculation engine (no storage, no UI): pricing, progress,
+               curve, rollup, burn, capacity, trend, schedule diff
 src/storage    StorageAdapter: File System Access, IndexedDB, memory; atomic writes, lock, conflicts
 src/app        React screens: Dashboard, Import, Library, Locations, Budget Master,
                Progress, Two-Week Log, Earned vs Actual, Settings
@@ -150,7 +162,8 @@ server/        serve.ps1 (no-install Windows server), serve.mjs (Node equivalent
 dist/          built application, committed
 standalone/    the whole application as one HTML file, committed
 fixtures/      anonymised fixture schedules (.xlsx, .xer, .tsv) and expected figures
-tests/         vitest suites
+tests/         vitest suites (the engine, in a second, with no browser)
+tests-ui/      playwright smoke tests: every screen opens, the data paths work
 docs/          INSTALL.md, DESIGN.md
 ```
 

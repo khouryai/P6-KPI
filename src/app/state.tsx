@@ -507,7 +507,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const b = bundle.data;
     // A backup taken before subsystems existed has neither key. Default them so a
     // restore from an old file does not write "undefined" over a newer store.
-    for (const key of ['settings', 'locations', 'library', 'overrides', 'testProgress', 'subsystems', 'teamActuals', 'idRules'] as const) {
+    for (const key of ['settings', 'locations', 'library', 'overrides', 'testProgress', 'subsystems', 'teamActuals', 'idRules', 'headcounts'] as const) {
       await store.saveFile(key, b[key] ?? (key === 'settings' ? b.settings : []));
     }
     // Its own line: unlike every other file this one is an object, so the empty
@@ -545,6 +545,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    * to one leaves the other's work alone.
    */
   const d = state.data;
+  /*
+   * Which baseline the job is measured against.
+   *
+   * `data.baseline` is the newest import of that kind, and that is the default. A
+   * programme that re-baselines still has to be able to show variance against the
+   * one it was approved on, so Settings can pin an earlier import and everything
+   * downstream — the planned curve, the two-week log, every variance — follows it.
+   * A pinned id that no longer exists falls back to the newest rather than to none.
+   */
+  const chosenBaseline = useMemo(() => {
+    const pinned = d.settings.baselineImportId;
+    if (!pinned || d.baseline?.id === pinned) return d.baseline;
+    return d.baselines.find((b) => b.id === pinned) ?? d.baseline;
+  }, [d.settings.baselineImportId, d.baseline, d.baselines]);
+
   const base = useMemo<ModelBase>(
     () =>
       computeBase({
@@ -556,9 +571,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         subsystems: d.subsystems,
         idRules: d.idRules,
         current: d.current?.activities ?? [],
-        baseline: d.baseline?.activities ?? null,
+        baseline: chosenBaseline?.activities ?? null,
       }),
-    [d.settings, d.locations, d.library, d.overrides, d.testProgress, d.subsystems, d.idRules, d.current, d.baseline],
+    [d.settings, d.locations, d.library, d.overrides, d.testProgress, d.subsystems, d.idRules, d.current, chosenBaseline],
   );
   const model = useMemo<Model>(() => attachBurn(base, d.teamActuals), [base, d.teamActuals]);
 

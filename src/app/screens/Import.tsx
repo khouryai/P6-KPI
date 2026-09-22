@@ -7,6 +7,7 @@ import { detectLayout, columnCount, columnLabel, FIELD_ORDER, FIELD_LABELS, type
 import { readWorkbook, pickSheet, workbookGrid } from '../../engine/workbook';
 import { parseXer, isXer, xerToActivities, type XerTable } from '../../engine/xer';
 import { distinctActivityTypes, distinctLocations } from '../../engine/discover';
+import { diffSchedules, type ActivityChange } from '../../engine/scheduleDiff';
 import { normKey } from '../../engine/keys';
 import type { ImportKind, ImportIndexEntry, ScheduleImport, P6Activity } from '../../engine/types';
 import { fmtDateTime, fmtDate } from '../format';
@@ -194,6 +195,21 @@ export function Import() {
       strandedTests: keyed.length - carriedTests,
     };
   }, [parsed, state.data, kind]);
+
+  /*
+   * What this file changes about the schedule of the same kind already in use.
+   *
+   * Computed before anything is written, because that is while it is still a
+   * decision. A monthly import that quietly moves forty finishes is the normal
+   * case, and the only way to know which forty used to be to export both and
+   * diff them by hand.
+   */
+  const changes = useMemo(() => {
+    if (!parsed) return null;
+    const inUse = kind === 'current' ? state.data.current : state.data.baseline;
+    if (!inUse) return null;
+    return { against: inUse, diff: diffSchedules(inUse.activities, parsed.activities) };
+  }, [parsed, state.data.current, state.data.baseline, kind]);
 
   const commit = async () => {
     if (!pending || !parsed) return;
@@ -415,6 +431,8 @@ export function Import() {
               <ul className="mt-1 max-h-40 overflow-auto">{preview.newTypes.map((t) => <li key={t}>{t}</li>)}</ul>
             </details>
           )}
+          {changes && <ChangeReport against={changes.against.sourceFilename} diff={changes.diff} kind={kind} />}
+
           <details className="mt-2 text-[12px]" open>
             <summary className="cursor-pointer">First 15 parsed rows</summary>
             <div className="mt-1 overflow-auto">
@@ -508,5 +526,99 @@ export function Import() {
         </div>
       )}
     </Page>
+  );
+}
+
+/** A day count as a signed slip, coloured by direction. */
+function Slip({ days }: { days: number | null }) {
+  if (days === null || days === 0) return <span className="text-[var(--text-subtle)]">—</span>;
+  return (
+    <span className={`font-semibold tabular-nums tone-${days > 0 ? 'bad' : 'good'}`}>
+      {days > 0 ? '+' : ''}
+      {days} d
+    </span>
+  );
+}
+
+/**
+ * What this import changes, before it is committed.
+ *
+ * Ordered by what a reader is looking for: the headline counts, then the slip list
+ * worst first, because "what moved and by how much" is the question a monthly
+ * import exists to answer and the one nobody could answer without exporting both
+ * schedules and comparing them by hand.
+ */
+function ChangeReport({ against, diff, kind }: { against: string; diff: ReturnType<typeof diffSchedules>; kind: ImportKind }) {
+  const [open, setOpen] = useState<'slipped' | 'pulledIn' | 'finished' | 'started' | 'added' | 'removed' | null>(
+    diff.slipped.length ? 'slipped' : null,
+  );
+
+  const worst = diff.slipped[0]?.finishMovedDays ?? 0;
+  const tiles: { key: NonNullable<typeof open>; label: string; rows: ActivityChange[]; tone?: string }[] = [
+    { key: 'slipped', label: 'Finish moved later', rows: diff.slipped, tone: diff.slipped.length ? 'tone-bad' : undefined },
+    { key: 'pulledIn', label: 'Finish pulled in', rows: diff.pulledIn, tone: diff.pulledIn.length ? 'tone-good' : undefined },
+    { key: 'finished', label: 'Newly finished', rows: diff.finished, tone: diff.finished.length ? 'tone-good' : undefined },
+    { key: 'started', label: 'Newly started', rows: diff.started },
+    { key: 'added', label: 'New activities', rows: diff.added },
+    { key: 'removed', label: 'Gone from the schedule', rows: diff.removed, tone: diff.removed.length ? 'tone-bad' : undefined },
+  ];
+  const shown = open ? (tiles.find((t) => t.key === open)?.rows ?? []) : [];
+
+  return (
+    <div className="mt-3 rounded border border-[var(--gray-200)] bg-[var(--surface-2)] px-3 py-2">
+      <div className="flex flex-wrap items-baseline gap-2 text-[12px]">
+        <span className="font-semibold">What this changes</span>
+        <span className="text-[var(--text-muted)]">
+          against the {kind} schedule in use ({against}). {diff.unchanged} activities are untouched.
+          {worst > 0 && <> The worst slip is <b className="tone-bad">{worst} days</b>.</>}
+        </span>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
+        {tiles.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            className={`factlet text-left${open === t.key ? ' phase-picked' : ''}${t.rows.length ? ' cursor-pointer' : ''}`}
+            disabled={!t.rows.length}
+            onClick={() => setOpen(open === t.key ? null : t.key)}
+          >
+            <div className="factlet-label">{t.label}</div>
+            <div className={`factlet-value ${t.rows.length ? t.tone ?? '' : 'text-[var(--text-subtle)]'}`}>{t.rows.length}</div>
+          </button>
+        ))}
+      </div>
+
+      {shown.length > 0 && (
+        <div className="table-wrap mt-2" style={{ maxHeight: 260 }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Activity ID</th>
+                <th>Name</th>
+                <th className="num">Finish</th>
+                <th>What changed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.slice(0, 200).map((c) => (
+                <tr key={c.activityId}>
+                  <td><span className="mono text-[11px]">{c.activityId}</span></td>
+                  <td className="cell-text" title={c.activityName}>{c.activityName}</td>
+                  <td className="num"><Slip days={c.finishMovedDays} /></td>
+                  <td>
+                    <span className="block text-[11.5px] text-[var(--text-muted)]" style={{ maxWidth: '30rem', whiteSpace: 'normal' }}>
+                      {c.kind === 'added' && 'Not in the schedule in use.'}
+                      {c.kind === 'removed' && 'In the schedule in use, not in this file.'}
+                      {c.fields.map((f) => `${f.field}: ${f.from} → ${f.to}`).join(' · ')}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {shown.length > 200 && <div className="mt-1 text-[11px] text-[var(--text-muted)]">Showing the first 200 of {shown.length}.</div>}
+    </div>
   );
 }
