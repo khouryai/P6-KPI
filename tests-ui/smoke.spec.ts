@@ -140,22 +140,37 @@ test('the status report starts with no whole-project curve, and draws one when a
   await expect(page.locator('.report text', { hasText: /^DATA DATE / })).toHaveCount(1);
 });
 
-test('the status report saves the whole page as a PNG, not only the curves', async ({ page }) => {
+test('the status report saves the whole page as a PNG, at the size it will be placed', async ({ page }) => {
   await open(page);
   await importSchedule(page, 'current', schedule({ finished: 4, ahead: 4 }));
   await page.goto('/#/report');
   await page.locator('.no-print').getByRole('button', { name: 'Whole project' }).click();
   await expect(page.locator('.report .recharts-wrapper')).toHaveCount(1);
+  await page.locator('.no-print select').filter({ hasText: 'Word page' }).selectOption('portrait');
 
-  const download = page.waitForEvent('download');
+  const files: import('@playwright/test').Download[] = [];
+  page.on('download', (d) => files.push(d));
   await page.getByRole('button', { name: 'Save as PNG' }).click();
-  const file = await download;
-  expect(file.suggestedFilename()).toMatch(/^status-report-.*\.png$/);
-  const bytes = readFileSync((await file.path())!);
+  await expect.poll(() => files.length, { timeout: 30_000 }).toBeGreaterThan(0);
+
+  const bytes = readFileSync((await files[0].path())!);
   expect(bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  // A picture of a chart alone would be a fraction of this. The page carries the
-  // heading, the fortnight's cards, its activities and the curve.
+  // A picture of a chart alone would be a fraction of this.
   expect(bytes.length).toBeGreaterThan(60_000);
+
+  /*
+   * The whole point of the size work: a PNG with no pHYs chunk claims no physical
+   * size, Word assumes 96 dpi, and a report two thousand pixels wide is shrunk by
+   * four to fit the text column — which is what "the quality is very poor" was.
+   */
+  const width = bytes.readUInt32BE(16);
+  const phys = bytes.indexOf(Buffer.from('pHYs'));
+  expect(phys, 'the PNG must say how big it really is').toBeGreaterThan(0);
+  const perMetre = bytes.readUInt32BE(phys + 4);
+  expect(bytes[phys + 12]).toBe(1); // the unit is the metre
+  const inches = width / (perMetre / 39.3701);
+  expect(inches).toBeGreaterThan(6.3);
+  expect(inches).toBeLessThan(6.7);
 });
 
 /**

@@ -90,7 +90,7 @@ export type Prepared = { img: HTMLImageElement; url: string; w: number; h: numbe
  * the webfonts are swapped for system fonts because an SVG loaded as an image cannot
  * fetch them.
  */
-export async function prepareChart(source: ChartSource): Promise<Prepared> {
+export async function prepareChart(source: ChartSource, pixelRatio = 1): Promise<Prepared> {
   const { chart } = source;
   const svg = chart instanceof SVGSVGElement ? chart : chartSurface(chart);
   if (!svg) throw new Error('No chart to export');
@@ -100,8 +100,11 @@ export async function prepareChart(source: ChartSource): Promise<Prepared> {
 
   const clone = svg.cloneNode(true) as SVGSVGElement;
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  clone.setAttribute('width', String(w));
-  clone.setAttribute('height', String(h));
+  // The intrinsic size can be several times the size on screen, with the viewBox
+  // left at the original: the curves are vectors, so the chart is then rasterised
+  // at whatever the canvas needs rather than blown up from a screen-sized bitmap.
+  clone.setAttribute('width', String(Math.round(w * pixelRatio)));
+  clone.setAttribute('height', String(Math.round(h * pixelRatio)));
   if (!clone.getAttribute('viewBox')) clone.setAttribute('viewBox', `0 0 ${w} ${h}`);
   clone.style.removeProperty('width');
   clone.style.removeProperty('height');
@@ -252,6 +255,52 @@ export async function chartsToPng(
  * So the report is painted instead: see `reportPaint.ts`, which draws it from the
  * same column definitions the tables on screen are built from.
  */
+
+/**
+ * Tell a PNG how big it really is.
+ *
+ * A PNG with no `pHYs` chunk carries no physical size, and Word assumes 96 dpi —
+ * so a 2,400 pixel wide report claims to be 25 inches across, Word shrinks it by
+ * four to fit the text column, and what lands on the page is mush. Stamping the
+ * density the picture was actually drawn at makes Word place it at its intended
+ * width and leave the pixels alone.
+ */
+export function withDpi(png: Uint8Array, dpi: number): Uint8Array {
+  const perMetre = Math.round(dpi * 39.3701);
+  const chunk = new Uint8Array(21);
+  const dv = new DataView(chunk.buffer);
+  dv.setUint32(0, 9); // length of the data
+  chunk.set([0x70, 0x48, 0x59, 0x73], 4); // "pHYs"
+  dv.setUint32(8, perMetre);
+  dv.setUint32(12, perMetre);
+  chunk[16] = 1; // the unit is the metre
+  dv.setUint32(17, crc32(chunk.subarray(4, 17)));
+
+  // Straight after IHDR, which is always the first chunk: 8 bytes of signature,
+  // then 4 length + 4 type + 13 data + 4 CRC.
+  const at = 8 + 25;
+  const out = new Uint8Array(png.length + chunk.length);
+  out.set(png.subarray(0, at), 0);
+  out.set(chunk, at);
+  out.set(png.subarray(at), at + chunk.length);
+  return out;
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(bytes: Uint8Array): number {
+  let c = 0xffffffff;
+  for (const b of bytes) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
 
 export function downloadBytes(name: string, bytes: Uint8Array, type: string): void {
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));

@@ -324,6 +324,30 @@ figure the table sorts and exports by: `91.42857142857142` where the page says
 somebody chose, in the order they put them, sorted the way they left it, without
 anything having to be told about any of that.
 
+### Why the first version was unreadable in Word
+
+It was drawn at screen width, one tall image, with no physical size on it. Four
+things then happened at once, and each of them shrank it again:
+
+- A PNG with no `pHYs` chunk claims no size, so Word assumes 96 dpi. Two thousand
+  pixels across becomes a claim to be twenty inches wide, and Word scales it down by
+  four to fit the text column.
+- A report is always taller than a page, and Word shrinks an inline image that will
+  not fit, so it came down again.
+- The layout was proportioned for a screen: eleven-pixel type in a 1,330-pixel-wide
+  page is fine at arm's length and is four-point type in a Word column.
+- The charts were captured at screen width and scaled down with everything else, so
+  their axis labels ended up a third the size of the type around them.
+
+All four are fixed at the same place — by deciding, before anything is drawn, how
+wide the picture is *meant to be on the page*. The layout width is chosen for that
+target, so the type is proportionally larger; the report is broken into page-sized
+images so Word never has to shrink one; each chart is laid out at the width it will
+occupy before it is captured, so its labels come out the size of the page's own type;
+and the density is stamped into the file so Word places each page at exactly its
+width and leaves the pixels alone. What lands in the document is 1:1, around 215 dpi,
+and reads at 100% zoom.
+
 ## When the Activity ID is wrong
 
 The ID is parsed positionally: location is the 4th dash-delimited segment, phase the
