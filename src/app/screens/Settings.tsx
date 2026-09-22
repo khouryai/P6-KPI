@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp } from '../state';
 import { Page, Notice } from '../components/ui';
 import type { Settings as S } from '../../engine/types';
-import { buildWorkbook, workbookBytes, downloadBytes, stamp } from '../export';
+import { downloadBytes, stamp } from '../export';
 import type { Bundle } from '../state';
 import { num, fmtDateTime } from '../format';
 import { BUILD_COMMIT, BUILD_TIME, IS_STANDALONE, runningFrom } from '../build';
@@ -18,6 +18,9 @@ export function Settings() {
   const exportXlsx = async () => {
     setBusy(true);
     try {
+      // Loaded here rather than imported: the spreadsheet library is a third of
+      // the bundle and nothing before this click needs it.
+      const { buildWorkbook, workbookBytes } = await import('../workbookExport');
       const wb = buildWorkbook(model, s, state.data.current?.activities ?? [], state.data.baseline?.activities ?? [], state.data.testProgress, state.data.missedReasons);
       const bytes = workbookBytes(wb);
       const name = `TC_Budget_${stamp()}.xlsx`;

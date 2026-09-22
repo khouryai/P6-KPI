@@ -772,6 +772,21 @@ export type Model = {
   notes: string[];
 };
 
+/**
+ * The model before the timesheets are folded in.
+ *
+ * Everything here is a function of the schedule, the library and the user's edits.
+ * `attachBurn` adds the earned-against-built half, which depends on team hours and
+ * on nothing this carries — which is exactly why the two are computed separately.
+ */
+export type ModelBase = Omit<Model, 'burn'> & {
+  /** The subsystem definitions the rollups were built with, for the burn to reuse. */
+  subsystemDefs: Subsystem[];
+  /** Month ends spanning the schedule: the grid the monthly burn is laid on. */
+  periods: string[];
+  dataDate: string | null;
+};
+
 export type ModelInput = {
   settings: Settings;
   locations: Location[];

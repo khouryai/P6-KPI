@@ -1,19 +1,36 @@
+import { lazy, Suspense } from 'react';
 import { AppProvider, useApp } from './state';
 import { useHashRoute } from './router';
 import { Layout } from './components/Layout';
 import { Setup } from './screens/Setup';
 import { Dashboard } from './screens/Dashboard';
-import { Import } from './screens/Import';
-import { Library } from './screens/Library';
-import { Locations } from './screens/Locations';
-import { BudgetMaster } from './screens/BudgetMaster';
-import { TestProgress } from './screens/TestProgress';
-import { Rollup } from './screens/Rollup';
-import { Subsystems } from './screens/Subsystems';
-import { TeamHours } from './screens/TeamHours';
-import { PeriodLog } from './screens/PeriodLog';
-import { IdRules } from './screens/IdRules';
-import { Settings } from './screens/Settings';
+
+/*
+ * Every screen but the dashboard is loaded when it is first opened.
+ *
+ * The two heaviest dependencies in the application are the spreadsheet library and
+ * the charting library, and between them they were most of a 1.4 MB bundle that had
+ * to arrive before anything appeared. Splitting on the route means the first paint
+ * carries the dashboard and its curve, and the Two-Week Log's charts or the Import
+ * screen's workbook reader arrive when somebody asks for them. The single-file
+ * standalone build inlines dynamic imports, so it is unaffected.
+ */
+const Import = lazy(() => import('./screens/Import').then((m) => ({ default: m.Import })));
+const Library = lazy(() => import('./screens/Library').then((m) => ({ default: m.Library })));
+const Locations = lazy(() => import('./screens/Locations').then((m) => ({ default: m.Locations })));
+const BudgetMaster = lazy(() => import('./screens/BudgetMaster').then((m) => ({ default: m.BudgetMaster })));
+const TestProgress = lazy(() => import('./screens/TestProgress').then((m) => ({ default: m.TestProgress })));
+const Rollup = lazy(() => import('./screens/Rollup').then((m) => ({ default: m.Rollup })));
+const Subsystems = lazy(() => import('./screens/Subsystems').then((m) => ({ default: m.Subsystems })));
+const TeamHours = lazy(() => import('./screens/TeamHours').then((m) => ({ default: m.TeamHours })));
+const PeriodLog = lazy(() => import('./screens/PeriodLog').then((m) => ({ default: m.PeriodLog })));
+const IdRules = lazy(() => import('./screens/IdRules').then((m) => ({ default: m.IdRules })));
+const Settings = lazy(() => import('./screens/Settings').then((m) => ({ default: m.Settings })));
+
+/** Shown while a screen's code arrives. On a local folder that is a few frames. */
+function Loading() {
+  return <div className="p-8 text-[13px] text-[var(--text-subtle)]">Loading…</div>;
+}
 
 function Shell() {
   const { state } = useApp();
@@ -57,7 +74,11 @@ function Shell() {
     default:
       screen = <Dashboard />;
   }
-  return <Layout screen={route.screen}>{screen}</Layout>;
+  return (
+    <Layout screen={route.screen}>
+      <Suspense fallback={<Loading />}>{screen}</Suspense>
+    </Layout>
+  );
 }
 
 export function App() {

@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { Model, ModelInput, ScheduleImport, ImportKind, ImportIndexEntry, P6Activity } from '../engine/types';
-import { computeModel } from '../engine/compute';
+import type { Model, ModelBase, ScheduleImport, ImportKind, ImportIndexEntry, P6Activity } from '../engine/types';
+import { attachBurn, computeBase } from '../engine/compute';
 import { discoverLibrary, discoverLocations } from '../engine/discover';
 import type { StorageAdapter } from '../storage/adapter';
 import { FileSystemAdapter } from '../storage/fileSystemAdapter';
@@ -534,22 +534,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [commitImport, readImport],
   );
 
-  const model = useMemo<Model>(() => {
-    const d = state.data;
-    const input: ModelInput = {
-      settings: d.settings,
-      locations: d.locations,
-      library: d.library,
-      overrides: d.overrides,
-      testProgress: d.testProgress,
-      subsystems: d.subsystems,
-      teamActuals: d.teamActuals,
-      idRules: d.idRules,
-      current: d.current?.activities ?? [],
-      baseline: d.baseline?.activities ?? null,
-    };
-    return computeModel(input);
-  }, [state.data]);
+  /*
+   * The model in two stages, because its halves change at different times.
+   *
+   * `computeBase` is the schedule: a thousand rows priced, dated, rolled up and
+   * plotted. `attachBurn` is the timesheets laid against it. Keying a month of team
+   * hours cannot move an activity or bend a curve, and the screen where people
+   * paste team hours is the one that would otherwise pay for a full rebuild on
+   * every paste. Each stage depends on exactly the store files it reads, so an edit
+   * to one leaves the other's work alone.
+   */
+  const d = state.data;
+  const base = useMemo<ModelBase>(
+    () =>
+      computeBase({
+        settings: d.settings,
+        locations: d.locations,
+        library: d.library,
+        overrides: d.overrides,
+        testProgress: d.testProgress,
+        subsystems: d.subsystems,
+        idRules: d.idRules,
+        current: d.current?.activities ?? [],
+        baseline: d.baseline?.activities ?? null,
+      }),
+    [d.settings, d.locations, d.library, d.overrides, d.testProgress, d.subsystems, d.idRules, d.current, d.baseline],
+  );
+  const model = useMemo<Model>(() => attachBurn(base, d.teamActuals), [base, d.teamActuals]);
 
   const writeExport = useCallback(async (name: string, bytes: Uint8Array) => {
     const store = storeRef.current;

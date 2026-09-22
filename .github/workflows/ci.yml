@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests
+        run: npm test
+      # The parity suite needs the real workbook, which is commercially sensitive
+      # and is never committed. It skips silently on its own; this says so out loud
+      # so a green run is not mistaken for one that checked the figures against it.
+      - name: Note the parity suite
+        run: echo "::notice::workbook-parity is skipped in CI (TC_WORKBOOK unset). Run it locally against a copy of the workbook before releasing."
+      - name: Build
+        run: npm run build
+      # dist/ and standalone/ are committed build output. If a build here changes
+      # them, the committed copy is stale and whoever pulls it runs old code.
+      - name: Committed build is current
+        run: |
+          if ! git diff --quiet -- dist standalone; then
+            echo "::error::dist/ or standalone/ is stale. Run 'npm run build' and commit the result."
+            git diff --stat -- dist standalone
+            exit 1
+          fi

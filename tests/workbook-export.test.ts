@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import * as XLSX from 'xlsx';
 import { computeModel } from '../src/engine/compute';
 import { fiscalYearDetail, forecastYears, fyStart } from '../src/engine/fiscal';
-import { buildWorkbook } from '../src/app/export';
+import { buildWorkbook } from '../src/app/workbookExport';
 import { DEFAULT_SETTINGS, type LibraryEntry, type Settings, type TeamActual } from '../src/engine/types';
 import { makeActivity } from './helpers';
 

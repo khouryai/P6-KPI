@@ -32,39 +32,39 @@ const grid = (ws: XLSX.WorkSheet) => XLSX.utils.sheet_to_json<unknown[]>(ws, { h
 
 describe('the sheet a table exports', () => {
   it('carries the visible columns as its header, in order', () => {
-    expect(grid(tableToSheet(rows, columns.slice(0, 4)))[0]).toEqual(['Activity ID', 'Activity name', 'Phase', 'Budget h']);
+    expect(grid(tableToSheet(XLSX, rows, columns.slice(0, 4)))[0]).toEqual(['Activity ID', 'Activity name', 'Phase', 'Budget h']);
   });
 
   it('writes numbers as numbers, so the spreadsheet can add them up', () => {
-    const body = grid(tableToSheet(rows, columns.slice(0, 4)))[1];
+    const body = grid(tableToSheet(XLSX, rows, columns.slice(0, 4)))[1];
     expect(body[3]).toBe(24);
     expect(typeof body[3]).toBe('number');
   });
 
   it('takes the value under a rendered cell, not the rendering', () => {
-    expect(grid(tableToSheet(rows, columns.slice(0, 4)))[1][2]).toBe('Phase 2');
+    expect(grid(tableToSheet(XLSX, rows, columns.slice(0, 4)))[1][2]).toBe('Phase 2');
   });
 
   it('prefers an explicit export value where the column gives one', () => {
     const col: Column<Row> = { key: 'pct', label: 'Done', value: (r) => r.hours, exportValue: (r) => `${r.hours} h` };
-    expect(grid(tableToSheet(rows, [col]))[1][0]).toBe('24 h');
+    expect(grid(tableToSheet(XLSX, rows, [col]))[1][0]).toBe('24 h');
   });
 
   it('exports exactly what the layout shows, in the order it shows it', () => {
     // Hide the name, bring the hours to the front: what comes out is what is read.
     const layout: TableLayout = { order: ['hours', 'id', 'phase'], off: ['name'], on: [] };
     const showing = applyLayout(columns, layout);
-    const out = grid(tableToSheet(rows, showing));
+    const out = grid(tableToSheet(XLSX, rows, showing));
     expect(out[0]).toEqual(['Budget h', 'Activity ID', 'Phase']);
     expect(out[1]).toEqual([24, 'A-1', 'Phase 2']);
   });
 
   it('names an unlabelled column rather than writing an empty header', () => {
-    expect(grid(tableToSheet(rows, [columns[4]]))[0]).toEqual(['Actions']);
+    expect(grid(tableToSheet(XLSX, rows, [columns[4]]))[0]).toEqual(['Actions']);
   });
 
   it('gives every column a width, so nothing lands in Excel already cut off', () => {
-    const ws = tableToSheet(rows, columns.slice(0, 4));
+    const ws = tableToSheet(XLSX, rows, columns.slice(0, 4));
     const widths = (ws['!cols'] ?? []).map((c) => c?.wch ?? 0);
     expect(widths).toHaveLength(4);
     // The long activity name has to be given more room than the short ID.
@@ -72,6 +72,6 @@ describe('the sheet a table exports', () => {
   });
 
   it('writes a header and nothing else when everything is filtered out', () => {
-    expect(grid(tableToSheet([], columns.slice(0, 4)))).toHaveLength(1);
+    expect(grid(tableToSheet(XLSX, [], columns.slice(0, 4)))).toHaveLength(1);
   });
 });

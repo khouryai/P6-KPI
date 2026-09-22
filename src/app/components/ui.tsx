@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
 import { define } from '../../engine/glossary';
 import { downloadBytes, stamp } from '../export';
 import { fmtDate } from '../format';
@@ -391,10 +390,10 @@ function ColumnPicker<T>({
  * `value` — the same raw figure the column sorts on, not the badge or the input
  * drawn over it — and nothing that is switched off is written.
  */
-export function tableToSheet<T>(rows: T[], columns: Column<T>[]): XLSX.WorkSheet {
+export function tableToSheet<T>(xlsx: typeof import('xlsx'), rows: T[], columns: Column<T>[]): import('xlsx').WorkSheet {
   const header = columns.map((c) => c.label || 'Actions');
   const body = rows.map((r) => columns.map((c) => (c.exportValue ? c.exportValue(r) : c.value(r)) ?? ''));
-  const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
+  const ws = xlsx.utils.aoa_to_sheet([header, ...body]);
   // Column widths, so the text a person went to the trouble of widening on screen
   // is not cut off again the moment it lands in Excel.
   ws['!cols'] = columns.map((c, i) => ({
@@ -525,11 +524,18 @@ export function SortableTable<T>({
     return w === undefined ? undefined : typeof w === 'number' ? { width: w, minWidth: w, maxWidth: w } : { width: w };
   };
 
-  /** The visible table, as a workbook. */
-  const exportSheet = () => {
+  /**
+   * The visible table, as a workbook.
+   *
+   * The spreadsheet library is loaded on the click rather than imported, because
+   * this component is on every screen and the library is a third of the bundle.
+   * Nobody should wait for it to open the dashboard.
+   */
+  const exportSheet = async () => {
     const name = exportName ?? tableId ?? 'table';
+    const XLSX = await import('xlsx');
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, tableToSheet(sorted, columns), name.slice(0, 28).replace(/[[\]:*?/\\]/g, '-'));
+    XLSX.utils.book_append_sheet(wb, tableToSheet(XLSX, sorted, columns), name.slice(0, 28).replace(/[[\]:*?/\\]/g, '-'));
     const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
     downloadBytes(`${name}-${stamp()}.xlsx`, bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   };
@@ -561,7 +567,7 @@ export function SortableTable<T>({
           <button className="btn btn-mini" onClick={fitAll} title="Widen every column to fit the longest thing in it. Double-click the edge of one heading to put that column back.">
             Fit columns
           </button>
-          <button className="btn btn-mini" onClick={exportSheet} title="Download what is on screen as an .xlsx: these columns, in this order, these rows.">
+          <button className="btn btn-mini" onClick={() => void exportSheet()} title="Download what is on screen as an .xlsx: these columns, in this order, these rows.">
             Excel
           </button>
           <button className={`btn btn-mini${hiddenCount > 0 ? ' is-on' : ''}`} onClick={() => setPicking((v) => !v)} title="Choose which columns to show, and their order">
