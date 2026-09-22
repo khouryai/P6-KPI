@@ -108,7 +108,7 @@ export const CurveChart = forwardRef<
     <div ref={ref} className="w-full" style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
         {/* The top margin is the DATA DATE label's room: at 8 it was cropped by the frame. */}
-        <ComposedChart data={data} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
+        <ComposedChart data={data} margin={{ top: 20, right: 44, left: 8, bottom: 0 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
           <XAxis
             dataKey="label"
@@ -134,7 +134,11 @@ export const CurveChart = forwardRef<
               x={marker}
               stroke="#cfd5df"
               strokeDasharray="4 4"
-              label={{ value: 'DATA DATE', position: 'top', fontSize: 9.5, fill: AXIS, letterSpacing: '0.1em' }}
+              /* The date itself, not just the words. On a printed page or a PNG
+                 pasted into a mail nobody can hover the line to find out when the
+                 schedule was measured, and "as at when?" is the first question
+                 anybody asks of an S-curve. */
+              label={{ value: `DATA DATE ${fmtDate(dataDate)}`, position: 'top', fontSize: 9.5, fill: AXIS, letterSpacing: '0.08em' }}
             />
           )}
           <Line type="monotone" dataKey="planned" legendType="plainline" name="Planned (baseline)" stroke={INK} strokeWidth={2} dot={false} isAnimationActive={false} />

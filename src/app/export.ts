@@ -73,7 +73,15 @@ function chartSurface(container: HTMLElement): SVGSVGElement | null {
 }
 
 /**
- * Rasterise a chart to PNG bytes.
+ * A chart as it will be drawn: the live element, and what to write over it.
+ */
+export type ChartSource = { chart: SVGSVGElement | HTMLElement; title?: string; subtitle?: string };
+
+/** One chart, measured and loaded, ready to be drawn onto a canvas. */
+type Prepared = { img: HTMLImageElement; url: string; w: number; h: number; legend: LegendItem[]; title?: string; subtitle?: string };
+
+/**
+ * Detach a chart, give it a real size, and load it as an image.
  *
  * Recharts sizes its SVG with `style="width:100%;height:100%"`, which means nothing
  * once the SVG is detached and loaded as an image: with no containing block and no
@@ -82,8 +90,8 @@ function chartSurface(container: HTMLElement): SVGSVGElement | null {
  * the webfonts are swapped for system fonts because an SVG loaded as an image cannot
  * fetch them.
  */
-export async function svgToPng(chart: SVGSVGElement | HTMLElement, opts: ChartPngOptions = {}): Promise<Uint8Array> {
-  const scale = opts.scale ?? 2;
+async function prepare(source: ChartSource): Promise<Prepared> {
+  const { chart } = source;
   const svg = chart instanceof SVGSVGElement ? chart : chartSurface(chart);
   if (!svg) throw new Error('No chart to export');
   const box = svg.getBoundingClientRect();
@@ -106,11 +114,6 @@ export async function svgToPng(chart: SVGSVGElement | HTMLElement, opts: ChartPn
   }
 
   const legend = chart instanceof SVGSVGElement ? [] : readLegend(chart, box);
-  const pad = 16;
-  const titleH = opts.title ? 24 : 0;
-  const subH = opts.subtitle ? 17 : 0;
-  const top = pad + titleH + subH;
-
   const xml = new XMLSerializer().serializeToString(clone);
   const url = URL.createObjectURL(new Blob([xml], { type: 'image/svg+xml;charset=utf-8' }));
   try {
@@ -120,46 +123,120 @@ export async function svgToPng(chart: SVGSVGElement | HTMLElement, opts: ChartPn
       i.onerror = () => reject(new Error('Could not render the chart image'));
       i.src = url;
     });
+    return { img, url, w, h, legend, title: source.title, subtitle: source.subtitle };
+  } catch (err) {
+    URL.revokeObjectURL(url);
+    throw err;
+  }
+}
+
+const PAD = 18;
+const TITLE_H = 24;
+const SUB_H = 17;
+
+/** Draw one prepared chart at `y`, and return the height it took. */
+function drawChart(ctx: CanvasRenderingContext2D, p: Prepared, x: number, y: number): number {
+  let top = y;
+  if (p.title) {
+    ctx.fillStyle = '#1a1a1a';
+    ctx.font = `600 15px ${SANS}`;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(p.title, x, top + 14);
+    top += TITLE_H;
+  }
+  if (p.subtitle) {
+    ctx.fillStyle = '#6e7179';
+    ctx.font = `11.5px ${SANS}`;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(p.subtitle, x, top + 11);
+    top += SUB_H;
+  }
+  ctx.drawImage(p.img, x, top, p.w, p.h);
+  for (const l of p.legend) {
+    ctx.fillStyle = l.color;
+    ctx.beginPath();
+    ctx.arc(x + l.x + 4, top + l.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#4a4d55';
+    ctx.font = `11.5px ${SANS}`;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(l.text, x + l.x + 13, top + l.y + 0.5);
+  }
+  return top + p.h - y;
+}
+
+async function encode(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'));
+  if (!blob) throw new Error('PNG encoding failed');
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+/** Rasterise one chart to PNG bytes. */
+export async function svgToPng(chart: SVGSVGElement | HTMLElement, opts: ChartPngOptions = {}): Promise<Uint8Array> {
+  return chartsToPng([{ chart, title: opts.title, subtitle: opts.subtitle }], { scale: opts.scale });
+}
+
+/**
+ * Several charts stacked into one PNG, under a heading.
+ *
+ * This is what a report is handed over as. Stacking them here rather than
+ * rasterising the whole page means the picture is made of the same chart SVGs the
+ * screen draws, at their real size — no screenshot of a scrolled viewport, and no
+ * dependency on a DOM-to-canvas library that would have to be kept honest about
+ * every style rule in the application.
+ */
+export async function chartsToPng(
+  sources: ChartSource[],
+  opts: { heading?: string; sub?: string; footer?: string; scale?: number; gap?: number } = {},
+): Promise<Uint8Array> {
+  if (sources.length === 0) throw new Error('No charts to export');
+  const scale = opts.scale ?? 2;
+  const gap = opts.gap ?? 22;
+  const prepared: Prepared[] = [];
+  try {
+    for (const s of sources) prepared.push(await prepare(s));
+
+    const headH = (opts.heading ? 26 : 0) + (opts.sub ? 18 : 0);
+    const footH = opts.footer ? 20 : 0;
+    const width = Math.max(...prepared.map((p) => p.w));
+    const bodyH = prepared.reduce((sum, p) => sum + (p.title ? TITLE_H : 0) + (p.subtitle ? SUB_H : 0) + p.h, 0) + gap * (prepared.length - 1);
+
     const canvas = document.createElement('canvas');
-    canvas.width = Math.round((w + pad * 2) * scale);
-    canvas.height = Math.round((top + h + pad) * scale);
+    canvas.width = Math.round((width + PAD * 2) * scale);
+    canvas.height = Math.round((PAD + headH + bodyH + footH + PAD) * scale);
     const ctx = canvas.getContext('2d')!;
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.scale(scale, scale);
 
-    if (opts.title) {
+    let y = PAD;
+    if (opts.heading) {
       ctx.fillStyle = '#1a1a1a';
-      ctx.font = `600 15px ${SANS}`;
+      ctx.font = `700 17px ${SANS}`;
       ctx.textBaseline = 'alphabetic';
-      ctx.fillText(opts.title, pad, pad + 14);
+      ctx.fillText(opts.heading, PAD, y + 16);
+      y += 26;
     }
-    if (opts.subtitle) {
+    if (opts.sub) {
       ctx.fillStyle = '#6e7179';
-      ctx.font = `11.5px ${SANS}`;
-      ctx.fillText(opts.subtitle, pad, pad + titleH + 11);
+      ctx.font = `12px ${SANS}`;
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(opts.sub, PAD, y + 12);
+      y += 18;
     }
-
-    ctx.drawImage(img, pad, top, w, h);
-
-    for (const l of legend) {
-      const x = pad + l.x;
-      const y = top + l.y;
-      ctx.fillStyle = l.color;
-      ctx.beginPath();
-      ctx.arc(x + 4, y, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#4a4d55';
-      ctx.font = `11.5px ${SANS}`;
-      ctx.textBaseline = 'middle';
-      ctx.fillText(l.text, x + 13, y + 0.5);
+    for (let i = 0; i < prepared.length; i++) {
+      y += drawChart(ctx, prepared[i], PAD, y);
+      if (i < prepared.length - 1) y += gap;
     }
-
-    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'));
-    if (!blob) throw new Error('PNG encoding failed');
-    return new Uint8Array(await blob.arrayBuffer());
+    if (opts.footer) {
+      ctx.fillStyle = '#9aa0ab';
+      ctx.font = `10.5px ${SANS}`;
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(opts.footer, PAD, y + 14);
+    }
+    return await encode(canvas);
   } finally {
-    URL.revokeObjectURL(url);
+    for (const p of prepared) URL.revokeObjectURL(p.url);
   }
 }
 

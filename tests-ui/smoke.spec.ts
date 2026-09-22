@@ -9,6 +9,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import * as XLSX from 'xlsx';
+import { readFileSync } from 'node:fs';
 
 /** A small schedule, built in memory so the suite carries no fixture files. */
 function schedule(opts: { finished: number; ahead: number }): Buffer {
@@ -32,6 +33,13 @@ async function open(page: Page) {
   await page.getByRole('button', { name: 'Just look around' }).click();
   await expect(page.locator('.sidenav')).toBeVisible();
   return errors;
+}
+
+/** The as-of date of the export. Without one nothing in-progress can earn. */
+async function setDataDate(page: Page, iso: string) {
+  await page.goto('/#/settings');
+  await page.getByRole('textbox', { name: 'Data date' }).fill(iso);
+  await expect(page.getByText(/saved/i).first()).toBeVisible();
 }
 
 async function importSchedule(page: Page, kind: 'current' | 'baseline', bytes: Buffer, name = 'schedule.xlsx') {
@@ -110,6 +118,61 @@ test('the status report prints without the application around it', async ({ page
   await expect(page.locator('.sidenav')).toBeHidden();
   await expect(page.locator('.no-print').first()).toBeHidden();
   await expect(page.locator('.report')).toBeVisible();
+});
+
+/**
+ * The report is written for a phase and a fortnight. The whole job's position is
+ * the one thing on the Dashboard already, so it is not what somebody gets handed
+ * by accident — and a curve nobody asked for is the easiest thing to leave on.
+ */
+test('the status report starts with no whole-project curve, and draws one when asked', async ({ page }) => {
+  await open(page);
+  await importSchedule(page, 'current', schedule({ finished: 4, ahead: 4 }));
+  await setDataDate(page, '2026-09-23');
+  await page.goto('/#/report');
+  await expect(page.locator('.report .recharts-wrapper')).toHaveCount(0);
+  await expect(page.getByText('No curve on the page yet')).toBeVisible();
+  await expect(page.getByText('Where the job stands')).toBeHidden();
+
+  await page.locator('.no-print').getByRole('button', { name: 'Whole project' }).click();
+  await expect(page.locator('.report .recharts-wrapper')).toHaveCount(1);
+  // The date, not just the words: on paper nobody can hover the line.
+  await expect(page.locator('.report text', { hasText: /^DATA DATE / })).toHaveCount(1);
+});
+
+test('the status report saves its graphs as a PNG', async ({ page }) => {
+  await open(page);
+  await importSchedule(page, 'current', schedule({ finished: 4, ahead: 4 }));
+  await page.goto('/#/report');
+  await page.locator('.no-print').getByRole('button', { name: 'Whole project' }).click();
+  await expect(page.locator('.report .recharts-wrapper')).toHaveCount(1);
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save graphs as PNG' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(/^status-report-curves-.*\.png$/);
+  const path = await file.path();
+  const bytes = readFileSync(path!);
+  // A real PNG, and big enough to be a chart rather than an empty canvas.
+  expect(bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  expect(bytes.length).toBeGreaterThan(10_000);
+});
+
+/**
+ * The complaint this rebuild came from: a tally of reasons under the period
+ * heading cannot be read against the activity that slipped.
+ */
+test('the status report puts the reason an activity was missed on its own row', async ({ page }) => {
+  await open(page);
+  await importSchedule(page, 'baseline', schedule({ finished: 3, ahead: 2 }));
+  await importSchedule(page, 'current', schedule({ finished: 3, ahead: 2 }));
+  await page.goto('/#/report');
+  // Onto a period the fixture's activities actually fall in.
+  await page.locator('.no-print input[type=date]').fill('2026-01-16');
+  await expect(page.locator(String.raw`.report .tbl`).last()).toBeVisible();
+  // The answer sits on the activity, not in a tally somewhere above it.
+  await expect(page.locator('.report th', { hasText: 'Why missed' })).toHaveCount(1);
+  await expect(page.locator('.report th', { hasText: 'Outcome' })).toHaveCount(1);
 });
 
 test('the dashboard orders phases numerically, whole project first', async ({ page }) => {

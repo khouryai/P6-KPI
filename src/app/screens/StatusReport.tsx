@@ -1,15 +1,18 @@
 import { useMemo, useRef, useState } from 'react';
 import { useApp } from '../state';
-import { Page, Panel, Notice } from '../components/ui';
+import { Page, Panel, Notice, Badge, SortableTable, type Column, type HeroStat } from '../components/ui';
 import { CurveChart } from '../components/CurveChart';
 import { buildCurve, rowTotals } from '../../engine/compute';
-import { periodLog, addDays, OUTCOMES, type PeriodOutcome } from '../../engine/period';
+import { periodLog, addDays, OUTCOMES, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
 import { trendFrom } from '../../engine/trend';
-import { effectiveReasonFor } from '../missedReasons';
+import { effectiveReasonFor, tallyReasons } from '../missedReasons';
+import { chartsToPng, downloadBytes, stamp } from '../export';
 import { fmtHours, fmtPct, fmtDate, todayISO } from '../format';
 import { isValidISO } from '../../engine/dates';
 import { useUnit } from '../units';
 import type { GroupStat } from '../../engine/types';
+
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 /** Phase codes sort numerically, as they do on the dashboard. */
 function phaseOrder(key: string): number {
@@ -17,24 +20,39 @@ function phaseOrder(key: string): number {
   return m ? Number(m[1]) : Number.POSITIVE_INFINITY;
 }
 
-const OUTCOME_TONE: Record<PeriodOutcome, string> = {
-  COMPLETED: 'tone-good',
-  'COMPLETED EARLY': 'tone-good',
-  STARTED: '',
-  CONTINUED: '',
-  MISSED: 'tone-bad',
-  'NOT STARTED': 'tone-muted',
+/** The same tones the Two-Week Log gives each outcome, so the two screens read alike. */
+const OUTCOME_TONE: Record<PeriodOutcome, 'good' | 'info' | 'warn' | 'bad' | 'muted'> = {
+  COMPLETED: 'good',
+  'COMPLETED EARLY': 'good',
+  STARTED: 'info',
+  CONTINUED: 'info',
+  MISSED: 'bad',
+  'NOT STARTED': 'muted',
 };
 
-/** A figure and its label, as the report prints them. */
-function Fig({ label, value, tone }: { label: string; value: string; tone?: string }) {
+/**
+ * A KPI card, drawn exactly as the Two-Week Log's outcome tiles are drawn — the
+ * same box, the same mono label, the same tabular figure. It is not a button here,
+ * because on a report nothing is a filter.
+ */
+function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: 'good' | 'info' | 'warn' | 'bad' | 'muted' }) {
   return (
-    <div className="rep-fig">
-      <div className="rep-fig-label">{label}</div>
-      <div className={`rep-fig-value ${tone ?? ''}`}>{value}</div>
+    <div className={`stat-tile${tone ? ` tone-${tone}` : ''}`}>
+      <span className="stat-tile-n">{value}</span>
+      <span className="stat-tile-l">{label}</span>
+      {sub && <span className="stat-tile-s">{sub}</span>}
     </div>
   );
 }
+
+/** How an achievement figure reads: at or over plan, near it, or short of it. */
+function achievedTone(a: number | null): 'good' | 'warn' | 'bad' | 'muted' {
+  if (a === null) return 'muted';
+  return a >= 1 ? 'good' : a >= 0.8 ? 'warn' : 'bad';
+}
+
+const PLANNED = '#6d28d9';
+const ACHIEVED = '#00875a';
 
 /**
  * The status report.
@@ -44,15 +62,18 @@ function Fig({ label, value, tone }: { label: string; value: string; tone?: stri
  * wants their own curve and the fortnight's misses, a programme meeting wants the
  * whole job and nothing else.
  *
- * The report deliberately carries almost no prose. Everything in the application
- * explains itself as you work; a printed page has to be read at a glance by someone
- * who will not hover anything, so it states figures and names, and leaves the
- * explaining to whoever is presenting it.
+ * It deliberately reads as the Two-Week Log reads — the same KPI cards, the same
+ * tables, the same outcome tiles — because that screen is where the review actually
+ * happens, and a report that looked like a different application would have to be
+ * re-learned by everybody who has to check it before it goes out. The whole-project
+ * position is off by default: a report is written for a phase and a fortnight, and
+ * the job's headline figure is available on the Dashboard to anybody who wants it.
  */
 export function StatusReport() {
-  const { state, model } = useApp();
+  const { state, model, actions } = useApp();
   const { percent } = useUnit();
-  const reportRef = useRef<HTMLDivElement>(null);
+  const charts = useRef(new Map<string, HTMLDivElement>());
+  const [busy, setBusy] = useState(false);
 
   const dataDate = state.data.settings.dataDate || null;
   const cadence = state.data.settings.curveCadence ?? 'month';
@@ -67,21 +88,22 @@ export function StatusReport() {
 
   // --- what goes on the page -------------------------------------------------
   /** '' is the whole project; otherwise a phase key. Order is the print order. */
-  const [charts, setCharts] = useState<string[]>(['']);
+  const [curveKeys, setCurveKeys] = useState<string[]>([]);
+  const [chartHeight, setChartHeight] = useState(360);
+  const [showProject, setShowProject] = useState(false);
   const [showPhaseTable, setShowPhaseTable] = useState(true);
   const [showLog, setShowLog] = useState(true);
   const [showLogActivities, setShowLogActivities] = useState(true);
   const [logOutcomes, setLogOutcomes] = useState<PeriodOutcome[]>(['MISSED', 'COMPLETED']);
-  const [showReasons, setShowReasons] = useState(true);
-  const [showTrend, setShowTrend] = useState(true);
+  const [showTrend, setShowTrend] = useState(false);
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
 
   const [end, setEnd] = useState(isValidISO(dataDate ?? '') ? (dataDate as string) : todayISO());
   const [span, setSpan] = useState(14);
 
-  const toggleChart = (key: string) =>
-    setCharts((cs) => (cs.includes(key) ? cs.filter((c) => c !== key) : [...cs, key]));
+  const toggleCurve = (key: string) =>
+    setCurveKeys((cs) => (cs.includes(key) ? cs.filter((c) => c !== key) : [...cs, key]));
   const toggleOutcome = (o: PeriodOutcome) =>
     setLogOutcomes((os) => (os.includes(o) ? os.filter((x) => x !== o) : [...os, o]));
 
@@ -95,12 +117,12 @@ export function StatusReport() {
   /** One curve per chosen selection, in the order they were chosen. */
   const curves = useMemo(
     () =>
-      charts.map((key) => {
+      curveKeys.map((key) => {
         const rows = key === '' ? model.rows : model.rows.filter((r) => r.phase === key);
         const label = key === '' ? 'Whole project' : (phases.find((p) => p.key === key)?.label ?? key);
         return { key, label, curve: buildCurve(rows, dataDate, cadence).curve, totals: rowTotals(rows) };
       }),
-    [charts, model.rows, phases, dataDate, cadence],
+    [curveKeys, model.rows, phases, dataDate, cadence],
   );
 
   const logRows = useMemo(
@@ -108,58 +130,279 @@ export function StatusReport() {
     [log.activities, logOutcomes],
   );
 
-  const reasons = useMemo(() => {
-    const missed = log.activities.filter((a) => a.outcome === 'MISSED');
-    const tally = new Map<string, number>();
-    for (const a of missed) {
-      const r = effectiveReasonFor(state.data.missedReasons, a.activityId, end)?.entry.reason ?? 'No reason given';
-      tally.set(r, (tally.get(r) ?? 0) + 1);
-    }
-    return [...tally.entries()].sort((a, b) => b[1] - a[1]);
-  }, [log.activities, state.data.missedReasons, end]);
+  /** Only the phases with something to say this window, as the Two-Week Log reads them. */
+  const activePhases = useMemo(
+    () => log.phases.filter((p) => p.plannedHours > 1e-9 || p.earnedHours > 1e-9 || Object.values(p.counts).some((n) => n > 0)),
+    [log.phases],
+  );
+
+  const missed = useMemo(() => log.activities.filter((a) => a.outcome === 'MISSED'), [log.activities]);
+  const reasonTally = useMemo(
+    () => tallyReasons(state.data.missedReasons, missed.map((a) => a.activityId), end),
+    [state.data.missedReasons, missed, end],
+  );
+  const reasonFor = (id: string) => effectiveReasonFor(state.data.missedReasons, id, end);
+
+  /**
+   * Hours, or the same hours as a share of the whole job. Every figure on the page
+   * goes through this, exactly as it does on the Two-Week Log, so percent mode
+   * cannot leave one stray hours value behind — which on a client pack is the only
+   * kind of mistake that matters.
+   */
+  const budget = log.projectBudgetHours;
+  const val = (hours: number, digits = 0) => (percent ? fmtPct(budget ? hours / budget : 0, 2) : `${fmtHours(hours, digits)} h`);
+  const variance = log.earnedHours - log.plannedHours;
+  const achievedWidth = log.achievement === null ? 0 : Math.min(100, Math.round(log.achievement * 100));
 
   const heading = title.trim() || 'Testing and Commissioning — Status Report';
+
+  const heroStats: HeroStat[] = showLog
+    ? [
+        { label: 'Planned', value: val(log.plannedHours), tone: 'muted' },
+        { label: 'Achieved', value: val(log.earnedHours), tone: 'good' },
+        {
+          label: 'Of plan',
+          value: log.achievement === null ? '—' : fmtPct(log.achievement, 0),
+          tone: log.achievement === null ? 'muted' : log.achievement >= 1 ? 'good' : log.achievement >= 0.8 ? 'amber' : 'red',
+        },
+        { label: 'Curves', value: String(curves.length), tone: 'blue' },
+      ]
+    : [{ label: 'Curves', value: String(curves.length), tone: 'blue' }];
+  if (showLog && missed.length > 0) {
+    heroStats.splice(3, 0, {
+      label: 'Missed explained',
+      value: `${missed.length - reasonTally.unexplained}/${missed.length}`,
+      tone: reasonTally.unexplained === 0 ? 'good' : 'amber',
+    });
+  }
+
+  /**
+   * The graphs as one picture.
+   *
+   * Composed from the chart SVGs the screen is drawing, at their real size, rather
+   * than screenshotting the page: what comes out is as sharp as the curves are and
+   * does not depend on where the report happened to be scrolled to.
+   */
+  const exportPng = async (only?: { key: string; label: string; totals: ReturnType<typeof rowTotals> }) => {
+    const wanted = only ? curves.filter((c) => c.key === only.key) : curves;
+    const sources = wanted
+      .map((c) => ({ el: charts.current.get(c.key), c }))
+      .filter((x): x is { el: HTMLDivElement; c: (typeof curves)[number] } => !!x.el)
+      .map(({ el, c }) => ({
+        chart: el,
+        title: c.label,
+        subtitle: percent
+          ? `${fmtPct(c.totals.pctComplete, 1)} complete across ${c.totals.inBudget} activities.`
+          : `${fmtHours(c.totals.budgetHours)} h budget, ${fmtHours(c.totals.earnedHours)} h earned (${fmtPct(c.totals.pctComplete, 1)}).`,
+      }));
+    if (sources.length === 0) {
+      actions.notify('error', 'There is no curve on the page to save. Pick one under Curves.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const bytes = await chartsToPng(sources, {
+        heading,
+        sub: [note.trim(), dataDate ? `Data date ${fmtDate(dataDate)}` : null, `Issued ${fmtDate(todayISO())}`]
+          .filter(Boolean)
+          .join(' · '),
+        footer: showLog ? `Period ${fmtDate(from)} to ${fmtDate(end)}` : undefined,
+      });
+      const name = `status-report-${only ? slug(only.label) : 'curves'}-${stamp()}.png`;
+      if (state.adapterKind === 'filesystem') actions.notify('ok', `Written to ${await actions.writeExport(name, bytes)}`);
+      else downloadBytes(name, bytes, 'image/png');
+    } catch (err) {
+      actions.notify('error', (err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // --- the activity table, read as the Two-Week Log reads it ------------------
+  const columns: Column<PeriodActivity>[] = [
+    {
+      key: 'id',
+      label: 'Activity',
+      locked: true,
+      value: (a) => a.activityId,
+      render: (a) => (
+        <div className="min-w-0">
+          <div className="mono text-[var(--text-muted)]">{a.activityId}</div>
+          <div className="cell-text font-semibold" title={a.activityName}>{a.activityName}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'outcome',
+      label: 'Outcome',
+      value: (a) => OUTCOMES.indexOf(a.outcome),
+      exportValue: (a) => a.outcome,
+      render: (a) => <Badge tone={OUTCOME_TONE[a.outcome]}>{a.outcome}</Badge>,
+    },
+    /*
+     * The reason, on the row it belongs to.
+     *
+     * It used to be a tally under the period heading — "3 access, 2 design" — which
+     * on a handed-over page is unanswerable: the reader is looking at the activity
+     * that slipped and has to hunt a separate table that never says which is which.
+     * The Two-Week Log puts the answer in the row, and so does this.
+     */
+    {
+      key: 'reason',
+      label: 'Why missed',
+      value: (a) => reasonFor(a.activityId)?.entry.reason ?? '',
+      render: (a) => {
+        if (a.outcome !== 'MISSED') return <span className="text-[var(--text-subtle)]">—</span>;
+        const eff = reasonFor(a.activityId);
+        if (!eff) return <span className="tone-bad text-[12px]">no reason given yet</span>;
+        return (
+          <span
+            className="cell-text"
+            title={eff.carried ? `Carried from the period ending ${fmtDate(eff.entry.periodEnd)}.` : eff.entry.reason}
+          >
+            {eff.entry.reason}
+            {eff.carried && <span className="ml-1 text-[var(--text-subtle)]">(carried)</span>}
+          </span>
+        );
+      },
+    },
+    { key: 'phase', label: 'Phase', value: (a) => a.phaseName },
+    {
+      key: 'planned',
+      label: percent ? 'Planned' : 'Planned h',
+      value: (a) => a.plannedHours,
+      num: true,
+      render: (a) => <span className="text-[var(--text-muted)]">{val(a.plannedHours, 1)}</span>,
+    },
+    {
+      key: 'earned',
+      label: percent ? 'Project achieved' : 'Project achieved h',
+      value: (a) => a.earnedHours,
+      num: true,
+      render: (a) => (
+        <b className={a.spreadToDataDate ? 'tone-muted' : undefined} title={a.spreadToDataDate ? 'Spread from the actual start to the data date, because nothing says when the progress happened.' : undefined}>
+          {val(a.earnedHours, 1)}{a.spreadToDataDate ? ' ~' : ''}
+        </b>
+      ),
+    },
+    {
+      key: 'pct',
+      label: '% complete',
+      value: (a) => a.pctComplete,
+      num: true,
+      width: '150px',
+      render: (a) => (
+        <div className="flex items-center justify-end gap-2">
+          <span className="w-9 text-right tabular-nums font-semibold">{fmtPct(a.pctComplete, 0)}</span>
+          <div className="bar" style={{ width: 60 }} title={percent ? fmtPct(a.pctComplete, 1) : `${fmtPct(a.pctComplete, 1)} of ${fmtHours(a.budgetHours)} h`}>
+            <span style={{ width: `${Math.min(100, Math.round(a.pctComplete * 100))}%` }} />
+          </div>
+        </div>
+      ),
+    },
+    { key: 'blf', label: 'BL finish', value: (a) => a.baselineFinish, render: (a) => fmtDate(a.baselineFinish) },
+    { key: 'af', label: 'Actual finish', value: (a) => a.actualFinish, render: (a) => fmtDate(a.actualFinish) },
+    {
+      key: 'var',
+      label: 'Days late',
+      value: (a) => a.finishVarianceDays,
+      num: true,
+      render: (a) =>
+        a.finishVarianceDays === null ? (
+          <span className="text-[var(--text-subtle)]">—</span>
+        ) : (
+          <span className={`font-semibold tone-${a.finishVarianceDays > 0 ? 'bad' : a.finishVarianceDays < 0 ? 'good' : 'muted'}`}>
+            {a.finishVarianceDays > 0 ? '+' : ''}{a.finishVarianceDays}
+          </span>
+        ),
+    },
+    { key: 'loc', label: 'Loc', value: (a) => a.location, optional: true },
+    { key: 'bls', label: 'BL start', value: (a) => a.baselineStart, optional: true, render: (a) => fmtDate(a.baselineStart) },
+    { key: 'as', label: 'Actual start', value: (a) => a.actualStart, optional: true, render: (a) => fmtDate(a.actualStart) },
+  ];
+
+  const phaseColumns: Column<GroupStat>[] = [
+    { key: 'phase', label: 'Phase', locked: true, value: (p) => p.label },
+    ...(percent ? [] : [
+      { key: 'earned', label: 'Earned h', value: (p: GroupStat) => p.earnedHours, num: true, render: (p: GroupStat) => fmtHours(p.earnedHours) },
+      { key: 'budget', label: 'Budget h', value: (p: GroupStat) => p.budgetHours, num: true, render: (p: GroupStat) => fmtHours(p.budgetHours) },
+    ]),
+    {
+      key: 'pct',
+      label: '% complete',
+      value: (p) => p.pctComplete,
+      num: true,
+      width: '150px',
+      render: (p) => (
+        <div className="flex items-center justify-end gap-2">
+          <span className="w-11 text-right tabular-nums font-semibold">{fmtPct(p.pctComplete, 1)}</span>
+          <div className="bar" style={{ width: 60 }}>
+            <span style={{ width: `${Math.min(100, Math.round(p.pctComplete * 100))}%` }} />
+          </div>
+        </div>
+      ),
+    },
+    { key: 'fin', label: 'Finished', value: (p) => p.finished, num: true },
+    { key: 'run', label: 'Running', value: (p) => p.inProgress, num: true },
+    { key: 'ns', label: 'Not started', value: (p) => p.notStarted, num: true },
+  ];
 
   return (
     <Page
       eyebrow="Progress"
       title="Status Report"
-      subtitle="One page to hand over. Choose what goes on it, then print or save as PDF."
+      subtitle="One page to hand over. Choose what goes on it, then print it, save it as a PDF, or save the graphs as a PNG."
+      stats={heroStats}
       actions={
-        <button className="btn btn-primary" onClick={() => window.print()}>
-          Print / save as PDF
-        </button>
+        <>
+          <button className="btn btn-mini" disabled={busy || curves.length === 0} onClick={() => void exportPng()}>
+            {busy ? 'Saving…' : 'Save graphs as PNG'}
+          </button>
+          <button className="btn btn-primary" onClick={() => window.print()}>
+            Print / save as PDF
+          </button>
+        </>
       }
     >
       {/* ---------- the builder. Never printed. ---------- */}
       <Panel title="What goes on the page" className="mb-4 no-print">
         <div className="grid gap-4 lg:grid-cols-2">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Curves</div>
-            <div className="mt-1.5 flex flex-wrap gap-2">
-              <button className={`btn btn-mini${charts.includes('') ? ' btn-primary' : ''}`} onClick={() => toggleChart('')}>
+            <div className="eyebrow mb-1.5">Curves</div>
+            <div className="flex flex-wrap gap-2">
+              <button className={`btn btn-mini${curveKeys.includes('') ? ' btn-primary' : ''}`} onClick={() => toggleCurve('')}>
                 Whole project
               </button>
               {phases.map((p) => (
-                <button key={p.key} className={`btn btn-mini${charts.includes(p.key) ? ' btn-primary' : ''}`} onClick={() => toggleChart(p.key)}>
+                <button key={p.key} className={`btn btn-mini${curveKeys.includes(p.key) ? ' btn-primary' : ''}`} onClick={() => toggleCurve(p.key)}>
                   {p.label}
                 </button>
               ))}
             </div>
-            <div className="mt-1.5 text-[11.5px] text-[var(--text-subtle)]">
-              {charts.length === 0 ? 'No curve on the page.' : `${charts.length} ${charts.length === 1 ? 'curve' : 'curves'}, in the order picked.`}
-              {' '}Reported in {percent ? 'percent' : 'man hours'} — switch on the Dashboard.
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px]">
+              <span className="text-[var(--text-muted)]">Size</span>
+              <select className="input" value={chartHeight} onChange={(e) => setChartHeight(Number(e.target.value))}>
+                <option value={300}>Standard</option>
+                <option value={360}>Large</option>
+                <option value={460}>Full page</option>
+              </select>
+              <span className="text-[var(--text-subtle)]">
+                {curveKeys.length === 0
+                  ? 'No curve on the page yet — pick one or more above.'
+                  : `${curveKeys.length} ${curveKeys.length === 1 ? 'curve' : 'curves'}, in the order picked.`}
+                {' '}In {percent ? 'percent' : 'man hours'} — switch on the Dashboard.
+              </span>
             </div>
           </div>
 
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Two-Week Log</div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px]">
+            <div className="eyebrow mb-1.5">Two-Week Log</div>
+            <div className="flex flex-wrap items-center gap-2 text-[12px]">
               <label className="flex cursor-pointer items-center gap-1.5">
                 <input type="checkbox" checked={showLog} onChange={(e) => setShowLog(e.target.checked)} /> Include
               </label>
               <span className="text-[var(--text-muted)]">ending</span>
-              <input className="input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} disabled={!showLog} />
+              <input className="input" type="date" value={end} onChange={(e) => e.target.value && setEnd(e.target.value)} disabled={!showLog} />
               <select className="input" value={span} onChange={(e) => setSpan(Number(e.target.value))} disabled={!showLog}>
                 <option value={7}>1 week</option>
                 <option value={14}>2 weeks</option>
@@ -181,16 +424,17 @@ export function StatusReport() {
                 </button>
               ))}
             </div>
-            <div className="mt-1.5 flex flex-wrap gap-3 text-[12px]">
-              <label className="flex cursor-pointer items-center gap-1.5">
-                <input type="checkbox" checked={showReasons} onChange={(e) => setShowReasons(e.target.checked)} disabled={!showLog} /> Why activities were missed
-              </label>
+            <div className="mt-1.5 text-[11.5px] text-[var(--text-subtle)]">
+              Why each activity was missed sits in its own row, the way the Two-Week Log shows it.
             </div>
           </div>
 
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Also include</div>
-            <div className="mt-1.5 flex flex-wrap gap-3 text-[12px]">
+            <div className="eyebrow mb-1.5">Also include</div>
+            <div className="flex flex-wrap gap-3 text-[12px]">
+              <label className="flex cursor-pointer items-center gap-1.5" title="The job's headline position: budget, earned, remaining and the rate it is converting at. Off by default — a report is usually written about a phase and a fortnight.">
+                <input type="checkbox" checked={showProject} onChange={(e) => setShowProject(e.target.checked)} /> Whole-project position
+              </label>
               <label className="flex cursor-pointer items-center gap-1.5">
                 <input type="checkbox" checked={showPhaseTable} onChange={(e) => setShowPhaseTable(e.target.checked)} /> Progress by phase
               </label>
@@ -201,8 +445,8 @@ export function StatusReport() {
           </div>
 
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Heading</div>
-            <input className="input mt-1.5 w-full" placeholder="Testing and Commissioning — Status Report" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <div className="eyebrow mb-1.5">Heading</div>
+            <input className="input w-full" placeholder="Testing and Commissioning — Status Report" value={title} onChange={(e) => setTitle(e.target.value)} />
             <input className="input mt-1.5 w-full" placeholder="A line under the heading, if one is needed" value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
         </div>
@@ -215,7 +459,7 @@ export function StatusReport() {
       )}
 
       {/* ---------- the page itself ---------- */}
-      <div className="report" ref={reportRef}>
+      <div className="report">
         <header className="rep-head">
           <div>
             <h1 className="rep-title">{heading}</h1>
@@ -227,151 +471,168 @@ export function StatusReport() {
           </div>
         </header>
 
-        <section className="rep-figs">
-          <Fig label="Complete" value={fmtPct(totals.pctComplete, 1)} />
-          {!percent && <Fig label="Budget" value={`${fmtHours(totals.budgetHours)} h`} />}
-          {!percent && <Fig label="Earned" value={`${fmtHours(totals.earnedHours)} h`} />}
-          {!percent && <Fig label="Remaining" value={`${fmtHours(totals.remainingHours)} h`} />}
-          <Fig label="Activities finished" value={`${totals.finished}/${totals.inBudget}`} />
-          {model.burn.project.factor !== null && (
-            <Fig
-              label="Earned per hour spent"
-              value={model.burn.project.factor.toFixed(2)}
-              tone={model.burn.project.factor >= 1 ? 'tone-good' : 'tone-bad'}
-            />
-          )}
-        </section>
-
-        {showTrend && trend.points.length >= 2 && (
-          <section className="rep-figs rep-figs-tight">
-            <Fig label="Factor, last 3 months" value={trend.recentFactor === null ? '—' : trend.recentFactor.toFixed(2)} />
-            <Fig label="Previous 3" value={trend.priorFactor === null ? '—' : trend.priorFactor.toFixed(2)} />
-            <Fig label="Progress a month" value={trend.recentPctPerMonth === null ? '—' : fmtPct(trend.recentPctPerMonth, 2)} />
-            <Fig label="At this pace" value={trend.monthsToFinish === null ? '—' : `${Math.ceil(trend.monthsToFinish)} months`} />
-          </section>
+        {showProject && (
+          <Panel className="mt-3" title="Where the job stands" meta={`${totals.inBudget} activities in budget`}>
+            <div className="stat-row">
+              <Stat label="Complete" value={fmtPct(totals.pctComplete, 1)} tone="info" />
+              {!percent && <Stat label="Budget h" value={fmtHours(totals.budgetHours)} />}
+              {!percent && <Stat label="Earned h" value={fmtHours(totals.earnedHours)} tone="good" />}
+              {!percent && <Stat label="Remaining h" value={fmtHours(totals.remainingHours)} />}
+              <Stat label="Finished" value={`${totals.finished}/${totals.inBudget}`} />
+              {model.burn.project.factor !== null && (
+                <Stat
+                  label="Earned per hour"
+                  value={model.burn.project.factor.toFixed(2)}
+                  tone={model.burn.project.factor >= 1 ? 'good' : 'bad'}
+                />
+              )}
+            </div>
+          </Panel>
         )}
 
-        {curves.map((c) => (
-          <section key={c.key} className="rep-block">
-            <h2 className="rep-h2">
-              {c.label}
-              <span className="rep-h2-note">
-                {fmtPct(c.totals.pctComplete, 1)} complete
-                {!percent && <> · {fmtHours(c.totals.earnedHours)} of {fmtHours(c.totals.budgetHours)} h</>}
-              </span>
-            </h2>
-            {c.curve.length ? (
-              <CurveChart curve={c.curve} dataDate={dataDate} percent={percent} total={c.totals.budgetHours} monthly={cadence === 'month'} height={230} />
-            ) : (
-              <div className="rep-empty">No dated activities to plot.</div>
-            )}
-          </section>
-        ))}
-
-        {showPhaseTable && phases.length > 0 && (
-          <section className="rep-block">
-            <h2 className="rep-h2">Progress by phase</h2>
-            <table className="rep-table">
-              <thead>
-                <tr>
-                  <th>Phase</th>
-                  {!percent && <th className="num">Earned</th>}
-                  {!percent && <th className="num">Budget</th>}
-                  <th className="num">Complete</th>
-                  <th className="num">Finished</th>
-                  <th className="num">Running</th>
-                  <th className="num">Not started</th>
-                </tr>
-              </thead>
-              <tbody>
-                {phases.map((p) => (
-                  <tr key={p.key}>
-                    <td>{p.label}</td>
-                    {!percent && <td className="num">{fmtHours(p.earnedHours)}</td>}
-                    {!percent && <td className="num">{fmtHours(p.budgetHours)}</td>}
-                    <td className="num">{fmtPct(p.pctComplete, 1)}</td>
-                    <td className="num">{p.finished}</td>
-                    <td className="num">{p.inProgress}</td>
-                    <td className="num">{p.notStarted}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
+        {showTrend && trend.points.length >= 2 && (
+          <Panel className="mt-3" title="Direction of travel" meta={`last ${trend.window} active months against the ${trend.window} before`}>
+            <div className="stat-row">
+              <Stat label="Factor now" value={trend.recentFactor === null ? '—' : trend.recentFactor.toFixed(2)} tone={trend.recentFactor !== null && trend.recentFactor >= 1 ? 'good' : 'bad'} />
+              <Stat label="Factor before" value={trend.priorFactor === null ? '—' : trend.priorFactor.toFixed(2)} tone="muted" />
+              <Stat label="Progress a month" value={trend.recentPctPerMonth === null ? '—' : fmtPct(trend.recentPctPerMonth, 2)} />
+              <Stat label="At this pace" value={trend.monthsToFinish === null ? '—' : `${Math.ceil(trend.monthsToFinish)}`} sub="months to finish" />
+            </div>
+          </Panel>
         )}
 
         {showLog && (
-          <section className="rep-block">
-            <h2 className="rep-h2">
-              Period {fmtDate(from)} to {fmtDate(end)}
-              <span className="rep-h2-note">
-                {log.achievement === null ? 'nothing was planned' : `${fmtPct(log.achievement, 0)} of plan`}
-                {!percent && <> · {fmtHours(log.earnedHours)} of {fmtHours(log.plannedHours)} h</>}
-                {' · '}
-                {fmtPct(log.pctAtStart, 1)} → {fmtPct(log.pctAtEnd, 1)}
-              </span>
-            </h2>
-
-            <div className="rep-counts">
-              {OUTCOMES.filter((o) => log.counts[o] > 0).map((o) => (
-                <span key={o} className="rep-count">
-                  <b className={OUTCOME_TONE[o]}>{log.counts[o]}</b> {o.toLowerCase()}
-                </span>
-              ))}
-              <span className="rep-count">
-                <b>{log.finishedOnTime}</b> of <b>{log.dueToFinish}</b> due finishes made
-              </span>
+          <Panel
+            className="mt-3"
+            title={`Period ${fmtDate(from)} to ${fmtDate(end)}`}
+            meta={`${log.days} days`}
+          >
+            <div className="stat-row">
+              <Stat label="Planned" value={val(log.plannedHours)} tone="muted" />
+              <Stat label="Achieved" value={val(log.earnedHours)} tone="good" />
+              <Stat
+                label="Of plan"
+                value={log.achievement === null ? '—' : fmtPct(log.achievement, 0)}
+                tone={achievedTone(log.achievement)}
+              />
+              <Stat label="Against plan" value={`${variance >= 0 ? '+' : ''}${val(variance)}`} tone={variance >= 0 ? 'good' : 'bad'} />
+              <Stat label="Project complete" value={fmtPct(log.pctAtEnd, 1)} sub={`from ${fmtPct(log.pctAtStart, 1)}`} tone="info" />
+              <Stat
+                label="Due finishes made"
+                value={`${log.finishedOnTime}/${log.dueToFinish}`}
+                tone={log.dueToFinish === 0 ? 'muted' : log.finishedOnTime === log.dueToFinish ? 'good' : 'bad'}
+              />
             </div>
 
-            {showReasons && reasons.length > 0 && (
-              <table className="rep-table rep-table-tight">
-                <thead>
-                  <tr><th>Why activities were missed</th><th className="num">Activities</th></tr>
-                </thead>
-                <tbody>
-                  {reasons.map(([r, n]) => (
-                    <tr key={r}><td>{r}</td><td className="num">{n}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+            <div className="plan-bar mt-4">
+              <div className="plan-bar-row">
+                <span className="plan-bar-key"><i style={{ background: PLANNED }} /> Planned</span>
+                <div className="plan-bar-track"><span style={{ width: '100%', background: PLANNED }} /></div>
+                <span className="plan-bar-val">{val(log.plannedHours)}</span>
+              </div>
+              <div className="plan-bar-row">
+                <span className="plan-bar-key"><i style={{ background: ACHIEVED }} /> Achieved</span>
+                <div className="plan-bar-track"><span style={{ width: `${achievedWidth}%`, background: ACHIEVED }} /></div>
+                <span className="plan-bar-val">{val(log.earnedHours)}</span>
+              </div>
+            </div>
 
-            {showLogActivities && (
-              logRows.length === 0 ? (
-                <div className="rep-empty">No activities in the chosen outcomes.</div>
-              ) : (
-                <table className="rep-table">
-                  <thead>
-                    <tr>
-                      <th>Activity</th>
-                      <th>Phase</th>
-                      <th>Outcome</th>
-                      {!percent && <th className="num">Earned</th>}
-                      <th className="num">Complete</th>
-                      <th>Baseline finish</th>
-                      <th>Actual finish</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {logRows.map((a) => (
-                      <tr key={a.activityId}>
-                        <td>
-                          <span className="rep-id">{a.activityId}</span>
-                          <span className="rep-name">{a.activityName}</span>
-                        </td>
-                        <td>{a.phaseName}</td>
-                        <td className={OUTCOME_TONE[a.outcome]}>{a.outcome}</td>
-                        {!percent && <td className="num">{fmtHours(a.earnedHours)}</td>}
-                        <td className="num">{fmtPct(a.pctComplete, 0)}</td>
-                        <td className="num">{fmtDate(a.baselineFinish)}</td>
-                        <td className="num">{fmtDate(a.actualFinish)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
+            {activePhases.length > 0 && (
+              <div className="mt-3 border-t border-[var(--line-soft)] pt-3">
+                <div className="eyebrow mb-1.5">By phase</div>
+                <div className="grid gap-x-6 gap-y-1 text-[12px] sm:grid-cols-2">
+                  {activePhases.map((p) => (
+                    <div key={p.key || '#'} className="flex flex-wrap items-baseline gap-x-2">
+                      <b className="text-[var(--text)]">{p.label}</b>
+                      <span className={`font-semibold tone-${achievedTone(p.achievement)}`}>
+                        {p.achievement === null ? 'nothing planned' : `${fmtPct(p.achievement, 0)} of plan`}
+                      </span>
+                      <span className="text-[var(--text-muted)]">
+                        moved <b className="text-[var(--text)]">{fmtPct(p.pctAtStart, 1)}</b> → <b className="text-[var(--text)]">{fmtPct(p.pctAtEnd, 1)}</b>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
-          </section>
+          </Panel>
+        )}
+
+        {/* ---------- the curves, one per row and big enough to read ---------- */}
+        {curves.map((c) => (
+          <Panel
+            key={c.key}
+            className="mt-3"
+            title={c.label}
+            meta={
+              <span className="flex items-center gap-3">
+                <span>
+                  {fmtPct(c.totals.pctComplete, 1)} complete
+                  {!percent && <> · {fmtHours(c.totals.earnedHours)} of {fmtHours(c.totals.budgetHours)} h</>}
+                </span>
+                <button className="btn btn-mini no-print" disabled={busy} onClick={() => void exportPng(c)}>
+                  PNG
+                </button>
+              </span>
+            }
+          >
+            {c.curve.length ? (
+              <CurveChart
+                ref={(el) => {
+                  if (el) charts.current.set(c.key, el);
+                  else charts.current.delete(c.key);
+                }}
+                curve={c.curve}
+                dataDate={dataDate}
+                percent={percent}
+                total={c.totals.budgetHours}
+                monthly={cadence === 'month'}
+                height={chartHeight}
+              />
+            ) : (
+              <div className="rep-empty">No dated activities to plot.</div>
+            )}
+          </Panel>
+        ))}
+
+        {showPhaseTable && phases.length > 0 && (
+          <Panel className="mt-3" title="Progress by phase">
+            <SortableTable
+              tableId="status-phases"
+              exportName="status-report-phases"
+              rows={phases}
+              columns={phaseColumns}
+              rowKey={(p) => p.key || '#'}
+              maxHeight="none"
+            />
+          </Panel>
+        )}
+
+        {showLog && showLogActivities && (
+          <div className="mt-3">
+            <div className="mb-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+              {OUTCOMES.map((o) => (
+                <div key={o} className={`stat-tile tone-${OUTCOME_TONE[o]}`}>
+                  <span className="stat-tile-n">{log.counts[o]}</span>
+                  <span className="stat-tile-l">{o}</span>
+                </div>
+              ))}
+            </div>
+            {logRows.length === 0 ? (
+              <Notice tone="info">No activities in the chosen outcomes between {fmtDate(from)} and {fmtDate(end)}.</Notice>
+            ) : (
+              <SortableTable
+                tableId="status-activities"
+                exportName="status-report-activities"
+                rows={logRows}
+                columns={columns}
+                rowKey={(a) => a.activityId}
+                defaultSort={{ key: 'outcome', dir: 'asc' }}
+                maxHeight="none"
+                rowClass={(a) => (a.outcome === 'MISSED' ? 'row-bad' : a.outcome === 'NOT STARTED' ? 'row-muted' : '')}
+              />
+            )}
+          </div>
         )}
       </div>
     </Page>
