@@ -14,7 +14,7 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(META)) db.createObjectStore(META);
     };
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB could not be opened'));
   });
 }
 
@@ -23,7 +23,7 @@ function tx<T>(db: IDBDatabase, store: string, mode: IDBTransactionMode, fn: (s:
     const t = db.transaction(store, mode);
     const req = fn(t.objectStore(store));
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => reject(req.error ?? new Error(`IndexedDB ${mode} on ${store} failed`));
   });
 }
 

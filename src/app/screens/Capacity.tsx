@@ -192,8 +192,8 @@ export function Capacity() {
         <>
           <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Show</span>
           <span className="seg">
-            <button className={`seg-btn${view === 'year' ? ' is-on' : ''}`} onClick={() => { setView('year'); setOpen(null); }}>By fiscal year</button>
-            <button className={`seg-btn${view === 'month' ? ' is-on' : ''}`} onClick={() => { setView('month'); setOpen(null); }}>By month</button>
+            <button className={`seg-btn${view === 'year' ? ' is-on' : ''}`} aria-pressed={view === 'year'} onClick={() => { setView('year'); setOpen(null); }}>By fiscal year</button>
+            <button className={`seg-btn${view === 'month' ? ' is-on' : ''}`} aria-pressed={view === 'month'} onClick={() => { setView('month'); setOpen(null); }}>By month</button>
           </span>
           <a className="btn ml-3" href={href('team')}>Earned vs {TERMS.built}</a>
         </>

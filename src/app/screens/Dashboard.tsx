@@ -216,8 +216,8 @@ export function Dashboard() {
         <>
           <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Measure in</span>
           <span className="seg">
-            <button className={`seg-btn${percent ? '' : ' is-on'}`} onClick={() => setUnit('hours')}>Man hours</button>
-            <button className={`seg-btn${percent ? ' is-on' : ''}`} onClick={() => setUnit('percent')} title="Hide every hours figure and report progress only. For sharing with the client.">
+            <button className={`seg-btn${percent ? '' : ' is-on'}`} aria-pressed={!(percent)} onClick={() => setUnit('hours')}>Man hours</button>
+            <button className={`seg-btn${percent ? ' is-on' : ''}`} aria-pressed={percent} onClick={() => setUnit('percent')} title="Hide every hours figure and report progress only. For sharing with the client.">
               % complete
             </button>
           </span>

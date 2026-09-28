@@ -65,7 +65,7 @@ export async function requestPermission(handle: FileSystemDirectoryHandle): Prom
 
 /** A stable per-browser identity for the advisory lock file. */
 export function ownerIdentity(): { id: string; label: string } {
-  let id = '';
+  let id: string;
   try {
     id = localStorage.getItem('tc-owner-id') ?? '';
     if (!id) {

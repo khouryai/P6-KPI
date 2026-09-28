@@ -6,8 +6,8 @@
  * the programme it is part of.
  */
 import type { BudgetRow, CurvePoint } from './types';
-import { accruedFraction } from './curves';
-import { periodEndsBetween, type Cadence } from './dates';
+import { accruedAt, prepWindow } from './curves';
+import { isoToMs, periodEndsBetween, type Cadence } from './dates';
 
 /**
  * The planned, forecast and earned curves for a set of rows.
@@ -47,15 +47,32 @@ export function buildCurve(
   const periods = curvePeriods(rows, dataDate, cadence);
   if (!periods.length) return { curve: [], periods: [] };
   const totalBudget = rows.reduce((s, r) => s + r.budgetHours, 0);
+  /*
+   * Every date parsed once, not once per period.
+   *
+   * This loop is rows × periods × three series, so at 675 activities over 21
+   * periods it runs forty thousand times. Parsing the same handful of ISO strings
+   * inside it was three quarters of the cost of building the whole model, and it
+   * is why a keyed percent took a moment to land on the curve.
+   */
+  const prepped = rows
+    .filter((r) => r.budgetHours !== 0 || r.earnedHours !== 0)
+    .map((r) => ({
+      budget: r.budgetHours,
+      earned: r.earnedHours,
+      planned: prepWindow(r.baselineStart, r.baselineFinish),
+      forecast: prepWindow(r.currentStart, r.currentFinish),
+      actual: prepWindow(r.earnStart, r.earnEnd),
+    }));
   const curve = periods.map((p) => {
+    const at = isoToMs(p);
     let planned = 0;
     let forecast = 0;
     let earned = 0;
-    for (const r of rows) {
-      if (r.budgetHours === 0 && r.earnedHours === 0) continue;
-      planned += r.budgetHours * accruedFraction(p, r.baselineStart, r.baselineFinish);
-      forecast += r.budgetHours * accruedFraction(p, r.currentStart, r.currentFinish);
-      earned += r.earnedHours * accruedFraction(p, r.earnStart, r.earnEnd);
+    for (const r of prepped) {
+      planned += r.budget * accruedAt(at, r.planned);
+      forecast += r.budget * accruedAt(at, r.forecast);
+      earned += r.earned * accruedAt(at, r.actual);
     }
     const earnedOrNull = dataDate && p > dataDate ? null : earned;
     return {

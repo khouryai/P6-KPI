@@ -161,7 +161,9 @@ export function TeamHours() {
   const burn = model.burn;
   const [paste, setPaste] = useState('');
   const [pending, setPending] = useState<TeamPaste | null>(null);
-  const [labelsAre, setLabelsAre] = useState<'subsystem' | 'person'>('subsystem');
+  /** Whether the pasted sheet's first column names groups. If not, its rows are
+   *  totalled into one group, because that is the only cut this screen reports. */
+  const [labelsAreGroups, setLabelsAreGroups] = useState(true);
   const [pendingSubsystem, setPendingSubsystem] = useState('');
   /** The month whose by-group split is open, on the months table. */
   const [openMonth, setOpenMonth] = useState<string | null>(null);
@@ -216,22 +218,19 @@ export function TeamHours() {
   );
 
   // --- keying and importing -------------------------------------------------
-  const commit = (rows: { month: string; subsystem: string; person?: string; hours: number }[]) => {
+  const commit = (rows: { month: string; subsystem: string; hours: number }[]) => {
     actions.update('teamActuals', (list) => {
       const next = [...list];
       for (const r of rows) {
-        // Same month, same group, same person is the same fact restated: replace it
-        // rather than adding the hours twice when a sheet is pasted again.
-        const i = next.findIndex(
-          (x) => x.month === r.month && normKey(x.subsystem) === normKey(r.subsystem) && normKey(x.person ?? '') === normKey(r.person ?? ''),
-        );
+        // Same month, same group is the same fact restated: replace it rather than
+        // adding the hours twice when a sheet is pasted again.
+        const i = next.findIndex((x) => x.month === r.month && normKey(x.subsystem) === normKey(r.subsystem));
         const row: TeamActual = {
-          id: i >= 0 ? next[i].id : `${r.month}-${r.subsystem}-${r.person ?? ''}-${Math.random().toString(36).slice(2, 8)}`,
+          id: i >= 0 ? next[i].id : `${r.month}-${r.subsystem}-${Math.random().toString(36).slice(2, 8)}`,
           month: r.month,
           subsystem: r.subsystem,
           hours: r.hours,
         };
-        if (r.person) row.person = r.person;
         if (i >= 0) next[i] = row;
         else next.push(row);
       }
@@ -241,14 +240,24 @@ export function TeamHours() {
 
   const applyPending = () => {
     if (!pending) return;
-    const rows = pending.rows.map((r) => ({
-      month: r.month,
-      subsystem: labelsAre === 'subsystem' ? r.label.trim() : pendingSubsystem.trim(),
-      person: labelsAre === 'person' ? r.label.trim() : undefined,
-      hours: r.hours,
-    }));
+    /*
+     * A sheet whose first column is not groups — names, most often — is totalled
+     * into the one group it was worked under. Keying each line separately would
+     * make five people in ATS five rows that overwrite one another, because a row
+     * here is one month of one group and nothing finer.
+     */
+    const rows = labelsAreGroups
+      ? pending.rows.map((r) => ({ month: r.month, subsystem: r.label.trim(), hours: r.hours }))
+      : [...pending.rows.reduce((m, r) => m.set(r.month, (m.get(r.month) ?? 0) + r.hours), new Map<string, number>())].map(
+          ([month, hours]) => ({ month, subsystem: pendingSubsystem.trim(), hours }),
+        );
     commit(rows);
-    actions.notify('ok', `${rows.length} rows read across ${pending.months.length} months. Check them below, then Save.`);
+    actions.notify(
+      'ok',
+      labelsAreGroups
+        ? `${rows.length} rows read across ${pending.months.length} months. Check them below, then Save.`
+        : `${pending.rows.length} lines totalled into ${rows.length} months for ${pendingSubsystem.trim() || 'Unassigned'}. Check them below, then Save.`,
+    );
     setPending(null);
     setPaste('');
   };
@@ -259,7 +268,7 @@ export function TeamHours() {
       actions.notify('error', 'Could not find months and hours in that. Paste a block with months across the top, or a column of months next to a column of hours.');
       return;
     }
-    setLabelsAre(/person|name|engineer|staff|who/i.test(out.labelHeader) ? 'person' : 'subsystem');
+    setLabelsAreGroups(!/person|name|engineer|staff|who/i.test(out.labelHeader));
     setPending(out);
   };
 
@@ -286,7 +295,7 @@ export function TeamHours() {
         actions.notify('error', `No months and hours found in ${file.name}. Expected months across the top, or a column of months beside a column of hours.`);
         return;
       }
-      setLabelsAre(/person|name|engineer|staff|who/i.test(best.labelHeader) ? 'person' : 'subsystem');
+      setLabelsAreGroups(!/person|name|engineer|staff|who/i.test(best.labelHeader));
       setPending(best);
     } catch (err) {
       actions.notify('error', (err as Error).message);
@@ -556,7 +565,6 @@ export function TeamHours() {
       value: (r) => r.subsystem,
       render: (r) => <CellInput value={r.subsystem} list="team-subsystems" placeholder="Unassigned" onCommit={(v) => editRow(r.id, { subsystem: v.trim() })} />,
     },
-    { key: 'person', label: 'Person', value: (r) => r.person ?? '', render: (r) => <CellInput value={r.person ?? ''} onCommit={(v) => editRow(r.id, { person: v.trim() || undefined })} /> },
     { key: 'hours', label: TERMS.builtHours, value: (r) => r.hours, num: true, render: (r) => <CellInput type="number" value={String(r.hours)} onCommit={(v) => editRow(r.id, { hours: Number(v) || 0 })} /> },
     { key: 'act', label: '', value: () => '', hint: '', render: (r) => <button className="btn-link text-[11px] font-normal" onClick={() => removeRow(r.id)}>remove</button> },
   ];
@@ -1050,20 +1058,21 @@ export function TeamHours() {
             <Notice tone="info">{pending.note} {pending.rows.length} rows, {pending.months.length} months{pending.skipped ? `, ${pending.skipped} cells skipped` : ''}.</Notice>
             <div className="flex flex-wrap items-center gap-2 text-[12px]">
               <span>The <b>{pending.labelHeader || 'first'}</b> column is a</span>
-              <select className="input" value={labelsAre} onChange={(e) => setLabelsAre(e.target.value as 'subsystem' | 'person')}>
-                <option value="subsystem">{TERMS.subsystemLower}</option>
-                <option value="person">person</option>
+              <select className="input" value={labelsAreGroups ? 'group' : 'other'} onChange={(e) => setLabelsAreGroups(e.target.value === 'group')}>
+                <option value="group">{TERMS.subsystemLower}</option>
+                <option value="other">list of people, or something else</option>
               </select>
-              {labelsAre === 'person' && (
+              {!labelsAreGroups && (
                 <>
-                  <span>working under</span>
+                  <span>whose hours all go to</span>
                   <input className="input w-40" list="team-subsystems" placeholder="leave blank for Unassigned" value={pendingSubsystem} onChange={(e) => setPendingSubsystem(e.target.value)} />
+                  <span className="text-[var(--text-muted)]">, totalled per month.</span>
                 </>
               )}
             </div>
             <div className="table-wrap" style={{ maxHeight: 200 }}>
               <table className="tbl">
-                <thead><tr><th>Month</th><th>{labelsAre === 'subsystem' ? TERMS.subsystem : 'Person'}</th><th className="num">{TERMS.builtHours}</th></tr></thead>
+                <thead><tr><th>Month</th><th>{labelsAreGroups ? TERMS.subsystem : pending.labelHeader || 'Label'}</th><th className="num">{TERMS.builtHours}</th></tr></thead>
                 <tbody>
                   {pending.rows.slice(0, 40).map((r, i) => (
                     <tr key={i}><td className="mono">{r.month}</td><td>{r.label || <span className="text-[var(--text-subtle)]">(blank)</span>}</td><td className="num">{fmtHours(r.hours)}</td></tr>

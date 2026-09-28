@@ -2,19 +2,20 @@ import { lazy, Suspense } from 'react';
 import { AppProvider, useApp } from './state';
 import { useHashRoute } from './router';
 import { Layout } from './components/Layout';
+import { Boundary } from './components/Boundary';
 import { Setup } from './screens/Setup';
-import { Dashboard } from './screens/Dashboard';
 
 /*
- * Every screen but the dashboard is loaded when it is first opened.
+ * Every screen is loaded when it is first opened, the dashboard included.
  *
- * The two heaviest dependencies in the application are the spreadsheet library and
- * the charting library, and between them they were most of a 1.4 MB bundle that had
- * to arrive before anything appeared. Splitting on the route means the first paint
- * carries the dashboard and its curve, and the Two-Week Log's charts or the Import
- * screen's workbook reader arrive when somebody asks for them. The single-file
- * standalone build inlines dynamic imports, so it is unaffected.
+ * The two heaviest dependencies are the spreadsheet library and the charting
+ * library, and between them they were most of a 1.4 MB bundle that had to arrive
+ * before anything appeared. The dashboard used to be exempt, which kept the whole
+ * charting library on the critical path for a screen that is often not the one
+ * somebody opened the application to reach. The single-file standalone build
+ * inlines dynamic imports, so it is unaffected either way.
  */
+const Dashboard = lazy(() => import('./screens/Dashboard').then((m) => ({ default: m.Dashboard })));
 const Import = lazy(() => import('./screens/Import').then((m) => ({ default: m.Import })));
 const Library = lazy(() => import('./screens/Library').then((m) => ({ default: m.Library })));
 const Locations = lazy(() => import('./screens/Locations').then((m) => ({ default: m.Locations })));
@@ -29,9 +30,19 @@ const PeriodLog = lazy(() => import('./screens/PeriodLog').then((m) => ({ defaul
 const IdRules = lazy(() => import('./screens/IdRules').then((m) => ({ default: m.IdRules })));
 const Settings = lazy(() => import('./screens/Settings').then((m) => ({ default: m.Settings })));
 
-/** Shown while a screen's code arrives. On a local folder that is a few frames. */
+/**
+ * Shown while a screen's code arrives. On a local folder that is a few frames, so
+ * it is the shape of what is coming rather than a spinner that flashes and goes.
+ */
 function Loading() {
-  return <div className="p-8 text-[13px] text-[var(--text-subtle)]">Loading…</div>;
+  return (
+    <div className="p-8" aria-busy="true" aria-live="polite">
+      <div className="skeleton h-7 w-56" />
+      <div className="skeleton mt-2 h-4 w-96" />
+      <div className="skeleton mt-6 h-32 w-full" />
+      <span className="sr-only">Loading the screen</span>
+    </div>
+  );
 }
 
 function Shell() {
@@ -84,7 +95,9 @@ function Shell() {
   }
   return (
     <Layout screen={route.screen}>
-      <Suspense fallback={<Loading />}>{screen}</Suspense>
+      <Boundary screen={route.screen}>
+        <Suspense fallback={<Loading />}>{screen}</Suspense>
+      </Boundary>
     </Layout>
   );
 }

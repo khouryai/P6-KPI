@@ -187,7 +187,6 @@ export const GLOSSARY: Record<string, string> = {
   'Cum earned': 'Earned hours from the first month up to and including this one.',
   'Cum built': 'Hours the team has built from the first month up to and including this one.',
   'Cum variance': 'Earned minus built since the start of the job. This is the hole, or the cushion.',
-  Person: 'Who the hours were charged by. Optional: the rollup works per group either way, but per person is how most timesheet exports come.',
   'Needing REVIEW': 'Activities whose type has no rate library entry yet, so they carry no hours. Price the type and they join the budget.',
   'Activities needing REVIEW': 'Activities whose type has no rate library entry yet, so they carry no hours. Price the type and they join the budget.',
   Finished: 'Activities in this group that have reached 100%.',

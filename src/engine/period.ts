@@ -14,7 +14,7 @@
  * screens would quietly disagree.
  */
 import type { BudgetRow } from './types';
-import { accruedFraction } from './curves';
+import { accruedAt, prepWindow, type AccrualWindow } from './curves';
 import { isoToMs, msToISO, isValidISO } from './dates';
 
 /** A day, in milliseconds. Windows are whole calendar days, inclusive at both ends. */
@@ -205,11 +205,14 @@ function within(iso: string | null, from: string, to: string): boolean {
 /**
  * Hours accrued inside the window for one span, as the curve would draw it: the
  * fraction complete at the end minus the fraction complete the day before it began.
+ *
+ * Takes the window already parsed and the two boundary dates already in
+ * milliseconds. Both ends are the same two dates for every row in the log, and
+ * re-parsing them per row was most of what this screen spent its time on.
  */
-function accruedIn(hours: number, start: string | null, end: string | null, from: string, to: string): number {
-  if (!hours || !start || !end) return 0;
-  const before = dayBefore(from);
-  return hours * (accruedFraction(to, start, end) - accruedFraction(before, start, end));
+function accruedIn(hours: number, w: AccrualWindow, beforeMs: number, toMs: number): number {
+  if (!hours || !w) return 0;
+  return hours * (accruedAt(toMs, w) - accruedAt(beforeMs, w));
 }
 
 /**
@@ -244,7 +247,6 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
   const safeTo = isValidISO(to) ? to : from;
   const lo = safeFrom <= safeTo ? safeFrom : safeTo;
   const hi = safeFrom <= safeTo ? safeTo : safeFrom;
-  const before = dayBefore(lo);
 
   const inBudget = rows.filter((r) => r.status === 'IN BUDGET');
   const activities: PeriodActivity[] = [];
@@ -258,9 +260,23 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
   const phaseBudget = new Map<string, number>();
   for (const r of inBudget) phaseBudget.set(r.phase, (phaseBudget.get(r.phase) ?? 0) + r.budgetHours);
 
+  /*
+   * Each row's two windows, parsed once. The log reads them in its own loop and
+   * again for every phase's start and end percentage, so without this the same
+   * handful of ISO strings is split several times per activity.
+   */
+  const beforeMs = isoToMs(dayBefore(lo));
+  const hiMs = isoToMs(hi);
+  const earnWin = new Map<BudgetRow, AccrualWindow>();
+  const planWin = new Map<BudgetRow, AccrualWindow>();
   for (const r of inBudget) {
-    const plannedHours = accruedIn(r.budgetHours, r.baselineStart, r.baselineFinish, lo, hi);
-    const earnedHours = accruedIn(r.earnedHours, r.earnStart, r.earnEnd, lo, hi);
+    earnWin.set(r, prepWindow(r.earnStart, r.earnEnd));
+    planWin.set(r, prepWindow(r.baselineStart, r.baselineFinish));
+  }
+
+  for (const r of inBudget) {
+    const plannedHours = accruedIn(r.budgetHours, planWin.get(r) ?? null, beforeMs, hiMs);
+    const earnedHours = accruedIn(r.earnedHours, earnWin.get(r) ?? null, beforeMs, hiMs);
     /*
      * Done, and when.
      *
@@ -360,7 +376,8 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
   }).length;
 
   const totalBudget = inBudget.reduce((s, r) => s + r.budgetHours, 0);
-  const earnedBy = (rs: BudgetRow[], date: string) => rs.reduce((s, r) => s + r.earnedHours * accruedFraction(date, r.earnStart, r.earnEnd), 0);
+  const earnedBy = (rs: BudgetRow[], atMs: number) =>
+    rs.reduce((s, r) => s + r.earnedHours * accruedAt(atMs, earnWin.get(r) ?? null), 0);
 
   /*
    * By phase, over the same window. The phases come from every in-budget activity
@@ -378,8 +395,8 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
     .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
     .map(([key, rs]) => {
       const budgetHours = rs.reduce((s, r) => s + r.budgetHours, 0);
-      const planned = rs.reduce((s, r) => s + accruedIn(r.budgetHours, r.baselineStart, r.baselineFinish, lo, hi), 0);
-      const earned = rs.reduce((s, r) => s + accruedIn(r.earnedHours, r.earnStart, r.earnEnd, lo, hi), 0);
+      const planned = rs.reduce((s, r) => s + accruedIn(r.budgetHours, planWin.get(r) ?? null, beforeMs, hiMs), 0);
+      const earned = rs.reduce((s, r) => s + accruedIn(r.earnedHours, earnWin.get(r) ?? null, beforeMs, hiMs), 0);
       const c = Object.fromEntries(OUTCOMES.map((o) => [o, 0])) as Record<PeriodOutcome, number>;
       for (const a of activities) if (a.phase === key) c[a.outcome] += 1;
       return {
@@ -390,8 +407,8 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
         plannedHours: planned,
         earnedHours: earned,
         achievement: Math.abs(planned) > 1e-9 ? earned / planned : null,
-        pctAtStart: budgetHours ? earnedBy(rs, before) / budgetHours : 0,
-        pctAtEnd: budgetHours ? earnedBy(rs, hi) / budgetHours : 0,
+        pctAtStart: budgetHours ? earnedBy(rs, beforeMs) / budgetHours : 0,
+        pctAtEnd: budgetHours ? earnedBy(rs, hiMs) / budgetHours : 0,
         counts: c,
       };
     });
@@ -406,17 +423,21 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
     shareOfBudget: totalBudget ? earnedHours / totalBudget : 0,
     plannedShareOfBudget: totalBudget ? plannedHours / totalBudget : 0,
     projectBudgetHours: totalBudget,
-    pctAtStart: totalBudget ? earnedBy(inBudget, before) / totalBudget : 0,
-    pctAtEnd: totalBudget ? earnedBy(inBudget, hi) / totalBudget : 0,
+    pctAtStart: totalBudget ? earnedBy(inBudget, beforeMs) / totalBudget : 0,
+    pctAtEnd: totalBudget ? earnedBy(inBudget, hiMs) / totalBudget : 0,
     counts,
     dueToFinish,
     finishedOnTime,
     activities,
-    slices: sliceWindow(lo, hi).map((s) => ({
-      ...s,
-      planned: inBudget.reduce((sum, r) => sum + accruedIn(r.budgetHours, r.baselineStart, r.baselineFinish, s.from, s.to), 0),
-      earned: inBudget.reduce((sum, r) => sum + accruedIn(r.earnedHours, r.earnStart, r.earnEnd, s.from, s.to), 0),
-    })),
+    slices: sliceWindow(lo, hi).map((s) => {
+      const fromMs = isoToMs(dayBefore(s.from));
+      const toMs = isoToMs(s.to);
+      return {
+        ...s,
+        planned: inBudget.reduce((sum, r) => sum + accruedIn(r.budgetHours, planWin.get(r) ?? null, fromMs, toMs), 0),
+        earned: inBudget.reduce((sum, r) => sum + accruedIn(r.earnedHours, earnWin.get(r) ?? null, fromMs, toMs), 0),
+      };
+    }),
     phases,
   };
 }

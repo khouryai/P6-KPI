@@ -1,5 +1,5 @@
 import React from 'react';
-import { useApp } from '../state';
+import { useApp, useChrome } from '../state';
 import { href } from '../router';
 import { fmtDateTime } from '../format';
 import { BUILD_COMMIT, BUILD_TIME, buildLabel } from '../build';
@@ -46,6 +46,9 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
 
 export function Layout({ screen, children }: { screen: string; children: React.ReactNode }) {
   const { state, model, actions } = useApp();
+  // The strip and the toast, from their own context: see ChromeState. Re-rendering
+  // this component costs a nav list; re-rendering the screen costs a whole table.
+  const chrome = useChrome();
   const dirty = state.dirty.size > 0;
   const updateReady = useUpdateReady();
   const q = model.summary;
@@ -84,7 +87,7 @@ export function Layout({ screen, children }: { screen: string; children: React.R
           <div className="truncate" title={state.storageLabel}>
             {storageLine}
           </div>
-          {state.lastSavedAt && <div className="mt-0.5 opacity-70">Saved {fmtDateTime(state.lastSavedAt)}</div>}
+          {chrome.lastSavedAt && <div className="mt-0.5 opacity-70">Saved {fmtDateTime(chrome.lastSavedAt)}</div>}
           <div className="mt-1 truncate opacity-60" title={`Build ${BUILD_COMMIT}${BUILD_TIME ? ` built ${fmtDateTime(BUILD_TIME)}` : ''}`}>
             {buildLabel()}
           </div>
@@ -96,7 +99,7 @@ export function Layout({ screen, children }: { screen: string; children: React.R
           <div className="min-w-0 truncate">
             {dirty ? (
               <>
-                <span className="font-semibold">{state.saving ? 'Saving' : state.autoSave ? 'Saving shortly' : 'Unsaved changes'}</span> in {[...state.dirty].join(', ')}.
+                <span className="font-semibold">{chrome.saving ? 'Saving' : state.autoSave ? 'Saving shortly' : 'Unsaved changes'}</span> in {[...state.dirty].join(', ')}.
                 {state.autoSave ? ' Written on its own a moment after you stop editing.' : ' Nothing is written until you save.'}
               </>
             ) : state.autoSave ? (
@@ -105,8 +108,8 @@ export function Layout({ screen, children }: { screen: string; children: React.R
               'All changes saved.'
             )}
           </div>
-          <button className={`btn btn-mini ${dirty && !state.autoSave ? 'btn-primary' : ''}`} disabled={!dirty || state.saving} onClick={() => void actions.save()}>
-            {state.saving ? 'Saving…' : 'Save now'}
+          <button className={`btn btn-mini ${dirty && !state.autoSave ? 'btn-primary' : ''}`} disabled={!dirty || chrome.saving} onClick={() => void actions.save()}>
+            {chrome.saving ? 'Saving…' : 'Save now'}
           </button>
         </div>
 
@@ -168,8 +171,8 @@ export function Layout({ screen, children }: { screen: string; children: React.R
 
         <div className="min-h-0 flex-1">{children}</div>
 
-        {state.toast && (
-          <div className={`toast notice-${state.toast.kind === 'error' ? 'error' : state.toast.kind === 'ok' ? 'ok' : 'info'}`}>{state.toast.text}</div>
+        {chrome.toast && (
+          <div className={`toast notice-${chrome.toast.kind === 'error' ? 'error' : chrome.toast.kind === 'ok' ? 'ok' : 'info'}`}>{chrome.toast.text}</div>
         )}
       </main>
     </div>

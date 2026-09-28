@@ -17,7 +17,7 @@ import type { DataUpdater } from './state';
 export function tidyTestProgress(t: TestProgress): TestProgress {
   const out: TestProgress = { activityId: t.activityId.trim(), updatedAt: t.updatedAt };
   for (const k of ['pctOverride', 'testStartOverride', 'testEndOverride', 'progressAsOf', 'note'] as const) {
-    const v = typeof t[k] === 'string' ? (t[k] as string).trim() : t[k];
+    const v = typeof t[k] === 'string' ? (t[k]).trim() : t[k];
     if (v !== undefined && v !== null && v !== '') (out as Record<string, unknown>)[k] = v;
   }
   return out;

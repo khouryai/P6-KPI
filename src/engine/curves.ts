@@ -16,11 +16,34 @@ export function accruedFraction(
   windowStart: string | null,
   windowEnd: string | null,
 ): number {
-  if (!windowStart || !windowEnd) return 0;
-  if (periodEnd < windowStart) return 0;
-  if (windowEnd <= windowStart) return periodEnd >= windowEnd ? 1 : 0;
-  const p = isoToMs(periodEnd);
+  return accruedAt(isoToMs(periodEnd), prepWindow(windowStart, windowEnd));
+}
+
+/**
+ * A window with both ends already parsed.
+ *
+ * The curve and the burn grid both accrue every row across every period, so the
+ * string form above parses the same handful of dates tens of thousands of times:
+ * 675 activities over 21 periods is 42,525 calls, each splitting three strings.
+ * That was three quarters of the cost of building the model. Parsed once per row
+ * and once per period end, the inner loop is arithmetic.
+ */
+export type AccrualWindow = { s: number; e: number } | null;
+
+export function prepWindow(windowStart: string | null, windowEnd: string | null): AccrualWindow {
+  if (!windowStart || !windowEnd) return null;
   const s = isoToMs(windowStart);
   const e = isoToMs(windowEnd);
-  return Math.min(1, (p - s) / (e - s));
+  // A date the parser could not read arrives as null, so this is belt and braces:
+  // a NaN would otherwise propagate silently into every total on the screen.
+  if (!Number.isFinite(s) || !Number.isFinite(e)) return null;
+  return { s, e };
+}
+
+export function accruedAt(periodEndMs: number, w: AccrualWindow): number {
+  if (!w) return 0;
+  if (periodEndMs < w.s) return 0;
+  if (w.e <= w.s) return periodEndMs >= w.e ? 1 : 0;
+  const f = (periodEndMs - w.s) / (w.e - w.s);
+  return f > 1 ? 1 : f;
 }

@@ -215,8 +215,8 @@ describe('earned against built', () => {
   const lib: LibraryEntry[] = [{ matchKey: 'Test Type', basis: 'RATE', durationShifts: 10, crew: [{ subsystem: 'ATS', count: 1 }] }];
   const a = makeActivity({ activityId: 'A', actualStart: true, startDate: '2026-06-01', actualFinish: true, finishDate: '2026-06-30' });
   const actuals: TeamActual[] = [
-    { id: '1', month: '2026-06', subsystem: 'ATS', person: 'A. Engineer', hours: 100 },
-    { id: '2', month: '2026-06', subsystem: 'ATS', person: 'B. Engineer', hours: 20 },
+    { id: '1', month: '2026-06', subsystem: 'ATS', hours: 100 },
+    { id: '2', month: '2026-06', subsystem: 'ATS', hours: 20 },
   ];
 
   it('earning less than the team built is a negative variance', () => {

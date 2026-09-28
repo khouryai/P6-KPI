@@ -591,7 +591,7 @@ export function StatusReport() {
               <select
                 className="input"
                 value={pngTarget}
-                onChange={(e) => setPngTarget(e.target.value as keyof typeof PAINT_TARGETS)}
+                onChange={(e) => setPngTarget(e.target.value)}
                 title="How wide the PNG is meant to sit once it is on a page. A narrower target lays the same report out narrower, which makes every figure on it proportionally bigger."
               >
                 {Object.entries(PAINT_TARGETS).map(([k, t]) => (

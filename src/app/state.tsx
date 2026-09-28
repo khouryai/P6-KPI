@@ -54,10 +54,23 @@ export type AppState = {
   storageLabel: string;
   adapterKind: StorageAdapter['kind'] | null;
   folderName: string | null;
-  saving: boolean;
-  lastSavedAt: string | null;
   /** Writing changes out on its own, shortly after each edit. */
   autoSave: boolean;
+};
+
+/**
+ * The chrome: what the status strip and the toast are doing.
+ *
+ * Deliberately not part of AppState, and that is a performance decision rather
+ * than a tidy one. Every screen reads AppState, so while a toast lived in it, every
+ * toast — and every tick of the auto-save's saving flag — re-rendered whatever
+ * table was open. On a 675 activity schedule that is twenty thousand cells
+ * reconciled to tell somebody a file was written. Split out, they reach the strip
+ * and nothing else.
+ */
+export type ChromeState = {
+  saving: boolean;
+  lastSavedAt: string | null;
   toast: { kind: 'ok' | 'error' | 'info'; text: string } | null;
 };
 
@@ -89,6 +102,12 @@ export type AppActions = {
 
 type Ctx = { state: AppState; model: Model; actions: AppActions };
 const AppContext = createContext<Ctx | null>(null);
+const ChromeContext = createContext<ChromeState>({ saving: false, lastSavedAt: null, toast: null });
+
+/** The status strip's own state. Only the strip reads it; see ChromeState. */
+export function useChrome(): ChromeState {
+  return useContext(ChromeContext);
+}
 
 export function useApp(): Ctx {
   const c = useContext(AppContext);
@@ -107,14 +126,14 @@ const initial: AppState = {
   storageLabel: '',
   adapterKind: null,
   folderName: null,
-  saving: false,
-  lastSavedAt: null,
   autoSave: readAutoSave(),
-  toast: null,
 };
+
+const initialChrome: ChromeState = { saving: false, lastSavedAt: null, toast: null };
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(initial);
+  const [chrome, setChrome] = useState<ChromeState>(initialChrome);
   const stateRef = useRef<AppState>(state);
   stateRef.current = state;
   const storeRef = useRef<Store | null>(null);
@@ -135,13 +154,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setState((s) => ({ ...s, ...(typeof p === 'function' ? p(s) : p) }));
   }, []);
 
-  const notify = useCallback(
-    (kind: 'ok' | 'error' | 'info', text: string) => {
-      patch({ toast: { kind, text } });
-      window.setTimeout(() => patch((s) => (s.toast?.text === text ? { toast: null } : {})), kind === 'error' ? 12000 : 5000);
-    },
-    [patch],
-  );
+  const notify = useCallback((kind: 'ok' | 'error' | 'info', text: string) => {
+    setChrome((c) => ({ ...c, toast: { kind, text } }));
+    window.setTimeout(
+      () => setChrome((c) => (c.toast?.text === text ? { ...c, toast: null } : c)),
+      kind === 'error' ? 12000 : 5000,
+    );
+  }, []);
 
   /** Mirror a file to the IndexedDB cache, best effort. */
   const mirror = useCallback(
@@ -190,7 +209,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Boot: reconnect to the folder chosen last time.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    void (async () => {
       if (readMode() === 'browser') {
         await openStore(idb(), null);
         return;
@@ -238,7 +257,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    * for a button first: any click or keypress in the window is a gesture, so the
    * reconnect rides on whatever they were going to do anyway. It runs once.
    */
-  const grantRef = useRef<() => Promise<void>>(async () => undefined);
+  const grantRef = useRef<() => Promise<void>>(() => Promise.resolve());
   useEffect(() => {
     if (state.status !== 'needs-permission' || !handleRef.current) return;
     const tryReconnect = () => void grantRef.current();
@@ -254,8 +273,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Refresh the advisory lock every minute while a folder is open.
   useEffect(() => {
     if (state.status !== 'ready' || state.adapterKind !== 'filesystem') return;
-    const t = window.setInterval(() => storeRef.current?.refreshLock().catch(() => undefined), 60_000);
-    const release = () => storeRef.current?.releaseLock().catch(() => undefined);
+    const t = window.setInterval(() => void storeRef.current?.refreshLock().catch(() => undefined), 60_000);
+    const release = () => void storeRef.current?.releaseLock().catch(() => undefined);
     window.addEventListener('pagehide', release);
     return () => {
       window.clearInterval(t);
@@ -357,7 +376,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const store = storeRef.current;
     if (!store) return;
     autoSaveFailedRef.current = false;
-    patch({ saving: true });
+    setChrome((c) => ({ ...c, saving: true }));
     const failed: string[] = [];
     const snapshot: StoreData = stateRef.current.data;
     const dirtyKeys: StoreFileKey[] = [...stateRef.current.dirty];
@@ -374,7 +393,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         failed.push(`${FILES[key]}: ${(err as Error).message}`);
       }
     }
-    patch({ saving: false, lastSavedAt: failed.length ? null : new Date().toISOString() });
+    setChrome((c) => ({ ...c, saving: false, lastSavedAt: failed.length ? null : new Date().toISOString() }));
     if (failed.length) {
       // Stop auto-save retrying a write that just failed, or a folder that has gone
       // offline turns into an error toast every second until it comes back. The next
@@ -384,7 +403,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } else if (dirtyKeys.length && !opts?.silent) {
       notify('ok', `Saved ${dirtyKeys.length} file${dirtyKeys.length === 1 ? '' : 's'} to ${store.adapter.describe()}.`);
     }
-  }, [mirror, notify, patch]);
+  }, [mirror, notify]);
 
   const setAutoSave = useCallback((on: boolean) => {
     writeAutoSave(on);
@@ -397,12 +416,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => {
-    if (!state.autoSave || state.status !== 'ready' || state.saving) return;
+    if (!state.autoSave || state.status !== 'ready' || chrome.saving) return;
     if (state.dirty.size === 0 || autoSaveFailedRef.current) return;
     if (state.adapterKind === null || state.adapterKind === 'memory') return;
     const t = window.setTimeout(() => void saveRef.current({ silent: true }), AUTOSAVE_DELAY);
     return () => window.clearTimeout(t);
-  }, [state.autoSave, state.status, state.saving, state.dirty, state.adapterKind]);
+  }, [state.autoSave, state.status, chrome.saving, state.dirty, state.adapterKind]);
 
   const commitImport = useCallback(
     async (kind: ImportKind, activities: P6Activity[], sourceFilename: string) => {
@@ -599,5 +618,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, removeImport, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify],
   );
 
-  return <AppContext.Provider value={{ state, model, actions }}>{children}</AppContext.Provider>;
+  /*
+   * Memoised, so a chrome update re-renders this provider without handing every
+   * screen a new object and making it reconcile its whole table.
+   */
+  const value = useMemo<Ctx>(() => ({ state, model, actions }), [state, model, actions]);
+  return (
+    <AppContext.Provider value={value}>
+      <ChromeContext.Provider value={chrome}>{children}</ChromeContext.Provider>
+    </AppContext.Provider>
+  );
 }

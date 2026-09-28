@@ -260,3 +260,51 @@ test('a schedule with duplicate Activity IDs still filters and sorts', async ({ 
   expect(await col()).toEqual([...asc].reverse());
 });
 
+/**
+ * A real schedule is around seven hundred activities, and Budget Master shows
+ * thirty columns of them. Rendering all of it was twenty thousand cells and two
+ * seconds of blank screen for rows nobody scrolled to.
+ */
+test('a long table keeps only the rows in view in the DOM, and still scrolls to the last one', async ({ page }) => {
+  await open(page);
+  const rows: unknown[][] = [['Activity ID', 'Activity Name', 'Original Duration', 'Remaining Duration', 'Start', 'Finish']];
+  for (let i = 0; i < 300; i++) {
+    rows.push([`0-P2-TC-A10-FA-${String(i).padStart(4, '0')}`, `[T&C] A10 - Core Network Test ${i}`, 10, 10, new Date(2026, i % 9, 1), new Date(2027, i % 9, 15)]);
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows, { cellDates: true }), 'P6_Extract');
+  await importSchedule(page, 'current', XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellDates: true }) as Buffer);
+
+  await page.goto('/#/budget');
+  const body = page.locator('.tbl tbody tr[data-row]');
+  await expect(body.first()).toBeVisible();
+  const shown = await body.count();
+  expect(shown).toBeGreaterThan(5);
+  expect(shown, 'only a window of the 300 rows should be in the DOM').toBeLessThan(120);
+
+  // The scrollbar still spans the whole table, and the end of it is the last row.
+  await page.locator('.table-wrap').evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await expect
+    .poll(async () => (await page.locator('.tbl tbody tr[data-row]').last().locator('td').first().innerText()).split('\n')[0])
+    .toBe('0-P2-TC-A10-FA-0299');
+});
+
+/**
+ * A heading that sorts is a control, and it used to be reachable by nothing but a
+ * click: a column could not be sorted at all without a mouse.
+ */
+test('a column sorts from the keyboard, and says which way it is sorted', async ({ page }) => {
+  await open(page);
+  await importSchedule(page, 'current', schedule({ finished: 4, ahead: 4 }));
+  await page.goto('/#/budget');
+  const th = page.locator('.tbl thead th').nth(1);
+  await expect(th).toHaveAttribute('aria-sort', 'none');
+  await th.focus();
+  await page.keyboard.press('Enter');
+  await expect(th).toHaveAttribute('aria-sort', 'ascending');
+  await page.keyboard.press('Enter');
+  await expect(th).toHaveAttribute('aria-sort', 'descending');
+  // Space is the other key a control answers to.
+  await page.keyboard.press(' ');
+  await expect(th).toHaveAttribute('aria-sort', 'ascending');
+});

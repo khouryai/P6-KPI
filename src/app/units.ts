@@ -53,10 +53,12 @@ export function setUnit(next: Unit): void {
 
 /** The current unit, and a setter. Every screen using this stays in step. */
 export function useUnit(): { unit: Unit; percent: boolean; setUnit: (u: Unit) => void; toggle: () => void } {
-  const unit = useSyncExternalStore(
+  // The server snapshot is annotated rather than asserted: without it the hook is
+  // inferred as string and the whole call loses the union.
+  const unit = useSyncExternalStore<Unit>(
     subscribe,
     () => current,
-    () => 'hours' as Unit,
+    () => 'hours',
   );
   const toggle = useCallback(() => setUnit(current === 'percent' ? 'hours' : 'percent'), []);
   return { unit, percent: unit === 'percent', setUnit, toggle };

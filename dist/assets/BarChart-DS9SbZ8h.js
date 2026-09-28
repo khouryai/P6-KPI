@@ -1,0 +1,1 @@
+import{r as a}from"./index-DWBhOrRu.js";import{ac as e,ad as o}from"./CartesianChart-CvX5DexB.js";var i=["axis","item"],s=a.forwardRef((r,t)=>a.createElement(e,{chartName:"BarChart",defaultTooltipEventType:"axis",validateTooltipEventTypes:i,tooltipPayloadSearcher:o,categoricalChartProps:r,ref:t}));export{s as B};

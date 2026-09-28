@@ -19,7 +19,7 @@ import type {
 } from './types';
 import { UNASSIGNED } from './pricing';
 import { subsystemLabel, sumRecord } from './rollup';
-import { accruedFraction } from './curves';
+import { accruedFraction, accruedAt, prepWindow } from './curves';
 import { maxISO, monthEnd, isoToMs, msToISO } from './dates';
 
 
@@ -32,16 +32,21 @@ export function monthlyEarned(rows: BudgetRow[], periods: string[], dataDate: st
   const out: MonthlyEarned[] = [];
   let prevTotal = 0;
   let prevBy = new Map<string, number>();
+  // Rows × periods again, so the windows and the subsystem split are read once
+  // here rather than re-derived for every month.
+  const prepped = rows
+    .filter((r) => r.earnStart)
+    .map((r) => ({ earned: r.earnedHours, window: prepWindow(r.earnStart, r.earnEnd), parts: Object.entries(r.subsystemEarned) }));
   for (const p of periods) {
     if (dataDate && p > dataDate) break;
+    const at = isoToMs(p);
     let total = 0;
     const by = new Map<string, number>();
-    for (const r of rows) {
-      if (!r.earnStart) continue;
-      const f = accruedFraction(p, r.earnStart, r.earnEnd);
+    for (const r of prepped) {
+      const f = accruedAt(at, r.window);
       if (f <= 0) continue;
-      total += r.earnedHours * f;
-      for (const [code, h] of Object.entries(r.subsystemEarned)) by.set(code, (by.get(code) ?? 0) + h * f);
+      total += r.earned * f;
+      for (const [code, h] of r.parts) by.set(code, (by.get(code) ?? 0) + h * f);
     }
     const bySubsystem: Record<string, number> = {};
     for (const code of new Set([...by.keys(), ...prevBy.keys()])) {

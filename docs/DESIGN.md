@@ -1337,3 +1337,59 @@ The build prompt's Section 10 table (267 rows, 23,296 hours) does not match the 
 workbook, whose own data yields 334 rows, 87 WBS, 247 activities, 27 locations, 75 types,
 216 in budget, 21 excluded, 10 deleted, 0 review, 19,354 hours. The workbook wins; the
 parity suite asserts against the workbook's own cached values, not the prompt's table.
+
+## Making it quick on a real schedule
+
+Seven hundred activities is a normal week here, and the application was measured
+against that rather than against a fixture. Four things were slow, and they were slow
+for four unrelated reasons.
+
+**The curve parsed the same dates forty thousand times.** `accruedFraction` took ISO
+strings and split each one on every call, and the curve calls it once per row per
+period per series. At 675 activities over 21 periods that is 42,525 calls and about
+127,000 string splits — three quarters of the cost of building the whole model.
+`prepWindow` parses a row's window once and `accruedAt` does arithmetic on the result;
+the string form is kept, delegating, for the callers that genuinely have one date.
+`computeModel` went from 54 ms to 22, and the two-week log from 12.5 ms to 2.
+
+**Every table rendered every row.** Budget Master was 675 rows of 30 columns: twenty
+thousand cells, thirty-six thousand DOM nodes, two seconds before anything appeared,
+for rows nobody scrolled to. `SortableTable` now renders the rows in view plus a
+margin, with a spacer row above and below holding the scrollbar in place. Wrapped text
+and the Status Report's tables are excluded on purpose: wrapping makes rows different
+heights, so a window built on one measured height would drift, and the report needs
+every row in the DOM for the print stylesheet and the picture.
+
+**A toast re-rendered the tables.** The toast, the saving flag and the last-saved time
+lived in `AppState`, which every screen reads — so telling somebody a file had been
+written reconciled twenty thousand cells. They are their own context now, read by the
+status strip and nothing else.
+
+**The dashboard was not lazy**, which kept the whole charting library on the critical
+path for a screen that is often not the one somebody opened the application to reach.
+
+| | before | after |
+| --- | --- | --- |
+| Budget Master, first paint | 2,088 ms | 777 ms |
+| Progress, first paint | 2,221 ms | 415 ms |
+| DOM nodes, Budget Master | 36,075 | 2,535 |
+| Edit a cell → repaint | 155 ms | 16 ms |
+| `computeModel` | 54 ms | 22 ms |
+| First-load JS | 717 KB | 331 KB |
+
+## What a screen does when it throws
+
+Nothing, until recently: a render error unmounted the whole tree, the window went
+white, and the only way back was a reload — which on unsaved work is the expensive
+kind of mistake. `Boundary` wraps the routed screen, so the nav and the status strip
+survive, the error is named, and the three things that recover it are offered. It
+clears itself when you navigate, so one bad screen does not poison the next.
+
+## Hours are per group, and that is all
+
+`TeamActual` used to carry the person who charged the hours. Nothing on any screen
+ever reported by it — so it was personal data being collected, and kept in a OneDrive
+folder, for an answer nobody had asked. It is gone, and `stripPerson` drops it on read
+so it leaves the file the next time anything is saved. A timesheet that lists people is
+still readable: its lines are totalled into the group they were worked under, which is
+the only cut this application reports.

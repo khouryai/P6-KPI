@@ -226,7 +226,7 @@ export function Import() {
   };
 
   const history = [...state.data.importsIndex].sort((a, b) => b.importedAt.localeCompare(a.importedAt));
-  const headerCells = grid && layout?.headerRow !== null && layout ? (grid[layout.headerRow as number] ?? null) : null;
+  const headerCells = grid && layout?.headerRow !== null && layout ? (grid[layout.headerRow] ?? null) : null;
   const cols = grid ? columnCount(grid) : 0;
 
   return (

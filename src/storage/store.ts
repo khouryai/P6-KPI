@@ -114,6 +114,18 @@ export function migrateTestCounts(rows: StoredTestProgress[]): TestProgress[] {
   });
 }
 
+/**
+ * Drop the person a row of hours was charged by.
+ *
+ * The field is gone from the type: nothing ever reported by it, so it was personal
+ * data being collected and kept for no answer anybody asked. Stripping it on read
+ * means it leaves the file the next time anything is saved, rather than sitting
+ * there in a OneDrive folder indefinitely. The hours are untouched.
+ */
+export function stripPerson(rows: (TeamActual & { person?: string })[]): TeamActual[] {
+  return rows.map(({ person: _person, ...rest }) => rest);
+}
+
 function parseJson<T>(text: string | null, fallback: T, path: string, problems: string[]): T {
   if (text === null || text.trim() === '') return fallback;
   try {
@@ -211,7 +223,7 @@ export class Store {
     // empty list is the correct reading of "this job has not been split yet", so a
     // missing file is not a problem to report.
     data.subsystems = parseJson<Subsystem[]>(await a.read(FILES.subsystems), [], FILES.subsystems, problems);
-    data.teamActuals = parseJson<TeamActual[]>(await a.read(FILES.teamActuals), [], FILES.teamActuals, problems);
+    data.teamActuals = stripPerson(parseJson<TeamActual[]>(await a.read(FILES.teamActuals), [], FILES.teamActuals, problems));
     // Absent in every store written before an Activity ID could be overruled. No
     // rules is the correct reading of "the IDs have all parsed fine so far".
     data.idRules = parseJson<IdRule[]>(await a.read(FILES.idRules), [], FILES.idRules, problems);

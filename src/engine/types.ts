@@ -294,14 +294,18 @@ export type TestProgress = {
 
 /**
  * Hours a team actually built in a month, as reported by timesheets. One row per
- * month per subsystem, optionally per person. This is the "what it cost" side; the
- * budget is the "what it was worth" side.
+ * month per subsystem. This is the "what it cost" side; the budget is the "what it
+ * was worth" side.
+ *
+ * Deliberately not per person. It used to carry a name as well, and nothing on any
+ * screen ever reported by it — so it was a column of personal data collected for no
+ * answer anybody asked. A per-person timesheet is still readable: its rows are
+ * totalled into the group they were worked under as they come in.
  */
 export type TeamActual = {
   id: string;
   month: string; // YYYY-MM
   subsystem: string; // '' when not attributed to one
-  person?: string;
   hours: number;
   note?: string;
 };

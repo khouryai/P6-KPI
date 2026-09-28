@@ -63,6 +63,10 @@ setting shared by both screens, remembered per machine.
 
 ## Fiscal years
 
+Hours are kept per group per month and nothing finer: a timesheet listing people is
+totalled into the group they worked under as it comes in. There is no per-person
+reporting anywhere in the application and no name is stored.
+
 **Earned vs Actual** rolls the months up by fiscal year, with earned, actual,
 variance, factor and how complete the job was at each year end. Click a year to
 narrow the screen to it and break it out **by resource group**; open a group to see
@@ -134,11 +138,18 @@ one file, every sheet, for project controls.
 ```
 npm install
 npm test               # engine, storage and import-format suites
+npm run lint           # eslint: hooks, floating promises, dead code. CI runs this first
+npm run typecheck      # tsc --noEmit
 npm run dev            # dev server on http://localhost:47800
 npm run build          # rebuilds BOTH dist/ and standalone/ — commit them together
 npm run test:ui        # playwright smoke tests; needs a build, serves it on 127.0.0.1:4173
 TC_WORKBOOK=path/to/TC_P6_Budget_SCurve.xlsx npm test   # parity against the real workbook
 ```
+
+Prettier is configured (`npm run format`) but the codebase is not formatted with it and
+CI does not check it: reformatting seventeen thousand hand-laid-out lines would bury
+every real change in the history for no defect caught. ESLint is the gate, because it
+finds defects.
 
 `dist/` and `standalone/` are committed deliberately: the laptop that runs this cannot
 build them. They are two builds of the same source — `dist/` is what `start.cmd` serves,

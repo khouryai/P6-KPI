@@ -590,8 +590,8 @@ export function PeriodLog() {
       toolbar={
         <>
           <span className="seg">
-            <button className={`seg-btn${percent ? '' : ' is-on'}`} onClick={() => setUnit('hours')}>Man hours</button>
-            <button className={`seg-btn${percent ? ' is-on' : ''}`} onClick={() => setUnit('percent')} title="Report progress only, with no hours anywhere. For sharing with the client.">
+            <button className={`seg-btn${percent ? '' : ' is-on'}`} aria-pressed={!(percent)} onClick={() => setUnit('hours')}>Man hours</button>
+            <button className={`seg-btn${percent ? ' is-on' : ''}`} aria-pressed={percent} onClick={() => setUnit('percent')} title="Report progress only, with no hours anywhere. For sharing with the client.">
               % complete
             </button>
           </span>
@@ -843,6 +843,7 @@ export function PeriodLog() {
           <button
             key={o}
             className={`outcome-tile tone-${OUTCOME_META[o].tone}${outcome === o ? ' is-on' : ''}`}
+            aria-pressed={outcome === o}
             title={OUTCOME_META[o].blurb}
             onClick={() => setOutcome(outcome === o ? '' : o)}
           >

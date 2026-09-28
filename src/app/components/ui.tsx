@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { define } from '../../engine/glossary';
 import { downloadBytes, stamp } from '../export';
 import { fmtDate } from '../format';
@@ -228,6 +228,13 @@ export type TableLayout = {
 };
 
 const LAYOUT_PREFIX = 'tc-cols-';
+
+/** Below this many rows there is nothing to win, and the spacers only add risk. */
+const VIRTUAL_FROM = 80;
+/** Rows kept either side of the viewport, so a flick does not show blank space. */
+const OVERSCAN = 12;
+/** Rendered before a row has been measured: enough to measure, and to fill a screen. */
+const FIRST_PAINT = 60;
 
 function readLayout(tableId: string): TableLayout | null {
   try {
@@ -574,6 +581,75 @@ export function SortableTable<T>({
    * Repeats get an occurrence suffix. A table with no duplicates — every table, on
    * a clean export — gets exactly the keys it got before.
    */
+  /*
+   * Only the rows on screen are in the DOM.
+   *
+   * Budget Master on a real schedule was 675 rows of 30 columns: twenty thousand
+   * cells, thirty-six thousand DOM nodes, and two seconds before anything appeared.
+   * Almost none of it was ever looked at. This renders the rows in view plus a
+   * margin either side and holds the scrollbar in place with a spacer row above and
+   * below, so the table scrolls and behaves exactly as it did.
+   *
+   * Two deliberate exceptions. Wrapped text makes rows different heights, and a
+   * window built on one row height would drift as you scrolled — so wrap mode
+   * renders everything. And a table with no maximum height is not the thing
+   * scrolling, which is the Status Report, where every row has to be in the DOM for
+   * the print stylesheet and the picture anyway.
+   */
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLTableSectionElement>(null);
+  const [rowH, setRowH] = useState(0);
+  const [view, setView] = useState({ top: 0, height: 0 });
+  const canWindow = !wrap && maxHeight !== 'none' && sorted.length >= VIRTUAL_FROM;
+
+  /*
+   * One measured row is the height of them all while the text is not wrapping.
+   * Fractional, not offsetHeight: rounding half a pixel per row puts the scrollbar
+   * two per cent out over six hundred of them. The tolerance stops a row that
+   * measures a hair differently each pass from re-rendering forever.
+   */
+  useLayoutEffect(() => {
+    if (!canWindow) return;
+    const tr = bodyRef.current?.querySelector('tr[data-row]');
+    const h = tr?.getBoundingClientRect().height ?? 0;
+    if (h > 0 && Math.abs(h - rowH) > 0.5) setRowH(h);
+  });
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !canWindow) return;
+    let frame = 0;
+    const read = () => {
+      frame = 0;
+      setView((v) => (v.top === el.scrollTop && v.height === el.clientHeight ? v : { top: el.scrollTop, height: el.clientHeight }));
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(read);
+    };
+    read();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    const ro = new ResizeObserver(onScroll);
+    ro.observe(el);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      el.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+    };
+  }, [canWindow]);
+
+  /** The slice to render, and the space to leave above and below it. */
+  const windowed = useMemo(() => {
+    if (!canWindow) return { rows: sorted, from: 0, above: 0, below: 0 };
+    // Before a row has been measured, render enough to measure one and to fill any
+    // plausible viewport, rather than all 675.
+    if (rowH === 0) return { rows: sorted.slice(0, FIRST_PAINT), from: 0, above: 0, below: 0 };
+    const height = view.height || 600;
+    const first = Math.max(0, Math.floor(view.top / rowH) - OVERSCAN);
+    const count = Math.ceil(height / rowH) + OVERSCAN * 2;
+    const last = Math.min(sorted.length, first + count);
+    return { rows: sorted.slice(first, last), from: first, above: first * rowH, below: (sorted.length - last) * rowH };
+  }, [canWindow, sorted, rowH, view]);
+
   const keys = useMemo(() => {
     const seen = new Map<string, number>();
     return sorted.map((r) => {
@@ -610,8 +686,13 @@ export function SortableTable<T>({
           )}
         </div>
       )}
-    <div className="table-wrap" style={{ maxHeight }}>
+    <div className="table-wrap" ref={scrollRef} style={{ maxHeight }}>
       <table className={`tbl${wrap ? ' is-wrap' : ''}${measuring ? ' is-measuring' : ''}`}>
+        <caption className="sr-only">
+          {sorted.length} rows, {columns.length} columns.
+          {sort ? ` Sorted by ${columns.find((c) => c.key === sort.key)?.label ?? sort.key}, ${sort.dir === 'asc' ? 'ascending' : 'descending'}.` : ''}
+          {' '}Press Enter on a column heading to sort by it.
+        </caption>
         <thead>
           <tr ref={headRef}>
             {columns.map((c) => (
@@ -619,7 +700,20 @@ export function SortableTable<T>({
                 key={c.key}
                 className={`cursor-pointer select-none${c.num ? ' num' : ''}`}
                 style={cellStyle(c)}
+                /*
+                 * Sortable by keyboard as well as by mouse. A heading that sorts is a
+                 * control, and it was reachable by nothing but a click — so a column
+                 * could not be sorted at all without a pointing device, and a screen
+                 * reader was told nothing about which column the table was sorted by.
+                 */
+                aria-sort={sort?.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                tabIndex={0}
                 onClick={() => toggle(c.key)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                  e.preventDefault();
+                  toggle(c.key);
+                }}
               >
                 {/*
                   * The caret is always rendered, in a fixed-width slot, so clicking a
@@ -627,14 +721,17 @@ export function SortableTable<T>({
                   * column it goes first, which leaves the label's last character sitting
                   * exactly over the figures underneath it.
                   */}
-                {c.num && <span className="th-sort">{sort?.key === c.key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>}
+                {c.num && <span className="th-sort" aria-hidden="true">{sort?.key === c.key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>}
                 <Term text={c.label} hint={c.hint} />
-                {!c.num && <span className="th-sort">{sort?.key === c.key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>}
+                {!c.num && <span className="th-sort" aria-hidden="true">{sort?.key === c.key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>}
                 {tableId && (
                   /* The grip lives in the heading, so it has to swallow the click
                      that would otherwise sort the column out from under the drag. */
                   <span
                     className="col-grip"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label={`Resize ${c.label}`}
                     title="Drag to set this column's width. Double-click to size it automatically again."
                     onPointerDown={(e) => startResize(e, c.key)}
                     onClick={(e) => e.stopPropagation()}
@@ -648,9 +745,14 @@ export function SortableTable<T>({
             ))}
           </tr>
         </thead>
-        <tbody>
-          {sorted.map((r, i) => (
-            <tr key={keys[i]} className={rowClass?.(r)}>
+        <tbody ref={bodyRef}>
+          {windowed.above > 0 && (
+            <tr aria-hidden="true" style={{ height: windowed.above }}>
+              <td colSpan={columns.length} style={{ padding: 0, border: 0 }} />
+            </tr>
+          )}
+          {windowed.rows.map((r, i) => (
+            <tr key={keys[windowed.from + i]} data-row className={rowClass?.(r)}>
               {columns.map((c) => (
                 <td
                   key={c.key}
@@ -662,6 +764,11 @@ export function SortableTable<T>({
               ))}
             </tr>
           ))}
+          {windowed.below > 0 && (
+            <tr aria-hidden="true" style={{ height: windowed.below }}>
+              <td colSpan={columns.length} style={{ padding: 0, border: 0 }} />
+            </tr>
+          )}
           {sorted.length === 0 && (
             <tr>
               <td colSpan={columns.length} className="py-8 text-center text-[var(--text-subtle)]">
