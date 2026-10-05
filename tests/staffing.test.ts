@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { BudgetRow } from '../src/engine/types';
-import { peopleNeeded, peopleOn, plannedRemaining, simulate, staffingTasks, type StaffScenario, type StaffingOptions } from '../src/engine/staffing';
+import { FULL_SCOPE, groupByType, outOfScope, peopleNeeded, peopleOn, plannedRemaining, simulate, staffingTasks, type StaffScenario, type StaffingOptions } from '../src/engine/staffing';
 
 const HPM = (40 * 52) / 12; // 173.33 h a month = 40 h a week
 const opts: StaffingOptions = { group: 'IXL', dataDate: '2026-10-01', efficiency: 1, hoursPerPersonPerMonth: HPM, utilisation: 1 };
@@ -17,8 +17,13 @@ function row(id: string, hours: number, start: string, finish: string, extra: Pa
   return {
     activityId: id,
     activityName: id,
+    matchKey: 'Test',
+    activityType: 'Test',
+    phase: 'P1',
     phaseName: 'Phase 1',
+    workType: 'TC',
     location: 'X',
+    disciplines: ['IXL'],
     status: 'IN BUDGET',
     actualStart: null,
     actualFinish: null,
@@ -177,5 +182,70 @@ describe('what the schedule expects to be left', () => {
     expect(now.remaining).toBe(100);
     expect(mid.remaining).toBe(50);
     expect(end.remaining).toBe(0);
+  });
+});
+
+describe('what is in the analysis', () => {
+  const ats = (id: string, loc = 'X') =>
+    row(id, 100, '2026-10-01', '2026-12-01', {
+      location: loc,
+      matchKey: 'ATS Test',
+      disciplines: ['ATS'],
+      subsystemHours: { ATS: 60, IXL: 40 },
+      subsystemEarned: {},
+      resources: [
+        { code: 'ATS', label: 'ATS', count: 3, shiftHours: 8, budgetHours: 60, earnedHours: 0 },
+        { code: 'IXL', label: 'IXL', count: 2, shiftHours: 8, budgetHours: 40, earnedHours: 0 },
+      ],
+    });
+
+  it('calls an activity this group’s own when its Subsystem names it, and support when it names another', () => {
+    const ts = staffingTasks([row('MINE', 80, '2026-10-01', '2026-10-14'), ats('THEIRS')], opts);
+    expect(ts.map((t) => [t.activityId, t.role, t.remainingBudget])).toEqual([
+      ['MINE', 'own', 80],
+      ['THEIRS', 'support', 40],
+    ]);
+  });
+
+  it('treats an activity with no Subsystem as own when this group is its whole crew', () => {
+    const [t] = staffingTasks([row('A', 80, '2026-10-01', '2026-10-14', { disciplines: [] })], opts);
+    expect(t.role).toBe('own');
+  });
+
+  it('leaves support out when asked, and filters by phase, work type, location and type', () => {
+    const ts = staffingTasks([row('MINE', 80, '2026-10-01', '2026-10-14'), ats('THEIRS')], opts);
+    const [mine, theirs] = ts;
+    expect(outOfScope(theirs, { ...FULL_SCOPE, includeSupport: false })).toBe('support');
+    expect(outOfScope(mine, { ...FULL_SCOPE, includeSupport: false })).toBeNull();
+    expect(outOfScope(mine, { ...FULL_SCOPE, workType: 'AC' })).toBe('work type');
+    expect(outOfScope(mine, { ...FULL_SCOPE, phase: 'P2' })).toBe('phase');
+    expect(outOfScope(mine, { ...FULL_SCOPE, location: 'Y' })).toBe('location');
+    expect(outOfScope(mine, { ...FULL_SCOPE, excludedTypes: ['test'] })).toBe('type');
+  });
+
+  it('keeps only work due by the end date, and backlog always', () => {
+    const ts = staffingTasks(
+      [row('EARLY', 40, '2026-10-01', '2026-10-20'), row('LATE', 40, '2027-03-01', '2027-04-01'), row('OLD', 40, '2026-08-01', '2026-09-01')],
+      opts,
+    );
+    const scope = { ...FULL_SCOPE, finishBy: '2026-12-31' };
+    expect(ts.filter((t) => !outOfScope(t, scope)).map((t) => t.activityId).sort()).toEqual(['EARLY', 'OLD']);
+  });
+
+  it('judges slip against the end date when one is set', () => {
+    const tasks = staffingTasks([row('A', 80, '2026-10-01', '2026-10-14')], opts);
+    const r = simulate(tasks, team(1), { ...opts, finishBy: '2026-10-31' });
+    expect(r.plannedFinish).toBe('2026-10-31');
+    expect(r.slipDays).toBe(-17);
+  });
+
+  it('groups an activity type repeated across locations into one line', () => {
+    const groups = groupByType(staffingTasks([ats('T1', 'A10'), ats('T2', 'B20'), row('MINE', 80, '2026-10-01', '2026-10-14')], opts));
+    const g = groups.find((x) => x.activityType === 'ATS Test')!;
+    expect(g.tasks).toHaveLength(2);
+    expect(g.locations).toEqual(['A10', 'B20']);
+    expect(g.effortHours).toBe(80);
+    expect(g.role).toBe('support');
+    expect(g.owner).toBe('ATS');
   });
 });

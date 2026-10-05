@@ -183,6 +183,8 @@ export const GLOSSARY: Record<string, string> = {
   'Budget left h': 'This group\u2019s share of the budget not yet earned on the activity.',
   'Effort h': 'Budget left divided by the efficiency factor: the hours the work will actually take.',
   'Forecast finish': 'The day the last hour is worked in the scenario chosen, given its people, the backlog ahead of it and its own crew size.',
+  Role: 'OWN: the activity belongs to this group (its Activity Library Subsystem names it). SUPPORT: another group\u2019s activity that has this group on its crew.',
+  In: 'Whether this activity type is in the staffing analysis. Untick to take every activity of the type out.',
   Slip: 'Forecast finish against planned finish. Late is behind the schedule.',
   Groups: 'How many resource groups earned or spent anything inside that fiscal year.',
   'Share of year': 'This group as a share of everything earned in that fiscal year.',

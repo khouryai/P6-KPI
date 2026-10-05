@@ -53,13 +53,49 @@ export type StaffingOptions = {
   hoursPerPersonPerMonth: number;
   /** Share of a person's hours that reaches this project, 0 to 1. */
   utilisation: number;
+  /**
+   * The date the analysis is measured against, when it is not the whole schedule.
+   * Slip, "on track" and the people needed are all judged against it.
+   */
+  finishBy?: string | null;
 };
+
+/**
+ * Which of the group's work is in the analysis.
+ *
+ * A group's work is of two kinds. Its OWN activities are the ones its Activity
+ * Library Subsystem names — IXL's test activities. SUPPORT is the hours it puts
+ * into another group's activities because it is on their crew — the IXL engineer
+ * on an ATS test. Both are real demand on the same people, but whether the second
+ * belongs in "how long will IXL's work take" is a choice, so it is a switch.
+ */
+export type StaffingScope = {
+  includeSupport: boolean;
+  /** Raw phase code ('' for all). */
+  phase: string;
+  workType: string;
+  location: string;
+  /** Activity types taken out by hand. */
+  excludedTypes: string[];
+  /** Only work planned to finish on or before this date. Backlog is always due. */
+  finishBy: string | null;
+};
+
+export const FULL_SCOPE: StaffingScope = { includeSupport: true, phase: '', workType: '', location: '', excludedTypes: [], finishBy: null };
 
 export type StaffingTask = {
   activityId: string;
   activityName: string;
+  /** The activity type, as the Activity Library keys it. Repeats across locations. */
+  activityType: string;
+  phase: string;
   phaseName: string;
+  workType: string;
   location: string;
+  /** The Subsystem the Activity Library gives the type: whose activity it is. */
+  owner: string;
+  /** OWN: this group's activity. SUPPORT: another group's, with this group on its crew. */
+  role: 'own' | 'support';
   plannedStart: string | null;
   plannedFinish: string | null;
   /** The group's share of the remaining budget. */
@@ -151,11 +187,23 @@ export function staffingTasks(rows: BudgetRow[], opts: StaffingOptions): Staffin
     const windowDays = plannedFinish && windowFrom && plannedFinish >= windowFrom ? daysBetween(windowFrom, plannedFinish) + 1 : 0;
     const plannedPace = windowDays > 0 ? remainingBudget / windowDays : 0;
 
+    // Owned when the Subsystem names this group, or names nobody and this group is
+    // the whole crew. Anything else has this group on it to help somebody else.
+    const crewCodes = Object.entries(r.subsystemHours).filter(([c, h]) => c && h > EPS).map(([c]) => normKey(c));
+    const own = r.disciplines.length
+      ? r.disciplines.some((d) => normKey(d) === want)
+      : crewCodes.every((c) => c === want);
+
     out.push({
       activityId: r.activityId,
       activityName: r.activityName,
+      activityType: r.matchKey || r.activityType,
+      phase: r.phase,
       phaseName: r.phaseName,
+      workType: r.workType,
       location: r.location,
+      owner: r.disciplines.join(', '),
+      role: own ? 'own' : 'support',
       plannedStart,
       plannedFinish,
       remainingBudget,
@@ -227,7 +275,7 @@ export function simulate(tasks: StaffingTask[], scenario: StaffScenario, opts: S
     slipDays: done[i] && t.plannedFinish ? daysBetween(t.plannedFinish, done[i]!) : null,
   }));
   const finish = open === 0 ? (done.reduce<string | null>((m, x) => (x && (!m || x > m) ? x : m), null) ?? opts.dataDate) : null;
-  const plannedFinish = tasks.reduce<string | null>((m, t) => (t.plannedFinish && (!m || t.plannedFinish > m) ? t.plannedFinish : m), null);
+  const plannedFinish = targetDate(tasks, opts);
 
   return {
     scenario,
@@ -239,6 +287,65 @@ export function simulate(tasks: StaffingTask[], scenario: StaffScenario, opts: S
     series,
     lateTasks: forecasts.filter((t) => t.slipDays === null ? t.forecastFinish === null : t.slipDays > 0).length,
   };
+}
+
+/** The date to beat: the one the user set, or else the latest planned finish. */
+export function targetDate(tasks: StaffingTask[], opts: Pick<StaffingOptions, 'finishBy'>): string | null {
+  if (opts.finishBy && isValidISO(opts.finishBy)) return opts.finishBy;
+  return tasks.reduce<string | null>((m, t) => (t.plannedFinish && (!m || t.plannedFinish > m) ? t.plannedFinish : m), null);
+}
+
+/** Why a task is left out of the analysis, or null when it is in. */
+export function outOfScope(t: StaffingTask, scope: StaffingScope): string | null {
+  if (t.role === 'support' && !scope.includeSupport) return 'support';
+  if (scope.phase && t.phase !== scope.phase) return 'phase';
+  if (scope.workType && t.workType !== scope.workType) return 'work type';
+  if (scope.location && t.location !== scope.location) return 'location';
+  if (scope.excludedTypes.some((x) => normKey(x) === normKey(t.activityType))) return 'type';
+  if (scope.finishBy && isValidISO(scope.finishBy) && !t.backlog && (!t.plannedFinish || t.plannedFinish > scope.finishBy)) return 'after end date';
+  return null;
+}
+
+/** One activity type and every location it repeats at. */
+export type TypeGroup = {
+  activityType: string;
+  /** 'mixed' when some of its activities are this group's and some another's. */
+  role: 'own' | 'support' | 'mixed';
+  owner: string;
+  tasks: StaffingTask[];
+  locations: string[];
+  effortHours: number;
+  backlog: number;
+  firstStart: string | null;
+  lastFinish: string | null;
+};
+
+export function groupByType(tasks: StaffingTask[]): TypeGroup[] {
+  const map = new Map<string, StaffingTask[]>();
+  for (const t of tasks) {
+    const k = normKey(t.activityType);
+    const list = map.get(k);
+    if (list) list.push(t);
+    else map.set(k, [t]);
+  }
+  return [...map.values()]
+    .map((list) => {
+      const roles = new Set(list.map((t) => t.role));
+      const starts = list.map((t) => t.plannedStart).filter((x): x is string => !!x).sort();
+      const finishes = list.map((t) => t.plannedFinish).filter((x): x is string => !!x).sort();
+      return {
+        activityType: list[0].activityType,
+        role: roles.size > 1 ? 'mixed' : list[0].role,
+        owner: [...new Set(list.map((t) => t.owner).filter(Boolean))].join(' / '),
+        tasks: list,
+        locations: [...new Set(list.map((t) => t.location).filter(Boolean))].sort(),
+        effortHours: list.reduce((s, t) => s + t.effortHours, 0),
+        backlog: list.filter((t) => t.backlog).length,
+        firstStart: starts[0] ?? null,
+        lastFinish: finishes[finishes.length - 1] ?? null,
+      } as TypeGroup;
+    })
+    .sort((a, b) => b.effortHours - a.effortHours || a.activityType.localeCompare(b.activityType));
 }
 
 /**

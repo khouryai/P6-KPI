@@ -4,6 +4,10 @@ import { useApp } from '../state';
 import { Page, Panel, Notice, SortableTable, CellInput, Badge, type Column, type HeroStat } from '../components/ui';
 import { DEFAULT_CAPACITY } from '../../engine/capacity';
 import {
+  FULL_SCOPE,
+  groupByType,
+  outOfScope,
+  targetDate,
   peopleNeeded,
   plannedRemaining,
   simulate,
@@ -13,7 +17,10 @@ import {
   type StaffChange,
   type StaffScenario,
   type StaffingOptions,
+  type StaffingScope,
+  type StaffingTask,
   type TaskForecast,
+  type TypeGroup,
 } from '../../engine/staffing';
 import { addDaysISO, isValidISO } from '../../engine/dates';
 import { normKey } from '../../engine/keys';
@@ -46,7 +53,11 @@ type Saved = {
   utilisation: number | null;
   scenarios: StaffScenario[];
   selected: string;
+  scope: StaffingScope;
 };
+
+/** Own activities only, until somebody asks for the support too. */
+const DEFAULT_SCOPE: StaffingScope = { ...FULL_SCOPE, includeSupport: false };
 
 const uid = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -70,6 +81,7 @@ function defaults(group: string, dataDate: string): Saved {
       { id: 'reduced-support', name: 'Reduced + later support', people: 4, changes: [{ id: 'c1', from: later, delta: 2, note: 'Additional support' }] },
     ],
     selected: 'current',
+    scope: DEFAULT_SCOPE,
   };
 }
 
@@ -78,7 +90,8 @@ function read(): Saved | null {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const v = JSON.parse(raw) as Saved;
-    return Array.isArray(v.scenarios) ? v : null;
+    // Saved before the scope existed: everything else stands, the scope starts fresh.
+    return Array.isArray(v.scenarios) ? { ...v, scope: { ...DEFAULT_SCOPE, ...(v.scope ?? {}) } } : null;
   } catch {
     return null;
   }
@@ -151,6 +164,9 @@ export function Staffing() {
   });
   useEffect(() => write(saved), [saved]);
   const patch = (p: Partial<Saved>) => setSaved((s) => ({ ...s, ...p }));
+  const setScope = (p: Partial<StaffingScope>) => setSaved((s) => ({ ...s, scope: { ...s.scope, ...p } }));
+  const scope = saved.scope;
+  const [openType, setOpenType] = useState<string | null>(null);
   const editScenario = (id: string, p: Partial<StaffScenario>) =>
     setSaved((s) => ({ ...s, scenarios: s.scenarios.map((x) => (x.id === id ? { ...x, ...p } : x)) }));
   const editChange = (sid: string, cid: string, p: Partial<StaffChange>) =>
@@ -164,15 +180,48 @@ export function Staffing() {
   const achieved = model.burn.bySubsystem.find((r) => normKey(r.code) === normKey(saved.group))?.factor ?? null;
 
   const opts: StaffingOptions | null = dataDate
-    ? { group: saved.group, dataDate, efficiency: saved.efficiency > 0 ? saved.efficiency : 1, hoursPerPersonPerMonth: hpm, utilisation: util }
+    ? {
+        group: saved.group,
+        dataDate,
+        efficiency: saved.efficiency > 0 ? saved.efficiency : 1,
+        hoursPerPersonPerMonth: hpm,
+        utilisation: util,
+        finishBy: scope.finishBy && isValidISO(scope.finishBy) ? scope.finishBy : null,
+      }
     : null;
 
-  const tasks = useMemo(() => (opts ? staffingTasks(model.rows, opts) : []), [model.rows, opts?.group, opts?.dataDate, opts?.efficiency]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Everything the group has left, then the part of it the scope keeps.
+  const allTasks = useMemo(() => (opts ? staffingTasks(model.rows, opts) : []), [model.rows, opts?.group, opts?.dataDate, opts?.efficiency]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tasks = useMemo(() => allTasks.filter((t) => !outOfScope(t, scope)), [allTasks, scope]);
+  const leftOut = useMemo(() => {
+    const by = new Map<string, { n: number; h: number }>();
+    for (const t of allTasks) {
+      const why = outOfScope(t, scope);
+      if (!why) continue;
+      const c = by.get(why) ?? { n: 0, h: 0 };
+      c.n += 1;
+      c.h += t.effortHours;
+      by.set(why, c);
+    }
+    return by;
+  }, [allTasks, scope]);
+  // The type list shows every type the other filters keep, ticked or not, so a type
+  // taken out can be put back.
+  const typeGroups = useMemo(
+    () => groupByType(allTasks.filter((t) => !outOfScope(t, { ...scope, excludedTypes: [] }))),
+    [allTasks, scope],
+  );
+  const support = allTasks.filter((t) => t.role === 'support');
+  const options = useMemo(() => {
+    const uniq = (f: (t: StaffingTask) => string) => [...new Set(allTasks.map(f).filter(Boolean))].sort();
+    const phaseNames = new Map(allTasks.map((t) => [t.phase, t.phaseName]));
+    return { phases: uniq((t) => t.phase).map((p) => [p, phaseNames.get(p) ?? p] as const), workTypes: uniq((t) => t.workType), locations: uniq((t) => t.location) };
+  }, [allTasks]);
   const results: ScenarioResult[] = useMemo(
     () => (opts ? saved.scenarios.map((s) => simulate(tasks, s, opts)) : []),
-    [tasks, saved.scenarios, hpm, util], // eslint-disable-line react-hooks/exhaustive-deps
+    [tasks, saved.scenarios, hpm, util, opts?.finishBy], // eslint-disable-line react-hooks/exhaustive-deps
   );
-  const plannedFinish = results[0]?.plannedFinish ?? tasks.reduce<string | null>((m, t) => (t.plannedFinish && (!m || t.plannedFinish > m) ? t.plannedFinish : m), null);
+  const plannedFinish = targetDate(tasks, opts ?? {});
   const needed = useMemo(
     () => (opts ? peopleNeeded(tasks, opts, plannedFinish) : null),
     [tasks, plannedFinish, hpm, util], // eslint-disable-line react-hooks/exhaustive-deps
@@ -214,7 +263,7 @@ export function Staffing() {
   const heroStats: HeroStat[] = [
     { label: 'Backlog', value: `${fmtHours(backlogHours)} h`, tone: backlogHours > 0.5 ? 'amber' : 'good' },
     { label: 'Work left', value: `${fmtHours(totalHours)} h`, tone: 'muted' },
-    { label: 'Planned finish', value: fmtDate(plannedFinish), tone: 'muted' },
+    { label: scope.finishBy ? 'End date' : 'Planned finish', value: fmtDate(plannedFinish), tone: 'muted' },
     {
       label: 'People to hold it',
       value: needed === null ? '—' : needed,
@@ -225,6 +274,13 @@ export function Staffing() {
   const taskColumns: Column<TaskForecast>[] = [
     { key: 'id', label: 'Activity ID', locked: true, value: (t) => t.activityId, render: (t) => <span className="mono">{t.activityId}</span> },
     { key: 'name', label: 'Activity', value: (t) => t.activityName },
+    { key: 'type', label: 'Type', value: (t) => t.activityType, optional: true },
+    {
+      key: 'role',
+      label: 'Role',
+      value: (t) => (t.role === 'own' ? 'OWN' : 'SUPPORT'),
+      render: (t) => <Badge tone={t.role === 'own' ? 'info' : 'purple'}>{t.role === 'own' ? 'OWN' : `SUPPORT ${t.owner}`}</Badge>,
+    },
     { key: 'phase', label: 'Phase', value: (t) => t.phaseName, optional: true },
     { key: 'loc', label: 'Location', value: (t) => t.location, optional: true },
     {
@@ -246,6 +302,51 @@ export function Staffing() {
       render: (t) => (t.forecastFinish ? <b>{fmtDate(t.forecastFinish)}</b> : <span className="tone-bad">not reached</span>),
     },
     { key: 'slip', label: 'Slip', value: (t) => t.slipDays ?? null, num: true, render: (t) => <Slip days={t.slipDays} /> },
+  ];
+
+  const isExcluded = (g: TypeGroup) => scope.excludedTypes.some((x) => normKey(x) === normKey(g.activityType));
+  const toggleType = (g: TypeGroup) =>
+    setScope({
+      excludedTypes: isExcluded(g) ? scope.excludedTypes.filter((x) => normKey(x) !== normKey(g.activityType)) : [...scope.excludedTypes, g.activityType],
+    });
+  const openGroup = openType === null ? null : (typeGroups.find((g) => g.activityType === openType) ?? null);
+
+  const typeColumns: Column<TypeGroup>[] = [
+    {
+      key: 'in',
+      label: 'In',
+      value: (g) => (isExcluded(g) ? 0 : 1),
+      hint: 'Untick to take every activity of this type out of the analysis.',
+      render: (g) => <input type="checkbox" checked={!isExcluded(g)} onChange={() => toggleType(g)} aria-label={`Include ${g.activityType}`} />,
+    },
+    {
+      key: 'type',
+      label: 'Type',
+      locked: true,
+      value: (g) => g.activityType,
+      render: (g) => (
+        <button className="btn-link text-left" onClick={() => setOpenType(openType === g.activityType ? null : g.activityType)}>
+          {g.activityType}
+        </button>
+      ),
+    },
+    {
+      key: 'role',
+      label: 'Role',
+      value: (g) => g.role.toUpperCase(),
+      render: (g) => <Badge tone={g.role === 'own' ? 'info' : g.role === 'support' ? 'purple' : 'muted'}>{g.role === 'support' ? `SUPPORT ${g.owner}` : g.role.toUpperCase()}</Badge>,
+    },
+    { key: 'count', label: 'Activities', value: (g) => g.tasks.length, num: true },
+    {
+      key: 'locs',
+      label: 'Locations',
+      value: (g) => g.locations.join(', '),
+      render: (g) => <span className="mono text-[11.5px]">{g.locations.length > 6 ? `${g.locations.slice(0, 6).join(', ')} +${g.locations.length - 6}` : g.locations.join(', ')}</span>,
+    },
+    { key: 'backlog', label: 'Backlog', value: (g) => g.backlog, num: true, render: (g) => (g.backlog ? <span className="tone-warn font-semibold">{g.backlog}</span> : '—') },
+    { key: 'effort', label: 'Effort h', value: (g) => g.effortHours, num: true, render: (g) => fmtHours(g.effortHours) },
+    { key: 'first', label: 'Planned start', value: (g) => g.firstStart ?? '', render: (g) => fmtDate(g.firstStart) },
+    { key: 'last', label: 'Planned finish', value: (g) => g.lastFinish ?? '', render: (g) => fmtDate(g.lastFinish) },
   ];
 
   return (
@@ -310,11 +411,91 @@ export function Staffing() {
           <Notice tone="warn">No data date is set, so there is no “today” to schedule from. Set it under <a className="btn-link" href={href('settings')}>Settings</a>.</Notice>
         </div>
       )}
-      {dataDate && tasks.length === 0 && (
+      {dataDate && allTasks.length === 0 && (
         <div className="mb-4">
           <Notice tone="info">
             {saved.group} has no budgeted work left on the current schedule. Pick another {TERMS.subsystemLower}, or check the crews on the Activity Library name it.
           </Notice>
+        </div>
+      )}
+
+      {dataDate && allTasks.length > 0 && (
+        <Panel
+          title="What is analysed"
+          meta={
+            <>
+              <b>{tasks.length}</b> of {allTasks.length} activities with {saved.group} work left, {fmtHours(totalHours)} of {fmtHours(allTasks.reduce((s, t) => s + t.effortHours, 0))} h
+              {leftOut.size > 0 && <> · left out: {[...leftOut.entries()].map(([why, c]) => `${c.n} by ${why}`).join(', ')}</>}
+            </>
+          }
+          className="mb-3"
+        >
+          <div className="flex flex-wrap items-end gap-x-5 gap-y-3 text-[12px]">
+            <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Work</div>
+              <span className="seg">
+                <button className={`seg-btn${!scope.includeSupport ? ' is-on' : ''}`} onClick={() => setScope({ includeSupport: false })}>
+                  {saved.group} activities only
+                </button>
+                <button
+                  className={`seg-btn${scope.includeSupport ? ' is-on' : ''}`}
+                  onClick={() => setScope({ includeSupport: true })}
+                  title={`Hours ${saved.group} puts into other groups' activities because it is on their crew.`}
+                >
+                  + {saved.group} support to others ({support.length}, {fmtHours(support.reduce((s, t) => s + t.effortHours, 0))} h)
+                </button>
+              </span>
+            </div>
+            <label>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Phase</div>
+              <select className="input" value={scope.phase} onChange={(e) => setScope({ phase: e.target.value })}>
+                <option value="">All</option>
+                {options.phases.map(([code, name]) => (
+                  <option key={code} value={code}>{name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Work type</div>
+              <select className="input" value={scope.workType} onChange={(e) => setScope({ workType: e.target.value })}>
+                <option value="">All</option>
+                {options.workTypes.map((w) => (
+                  <option key={w} value={w}>{w}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Location</div>
+              <select className="input" value={scope.location} onChange={(e) => setScope({ location: e.target.value })}>
+                <option value="">All</option>
+                {options.locations.map((l) => (
+                  <option key={l} value={l}>{l}</option>
+                ))}
+              </select>
+            </label>
+            <label title="Only work the current schedule plans to finish by this date. Backlog is always in, because it is already due. Slip and the people needed are judged against this date.">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Planned to finish by</div>
+              <span className="flex items-center gap-1.5">
+                <input className="input" type="date" value={scope.finishBy ?? ''} onChange={(e) => setScope({ finishBy: e.target.value || null })} />
+                {scope.finishBy ? (
+                  <button className="btn-link text-[11px]" onClick={() => setScope({ finishBy: null })}>whole schedule</button>
+                ) : (
+                  <span className="text-[11px] text-[var(--text-subtle)]">whole schedule</span>
+                )}
+              </span>
+            </label>
+            {(scope.phase || scope.workType || scope.location || scope.finishBy || scope.excludedTypes.length > 0) && (
+              <button className="btn btn-mini" onClick={() => setScope({ phase: '', workType: '', location: '', finishBy: null, excludedTypes: [] })}>
+                Clear filters
+              </button>
+            )}
+          </div>
+        </Panel>
+      )}
+
+      {dataDate && allTasks.length > 0 && tasks.length === 0 && (
+        <div className="mb-4">
+          <Notice tone="info">Nothing is left in the analysis. Widen the filters above, or tick an activity type back in below.</Notice>
         </div>
       )}
 
@@ -447,6 +628,40 @@ export function Staffing() {
               </ResponsiveContainer>
             </div>
           </Panel>
+
+          {selected && (
+            <Panel
+              title="Activities analysed, by type"
+              meta={`Each type once, however many locations it repeats at. Untick a type to take it out. Click a type to list its activities under “${selected.scenario.name}”.`}
+              className="mb-3"
+            >
+              <SortableTable
+                tableId="staffing-types"
+                exportName={`Staffing ${saved.group} types`}
+                rows={typeGroups}
+                columns={typeColumns}
+                rowKey={(g) => g.activityType}
+                defaultSort={{ key: 'effort', dir: 'desc' }}
+                maxHeight="360px"
+                rowClass={(g) => (isExcluded(g) ? 'row-muted' : openType === g.activityType ? 'row-warn' : '')}
+              />
+              {openGroup && (
+                <div className="mt-3">
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    {openGroup.activityType} — {openGroup.tasks.length} {openGroup.tasks.length === 1 ? 'activity' : 'activities'}
+                  </div>
+                  <SortableTable
+                    tableId="staffing-type-detail"
+                    rows={selected.tasks.filter((t) => t.activityType === openGroup.activityType).length ? selected.tasks.filter((t) => t.activityType === openGroup.activityType) : openGroup.tasks.map((t) => ({ ...t, forecastFinish: null, slipDays: null }))}
+                    columns={taskColumns}
+                    rowKey={(t) => t.activityId}
+                    defaultSort={{ key: 'pfinish', dir: 'asc' }}
+                    maxHeight="300px"
+                  />
+                </div>
+              )}
+            </Panel>
+          )}
 
           {selected && (
             <Panel
