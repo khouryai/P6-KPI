@@ -4,8 +4,10 @@ import { Page, SortableTable, CellInput, Select, Badge, Notice, Panel, statusTon
 import type { ActivityOverride, ActivityVisibility, BudgetRow } from '../../engine/types';
 import { fmtHours, fmtPct, fmtDate, num } from '../format';
 import { normKey } from '../../engine/keys';
+import { isValidISO } from '../../engine/dates';
 import { href, type Route } from '../router';
 import { TERMS } from '../../engine/vocab';
+import { normalisePhaseValue, phaseLabel, phaseOf } from '../../engine/parse';
 
 const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> = {
   review: { label: 'Needing REVIEW', test: (r) => r.status === 'REVIEW' },
@@ -15,7 +17,12 @@ const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> 
   pctp6: { label: 'Percent complete from P6 duration', test: (r) => r.pctSource === 'P6' && r.status === 'IN BUDGET' },
   shifts: { label: 'RATE type missing shifts', test: (r) => r.needsShifts },
   override: { label: 'Has an hours override', test: (r) => r.overrideHours !== null },
-  edited: { label: 'Carries an edit of yours', test: (r) => r.renamed || r.visibility !== null || r.overrideHours !== null },
+  edited: {
+    label: 'Carries an edit of yours',
+    test: (r) => r.renamed || r.visibility !== null || r.overrideHours !== null || r.phaseEdited || r.locationEdited || r.datesEdited,
+  },
+  dates: { label: 'Dates changed — for the scheduler', test: (r) => r.datesEdited },
+  moved: { label: 'Moved to another phase or location', test: (r) => r.phaseEdited || r.locationEdited },
   forcedzero: { label: 'Forced in but carrying no hours', test: (r) => r.visibility === 'INCLUDED' && r.status === 'IN BUDGET' && r.budgetHours === 0 },
 };
 
@@ -91,6 +98,11 @@ export function BudgetMaster({ route }: { route: Route }) {
         next.nameOverride === undefined &&
         next.discipline === undefined &&
         next.visibility === undefined &&
+        next.phase === undefined &&
+        next.location === undefined &&
+        next.startDate === undefined &&
+        next.finishDate === undefined &&
+        next.dateNote === undefined &&
         next.note === undefined;
       if (empty) return i >= 0 ? ovs.filter((_, j) => j !== i) : ovs;
       return i >= 0 ? ovs.map((o, j) => (j === i ? next : o)) : [...ovs, next];
@@ -98,6 +110,13 @@ export function BudgetMaster({ route }: { route: Route }) {
   };
 
   const ovOf = (id: string) => state.data.overrides.find((o) => normKey(o.activityId) === normKey(id));
+
+  /** A date the same as P6's, or blank, is no override at all. */
+  const setDate = (r: BudgetRow, which: 'start' | 'finish', v: string) => {
+    const p6 = which === 'start' ? r.activity.startDate : r.activity.finishDate;
+    const next = !v || v === p6 ? undefined : v;
+    setOv(r.activityId, which === 'start' ? { startDate: next } : { finishDate: next });
+  };
 
   /**
    * Forcing an activity into the budget is a promise the Activity Library has to be
@@ -183,6 +202,11 @@ export function BudgetMaster({ route }: { route: Route }) {
           merged.nameOverride === undefined &&
           merged.discipline === undefined &&
           merged.visibility === undefined &&
+          merged.phase === undefined &&
+          merged.location === undefined &&
+          merged.startDate === undefined &&
+          merged.finishDate === undefined &&
+          merged.dateNote === undefined &&
           merged.note === undefined;
         if (empty) {
           if (i >= 0) next.splice(i, 1);
@@ -204,6 +228,8 @@ export function BudgetMaster({ route }: { route: Route }) {
   const [bulkDiscipline, setBulkDiscipline] = useState('');
   const [bulkHours, setBulkHours] = useState('');
   const [bulkNote, setBulkNote] = useState('');
+  const [bulkPhase, setBulkPhase] = useState('');
+  const [bulkLoc, setBulkLoc] = useState('');
 
   const dropStale = () => {
     const ids = new Set(model.staleOverrides.map((o) => normKey(o.activityId)));
@@ -282,8 +308,46 @@ export function BudgetMaster({ route }: { route: Route }) {
         />
       ),
     },
-    { key: 'phase', label: 'Phase', value: (r) => r.phaseName },
-    { key: 'loc', label: 'Loc', value: (r) => r.location },
+    {
+      key: 'phase',
+      label: 'Phase',
+      value: (r) => r.phaseName,
+      hint: 'Editable. Moves this one activity to another phase — type 3, P3 or Phase 3. Clear it to go back to what the Activity ID (or an Activity ID Rule) says. P6 is never changed.',
+      render: (r) => (
+        <span className="flex items-center gap-1">
+          <CellInput
+            className="cell-input w-20"
+            value={r.phaseEdited ? r.phase : ''}
+            placeholder={r.phaseName}
+            list="budget-phases"
+            title={r.phaseEdited ? `Moved here by hand. Clear to go back to ${phaseLabel(phaseOf(r.activity.activityId))}.` : 'Type a phase to move this activity. Blank follows the Activity ID.'}
+            onCommit={(v) => setOv(r.activityId, { phase: v.trim() || undefined })}
+          />
+          {r.phaseEdited && <Badge tone="purple">moved</Badge>}
+          {r.phaseFromRule && <Badge tone="muted">rule</Badge>}
+        </span>
+      ),
+    },
+    {
+      key: 'loc',
+      label: 'Loc',
+      value: (r) => r.location,
+      hint: 'Editable. Moves this one activity to another location, and its complexity factor with it. Clear it to go back to what the Activity ID (or an Activity ID Rule) says. P6 is never changed.',
+      render: (r) => (
+        <span className="flex items-center gap-1">
+          <CellInput
+            className="cell-input w-20"
+            value={r.locationEdited ? r.location : ''}
+            placeholder={r.location}
+            list="budget-locations"
+            title={r.locationEdited ? `Moved here by hand. Clear to go back to ${r.activity.location}.` : 'Type a location to move this activity. Blank follows the Activity ID.'}
+            onCommit={(v) => setOv(r.activityId, { location: v.trim() || undefined })}
+          />
+          {r.locationEdited && <Badge tone="purple">moved</Badge>}
+          {r.locationFromRule && <Badge tone="muted">rule</Badge>}
+        </span>
+      ),
+    },
     {
       key: 'key',
       label: 'Match key',
@@ -402,8 +466,51 @@ export function BudgetMaster({ route }: { route: Route }) {
     { key: 'bls', label: 'BL start', value: (r) => r.baselineStart, render: (r) => fmtDate(r.baselineStart) },
     { key: 'blf', label: 'BL finish', value: (r) => r.baselineFinish, render: (r) => fmtDate(r.baselineFinish) },
     { key: 'blsrc', label: 'BL src', value: (r) => r.baselineSource, render: (r) => <Badge tone={statusTone(r.baselineSource)}>{r.baselineSource}</Badge> },
-    { key: 'cs', label: 'Cur start', value: (r) => r.currentStart, render: (r) => <>{fmtDate(r.currentStart)}{r.activity.actualStart ? ' A' : ''}{!r.currentStart && r.activity.startRaw ? <span className="text-[var(--bad)]" title="unparseable">{` (${r.activity.startRaw})`}</span> : null}</> },
-    { key: 'cf', label: 'Cur finish', value: (r) => r.currentFinish, render: (r) => <>{fmtDate(r.currentFinish)}{r.activity.actualFinish ? ' A' : ''}{!r.currentFinish && r.activity.finishRaw ? <span className="text-[var(--bad)]" title="unparseable">{` (${r.activity.finishRaw})`}</span> : null}</> },
+    {
+      key: 'cs',
+      label: 'Cur start',
+      value: (r) => r.currentStart,
+      hint: 'Editable. A date typed here is used instead of P6’s everywhere — the forecast, the backlog, the staffing — until you clear it. P6’s own date stays beside it under P6 dates, for the scheduler.',
+      render: (r) => <DateCell r={r} which="start" onCommit={(v) => setDate(r, 'start', v)} />,
+    },
+    {
+      key: 'cf',
+      label: 'Cur finish',
+      value: (r) => r.currentFinish,
+      hint: 'Editable. A date typed here is used instead of P6’s everywhere — the forecast, the backlog, the staffing — until you clear it. P6’s own date stays beside it under P6 dates, for the scheduler.',
+      render: (r) => <DateCell r={r} which="finish" onCommit={(v) => setDate(r, 'finish', v)} />,
+    },
+    {
+      key: 'p6dates',
+      label: 'P6 dates',
+      value: (r) => (r.datesEdited ? `${r.activity.startDate ?? ''} – ${r.activity.finishDate ?? ''}` : ''),
+      exportValue: (r) => (r.datesEdited ? `${fmtDate(r.activity.startDate)} – ${fmtDate(r.activity.finishDate)}` : ''),
+      hint: 'What P6 has, shown only where you have changed the dates. Once a later import agrees with you it says so, and the change can be cleared.',
+      render: (r) =>
+        !r.datesEdited ? (
+          <span className="text-[var(--text-subtle)]">—</span>
+        ) : (
+          <span className="flex items-center gap-1 whitespace-nowrap">
+            <span className="text-[var(--text-muted)]">{fmtDate(r.activity.startDate)} – {fmtDate(r.activity.finishDate)}</span>
+            {r.p6Agrees ? (
+              <button className="btn-link text-[11px]" title="P6 now has the dates you keyed. Clear yours." onClick={() => setOv(r.activityId, { startDate: undefined, finishDate: undefined })}>
+                <Badge tone="good">P6 agrees — clear</Badge>
+              </button>
+            ) : (
+              <Badge tone="warn">differs</Badge>
+            )}
+          </span>
+        ),
+    },
+    {
+      key: 'dnote',
+      label: 'Date note',
+      value: (r) => r.dateNote,
+      hint: 'Editable. Why the dates were changed — what to raise with the scheduler at the next review.',
+      render: (r) => (
+        <CellInput className="cell-input cell-wide" value={r.dateNote} placeholder="—" onCommit={(v) => setOv(r.activityId, { dateNote: v.trim() || undefined })} />
+      ),
+    },
     { key: 'pct', label: '% complete', value: (r) => r.pctComplete, num: true, render: (r) => fmtPct(r.pctComplete, 0) },
     { key: 'pctsrc', label: '% src', value: (r) => r.pctSource, render: (r) => <Badge tone={statusTone(r.pctSource)}>{r.pctSource}</Badge> },
     { key: 'es', label: 'Earn start', value: (r) => r.earnStart, render: (r) => fmtDate(r.earnStart) },
@@ -465,7 +572,7 @@ export function BudgetMaster({ route }: { route: Route }) {
   const subtitle =
     view === 'hidden'
       ? `${rows.length} of ${hiddenCount} hidden activities. They are in no total, no curve and no export. Priced here as if they were back in, so you can see what each one would add: ${fmtHours(total)} h.`
-      : `${rows.length} of ${model.rows.length} activities shown. Budget ${fmtHours(total)} h, earned ${fmtHours(earned)} h. Name, Show, ${TERMS.discipline}, Override h and Note are yours to edit and survive every import; everything from P6 is read-only.`;
+      : `${rows.length} of ${model.rows.length} activities shown. Budget ${fmtHours(total)} h, earned ${fmtHours(earned)} h. Name, Show, Phase, Loc, Cur start, Cur finish, ${TERMS.discipline}, Override h and Note are yours to edit and survive every import; everything from P6 is read-only.`;
 
   return (
     <Page
@@ -516,6 +623,19 @@ export function BudgetMaster({ route }: { route: Route }) {
         </>
       }
     >
+      <datalist id="budget-phases">
+        {[...new Map(model.rows.map((r) => [r.phase, r.phaseName])).entries()]
+          .filter(([p]) => p)
+          .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+          .map(([p, name]) => (
+            <option key={p} value={p}>{name}</option>
+          ))}
+      </datalist>
+      <datalist id="budget-locations">
+        {[...new Set([...model.rows.map((r) => r.location), ...state.data.locations.map((l) => l.code)])].filter(Boolean).sort().map((l) => (
+          <option key={l} value={l} />
+        ))}
+      </datalist>
       <datalist id="budget-disciplines">
         {[...new Set(model.rows.flatMap((r) => r.disciplines))].filter(Boolean).sort().map((d) => (
           <option key={d} value={d} />
@@ -566,6 +686,40 @@ export function BudgetMaster({ route }: { route: Route }) {
               </div>
               <div className="mt-1 text-[11.5px] text-[var(--text-subtle)]">
                 Replaces the calculated figure and bypasses the complexity factor. Blank hands each activity back to its rate.
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Phase</div>
+              <div className="mt-1 flex gap-2">
+                <input className="input w-28" list="budget-phases" placeholder="P3" value={bulkPhase} onChange={(e) => setBulkPhase(e.target.value)} />
+                <button
+                  className="btn"
+                  disabled={rows.length === 0}
+                  onClick={() => applyToShown({ phase: bulkPhase.trim() || undefined }, bulkPhase.trim() ? `Move to ${phaseLabel(normalisePhaseValue(bulkPhase))}` : 'Put back in the phase the Activity ID says')}
+                >
+                  Apply
+                </button>
+              </div>
+              <div className="mt-1 text-[11.5px] text-[var(--text-subtle)]">
+                Moves these activities to another phase. Blank puts each back where its Activity ID (or a rule) puts it.
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Location</div>
+              <div className="mt-1 flex gap-2">
+                <input className="input w-28" list="budget-locations" placeholder="B20" value={bulkLoc} onChange={(e) => setBulkLoc(e.target.value)} />
+                <button
+                  className="btn"
+                  disabled={rows.length === 0}
+                  onClick={() => applyToShown({ location: bulkLoc.trim() || undefined }, bulkLoc.trim() ? `Move to location ${bulkLoc.trim()}` : 'Put back at the location the Activity ID says')}
+                >
+                  Apply
+                </button>
+              </div>
+              <div className="mt-1 text-[11.5px] text-[var(--text-subtle)]">
+                Moves these activities to another location, and its complexity factor with them. Blank puts each back.
               </div>
             </div>
 
@@ -625,6 +779,39 @@ export function BudgetMaster({ route }: { route: Route }) {
         </div>
       )}
 
+      {view === 'active' && flag === 'dates' && (
+        <div className="mb-3">
+          <Notice tone="info">
+            {rows.length === 0 ? (
+              <>No activity is using dates of yours. Key a <b>Cur start</b> or <b>Cur finish</b> on any row to use it instead of P6’s until the schedule is corrected.</>
+            ) : (
+              <>
+                <b>
+                  {rows.length} {rows.length === 1 ? 'activity is' : 'activities are'} using your dates instead of P6’s.
+                </b>{' '}
+                <b>P6 dates</b> shows what the schedule has beside each, and <b>Date note</b> says why — the <b>Excel</b> button on the table hands the list to the scheduler.
+                {rows.some((r) => r.p6Agrees) && (
+                  <>
+                    {' '}
+                    {rows.filter((r) => r.p6Agrees).length} now match P6 after the latest import.{' '}
+                    <button
+                      className="btn btn-mini"
+                      onClick={() => {
+                        const agree = rows.filter((r) => r.p6Agrees);
+                        for (const r of agree) setOv(r.activityId, { startDate: undefined, finishDate: undefined, dateNote: undefined });
+                        actions.notify('ok', `Cleared ${agree.length} date ${agree.length === 1 ? 'change' : 'changes'} P6 now agrees with. Save to write.`);
+                      }}
+                    >
+                      Clear those
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+          </Notice>
+        </div>
+      )}
+
       {view === 'active' && flag === 'review' && rows.length > 0 && (
         <div className="mb-3">
           <Notice tone="warn">
@@ -680,7 +867,39 @@ function tidyOverride(o: ActivityOverride): ActivityOverride {
   if (o.nameOverride?.trim()) out.nameOverride = o.nameOverride.trim();
   if (o.discipline?.trim()) out.discipline = o.discipline.trim();
   if (o.visibility) out.visibility = o.visibility;
+  if (o.phase?.trim()) out.phase = o.phase.trim();
+  if (o.location?.trim()) out.location = o.location.trim();
+  if (o.startDate && isValidISO(o.startDate)) out.startDate = o.startDate;
+  if (o.finishDate && isValidISO(o.finishDate)) out.finishDate = o.finishDate;
+  if (o.dateNote?.trim()) out.dateNote = o.dateNote.trim();
   if (o.note?.trim()) out.note = o.note.trim();
   if (o.updatedAt) out.updatedAt = o.updatedAt;
   return out;
+}
+
+/**
+ * A current-schedule date that can be keyed over. Shows P6's date when it is P6's,
+ * yours with a marker when it is yours, and the unparseable text P6 sent when there
+ * is nothing to show.
+ */
+function DateCell({ r, which, onCommit }: { r: BudgetRow; which: 'start' | 'finish'; onCommit: (v: string) => void }) {
+  const value = which === 'start' ? r.currentStart : r.currentFinish;
+  const p6 = which === 'start' ? r.activity.startDate : r.activity.finishDate;
+  const actual = which === 'start' ? r.activity.actualStart : r.activity.actualFinish;
+  const raw = which === 'start' ? r.activity.startRaw : r.activity.finishRaw;
+  const mine = (value ?? null) !== (p6 ?? null);
+  return (
+    <span className="flex items-center gap-1 whitespace-nowrap">
+      <CellInput
+        type="date"
+        className={`cell-input${mine ? ' font-semibold' : ''}`}
+        value={value ?? ''}
+        title={mine ? `Yours. P6 has ${fmtDate(p6)}. Clear it, or key P6's date, to go back.` : 'From P6. Key a date to use instead until the schedule is corrected.'}
+        onCommit={onCommit}
+      />
+      {actual && !mine && <span className="text-[var(--text-muted)]">A</span>}
+      {mine && <Badge tone="purple">yours</Badge>}
+      {!value && raw && <span className="text-[var(--bad)]" title="unparseable">({raw})</span>}
+    </span>
+  );
 }

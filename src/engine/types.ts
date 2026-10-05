@@ -186,6 +186,24 @@ export type ActivityOverride = {
   nameOverride?: string;
   /** Replaces the library entry's discipline for this one activity. */
   discipline?: string;
+  /**
+   * Moves this one activity to another phase or location, whatever its Activity ID
+   * says and whatever an Activity ID Rule says. P6 is never touched; clearing the
+   * field puts it back where the ID and the rules put it. The location's complexity
+   * factor follows the move, as it does for a rule.
+   */
+  phase?: string;
+  location?: string;
+  /**
+   * Dates to use instead of P6's start and finish for this one activity, until the
+   * schedule is corrected. Everything that reads the schedule's dates reads these —
+   * the forecast, the backlog, the staffing — and P6's own dates stay on the row so
+   * the two can be put side by side for the scheduler.
+   */
+  startDate?: string;
+  finishDate?: string;
+  /** Why the dates were changed: what to raise with the scheduler at the next review. */
+  dateNote?: string;
   /** Whether this activity is in the budget, out of it, or gone. */
   visibility?: ActivityVisibility;
   /** ISO datetime of the last edit, for the audit trail. */
@@ -362,10 +380,22 @@ export type BudgetRow = {
   location: string;
   /** True when a rule decided the location rather than the ID's own 4th segment. */
   locationFromRule: boolean;
+  /** True when somebody moved this activity to its location by hand in Budget Master. */
+  locationEdited: boolean;
+  /**
+   * The start and finish are yours, not P6's, for at least one of the two. P6's
+   * dates are still on `activity`. `p6Agrees` is true once a later import carries
+   * the same dates, so the override can be cleared.
+   */
+  datesEdited: boolean;
+  p6Agrees: boolean;
+  dateNote: string;
   /** Raw 2nd segment of the Activity ID, e.g. "P2". Derived, never stored. */
   phase: string;
   /** True when a rule decided the phase rather than the ID's own 2nd segment. */
   phaseFromRule: boolean;
+  /** True when somebody moved this activity to its phase by hand in Budget Master. */
+  phaseEdited: boolean;
   /** "P2" shown as "Phase 2". */
   phaseName: string;
   /** Raw 3rd segment, e.g. "TC" or "AC". */
@@ -693,6 +723,8 @@ export type Summary = {
   duplicateActivityIds: number;
   /** Rows identical to another row in every field, dropped so the activity counts once. */
   repeatedRows: number;
+  /** Activities whose start or finish was keyed in place of P6's. */
+  datesEdited: number;
   pctFromP6: number; // in budget only
   pctFromOverride: number;
   inProgress: number;

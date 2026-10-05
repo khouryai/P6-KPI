@@ -125,11 +125,14 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
      */
     const locRule = matchIdRule(a.activityId, 'location', idRules);
     const phaseRule = matchIdRule(a.activityId, 'phase', idRules);
-    const locationOfRow = locRule ? locRule.value.trim() : a.location;
-    const phaseOfRow = phaseRule ? normalisePhaseValue(phaseRule.value) : phaseOf(a.activityId);
+    // A move made by hand on this one activity beats a rule, which beats the ID.
+    const ovEarly = ovIdx.get(normKey(a.activityId));
+    const locEdit = ovEarly?.location?.trim() || '';
+    const phaseEdit = ovEarly?.phase?.trim() ? normalisePhaseValue(ovEarly.phase) : '';
+    const locationOfRow = locEdit || (locRule ? locRule.value.trim() : a.location);
+    const phaseOfRow = phaseEdit || (phaseRule ? normalisePhaseValue(phaseRule.value) : phaseOf(a.activityId));
     const match = resolveMatchKey(a.activityType, libIdx);
     const entry = match.entry;
-    const ovEarly = ovIdx.get(normKey(a.activityId));
     const visibility: ActivityVisibility | null = ovEarly?.visibility ?? null;
     const forcedIn = visibility === 'INCLUDED';
     const rateStatus: RateStatus = entry ? libraryRateStatus(entry, settings, forcedIn) : 'NO MATCH';
@@ -158,6 +161,16 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
     const complexity = inBudget ? (loc?.complexityFactor ?? settings.defaultComplexity) : null;
     const stdHours = inBudget && entry ? stdHoursFor(entry, settings, a.originalDuration) : null;
     const ov = ovEarly;
+    /*
+     * The dates this activity is read with. A date keyed against it stands in for
+     * P6's until somebody clears it; the P6 row itself is left exactly as exported.
+     */
+    const startEdit = ov?.startDate && isValidISO(ov.startDate) ? ov.startDate : null;
+    const finishEdit = ov?.finishDate && isValidISO(ov.finishDate) ? ov.finishDate : null;
+    const startDate = startEdit ?? a.startDate;
+    const finishDate = finishEdit ?? a.finishDate;
+    const datesEdited = !!(startEdit || finishEdit);
+    const p6Agrees = datesEdited && (!startEdit || startEdit === a.startDate) && (!finishEdit || finishEdit === a.finishDate);
     const overrideHours = inBudget && ov && ov.overrideHours !== undefined && Number.isFinite(ov.overrideHours) ? ov.overrideHours : null;
     const budgetHours = !inBudget
       ? 0
@@ -169,10 +182,10 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
     // Baseline dates: matched on trimmed Activity ID. Fall back to current dates when absent.
     const bl = baseIdx.get(normKey(a.activityId));
     let baselineSource: BaselineSource;
-    if (!bl || !bl.finishDate) baselineSource = a.finishDate ? 'CURRENT' : 'NONE';
+    if (!bl || !bl.finishDate) baselineSource = finishDate ? 'CURRENT' : 'NONE';
     else baselineSource = 'BASELINE';
-    const baselineStart = baselineSource === 'BASELINE' ? bl!.startDate : baselineSource === 'CURRENT' ? a.startDate : null;
-    const baselineFinish = baselineSource === 'BASELINE' ? bl!.finishDate : baselineSource === 'CURRENT' ? a.finishDate : null;
+    const baselineStart = baselineSource === 'BASELINE' ? bl!.startDate : baselineSource === 'CURRENT' ? startDate : null;
+    const baselineFinish = baselineSource === 'BASELINE' ? bl!.finishDate : baselineSource === 'CURRENT' ? finishDate : null;
 
     // Percent complete: override, then tests, then P6 duration.
     const tp = tpIdx.get(normKey(a.activityId));
@@ -205,8 +218,8 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
     const testStart = tp?.testStartOverride && isValidISO(tp.testStartOverride) ? tp.testStartOverride : null;
     const testEnd = tp?.testEndOverride && isValidISO(tp.testEndOverride) ? tp.testEndOverride : null;
     const progressAsOf = tp?.progressAsOf && isValidISO(tp.progressAsOf) ? tp.progressAsOf : null;
-    const actualStart = testStart ?? (a.actualStart ? a.startDate : null);
-    const rawFinish = testEnd ?? (a.actualFinish ? a.finishDate : null);
+    const actualStart = testStart ?? (a.actualStart ? startDate : null);
+    const rawFinish = testEnd ?? (a.actualFinish ? finishDate : null);
     const actualFinish = rawFinish && actualStart ? maxISO(actualStart, rawFinish) : rawFinish;
     const earnStart = actualStart;
     let earnEnd: string | null = null;
@@ -237,11 +250,13 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
       visibility,
       hidden: visibility === 'HIDDEN',
       location: locationOfRow,
-      locationFromRule: !!locRule,
+      locationFromRule: !locEdit && !!locRule,
+      locationEdited: !!locEdit,
       // Derived from the Activity ID rather than stored, so imports written by an
       // earlier version of the app group correctly without a migration.
       phase: phaseOfRow,
-      phaseFromRule: !!phaseRule,
+      phaseFromRule: !phaseEdit && !!phaseRule,
+      phaseEdited: !!phaseEdit,
       phaseName: phaseLabel(phaseOfRow),
       workType: workTypeOf(a.activityId),
       seqCode: a.seqCode,
@@ -260,8 +275,11 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
       baselineStart,
       baselineFinish,
       baselineSource,
-      currentStart: a.startDate,
-      currentFinish: a.finishDate,
+      currentStart: startDate,
+      currentFinish: finishDate,
+      datesEdited,
+      p6Agrees,
+      dateNote: ov?.dateNote?.trim() ?? '',
       pctComplete,
       pctSource,
       earnedHours,
@@ -273,7 +291,7 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
       earnEnd,
       earnWindowSource,
       onPlannedCurve: budgetHours > 0 && !!baselineStart && !!baselineFinish,
-      onForecastCurve: budgetHours > 0 && !!a.startDate && !!a.finishDate,
+      onForecastCurve: budgetHours > 0 && !!startDate && !!finishDate,
       subsystemHours,
       subsystemEarned: scaleRecord(subsystemHours, pctComplete),
       resources,
@@ -495,6 +513,7 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
     forcedInUnpriced: count((r) => r.visibility === 'INCLUDED' && r.status === 'IN BUDGET' && r.budgetHours === 0),
     forcedOut: count((r) => r.visibility === 'EXCLUDED'),
     staleOverrides: staleOverrides.length,
+    datesEdited: count((r) => r.datesEdited),
   };
   if (!hasBaseline) notes.push('No baseline import. The planned curve mirrors the forecast for every activity.');
   if (hiddenRows.length > 0) {
@@ -520,6 +539,11 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
   if (summary.duplicateActivityIds > 0) {
     notes.push(
       `${summary.duplicateActivityIds} activities share an Activity ID with another activity. The ID is what every percent, override and note is keyed on, so each of those reaches only the first of them.`,
+    );
+  }
+  if (summary.datesEdited > 0) {
+    notes.push(
+      `${summary.datesEdited} ${summary.datesEdited === 1 ? 'activity is' : 'activities are'} using dates you keyed instead of P6's. Budget Master lists them under Dates changed, with P6's dates beside yours, for the scheduler.`,
     );
   }
   if (summary.onNoCurve > 0) {

@@ -479,3 +479,66 @@ describe('a location with no activities is not a location anybody needs to see',
     expect(m.locations[0].count).toBeGreaterThan(0);
   });
 });
+
+describe('moving one activity to another phase or location', () => {
+  it('moves it, beats an Activity ID Rule, and takes the new location’s complexity', () => {
+    const input = scenario([{ activityId: 'A-P2-TC-X10-FA-0010', phase: 'Phase 3', location: 'Y20' }], [], {
+      locations: [{ code: 'X10' }, { code: 'Y20', complexityFactor: 2 }],
+      idRules: [{ id: 'r', field: 'phase', match: 'FA-0010', value: '5' }],
+    } as Partial<ModelInput>);
+    const m = computeModel(input);
+    const moved = m.rows.find((r) => r.activityId === 'A-P2-TC-X10-FA-0010')!;
+    const left = m.rows.find((r) => r.activityId === 'A-P2-TC-X10-FA-0020')!;
+    expect(moved.phase).toBe('P3');
+    expect(moved.phaseEdited).toBe(true);
+    expect(moved.phaseFromRule).toBe(false);
+    expect(moved.location).toBe('Y20');
+    expect(moved.locationEdited).toBe(true);
+    expect(moved.budgetHours).toBe(left.budgetHours * 2);
+    expect(left.phase).toBe('P2');
+    expect(left.phaseEdited).toBe(false);
+  });
+
+  it('goes back where the ID puts it when the move is cleared', () => {
+    const m = computeModel(scenario([{ activityId: 'A-P2-TC-X10-FA-0010', note: 'kept' }]));
+    const r = m.rows.find((x) => x.activityId === 'A-P2-TC-X10-FA-0010')!;
+    expect(r.phase).toBe('P2');
+    expect(r.location).toBe('X10');
+  });
+});
+
+describe('dates keyed over P6’s', () => {
+  const id = 'A-P2-TC-X10-FA-0010';
+  const p6 = (startDate: string, finishDate: string): Partial<ModelInput> => ({
+    current: [makeActivity({ activityId: id, activityName: '[T&C] X10 (Ph2) - Test Type', startDate, finishDate, sortOrder: 0 })],
+  });
+
+  it('uses the keyed dates and keeps P6’s on the row', () => {
+    const m = computeModel(scenario([{ activityId: id, startDate: '2026-11-02', finishDate: '2026-11-20', dateNote: 'Access not until November' }], [], p6('2026-09-01', '2026-09-30')));
+    const r = m.rows[0];
+    expect(r.currentStart).toBe('2026-11-02');
+    expect(r.currentFinish).toBe('2026-11-20');
+    expect(r.activity.startDate).toBe('2026-09-01');
+    expect(r.datesEdited).toBe(true);
+    expect(r.p6Agrees).toBe(false);
+    expect(r.dateNote).toBe('Access not until November');
+    expect(m.summary.datesEdited).toBe(1);
+  });
+
+  it('can change just one of the two', () => {
+    const r = computeModel(scenario([{ activityId: id, finishDate: '2026-10-15' }], [], p6('2026-09-01', '2026-09-30'))).rows[0];
+    expect(r.currentStart).toBe('2026-09-01');
+    expect(r.currentFinish).toBe('2026-10-15');
+  });
+
+  it('says so once a later import agrees, so the change can be cleared', () => {
+    const r = computeModel(scenario([{ activityId: id, startDate: '2026-11-02', finishDate: '2026-11-20' }], [], p6('2026-11-02', '2026-11-20'))).rows[0];
+    expect(r.p6Agrees).toBe(true);
+  });
+
+  it('stands in for the baseline too when there is no baseline import', () => {
+    const r = computeModel(scenario([{ activityId: id, startDate: '2026-11-02', finishDate: '2026-11-20' }], [], p6('2026-09-01', '2026-09-30'))).rows[0];
+    expect(r.baselineSource).toBe('CURRENT');
+    expect(r.baselineFinish).toBe('2026-11-20');
+  });
+});

@@ -93,7 +93,9 @@ export function phaseLabel(code: string): string {
  */
 export function normalisePhaseValue(value: string): string {
   const t = value.trim();
-  return /^\d+$/.test(t) ? `P${t}` : t;
+  // "3", "P3" and "Phase 3" all mean the same phase.
+  const n = /^(?:phase\s*|p)?(\d+)$/i.exec(t);
+  return n ? `P${n[1]}` : t;
 }
 
 /**
