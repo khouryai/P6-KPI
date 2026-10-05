@@ -72,8 +72,31 @@ function firstByKey<T>(items: T[], key: (t: T) => string): Map<string, T> {
   return m;
 }
 
+/**
+ * The schedule with exact repeats taken out.
+ *
+ * A P6 export can write one activity on several rows — a layout grouped by a code
+ * the activity carries twice, or one row per resource assignment. Every field the
+ * application reads is identical on those rows, so they are one activity, and
+ * pricing each of them would count its hours once per row on every screen. Rows
+ * that share an ID but differ in anything else are different activities and stay.
+ */
+export function dropRepeatedRows(acts: P6Activity[]): { kept: P6Activity[]; dropped: number } {
+  const seen = new Set<string>();
+  const kept: P6Activity[] = [];
+  for (const a of acts) {
+    const { sortOrder: _o, rawActivityId: _r, ...fields } = a;
+    const key = JSON.stringify({ ...fields, activityId: a.activityId.trim().toLowerCase() });
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(a);
+  }
+  return { kept, dropped: acts.length - kept.length };
+}
+
 export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
-  const { settings, overrides, testProgress, current } = input;
+  const { settings, overrides, testProgress } = input;
+  const { kept: current, dropped: repeatedRows } = dropRepeatedRows(input.current);
   const notes: string[] = [];
   const libIdx = indexLibrary(input.library);
   const locIdx = firstByKey<Location>(input.locations, (l) => l.code);
@@ -452,6 +475,7 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
       (r) => r.status === 'IN BUDGET' && r.activity.originalDuration !== null && r.activity.remainingDuration === null,
     ),
     duplicateActivityIds: duplicateIdRows,
+    repeatedRows,
     pctFromP6: count((r) => r.pctSource === 'P6' && r.status === 'IN BUDGET'),
     pctFromOverride: count((r) => r.pctSource === 'OVERRIDE'),
     inProgress: count((r) => r.earnWindowSource === 'IN PROGRESS'),
@@ -486,6 +510,11 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
   if (summary.noRemainingDuration > 0) {
     notes.push(
       `${summary.noRemainingDuration} in-budget ${summary.noRemainingDuration === 1 ? 'activity has' : 'activities have'} no Remaining Duration in the import, so P6 can say nothing about their progress and they read 0% until somebody keys one. Check the Remaining Duration column was mapped on Import.`,
+    );
+  }
+  if (repeatedRows > 0) {
+    notes.push(
+      `${repeatedRows} ${repeatedRows === 1 ? 'row of the schedule repeats' : 'rows of the schedule repeat'} another row exactly — same Activity ID, name, dates and durations. Each activity is counted once.`,
     );
   }
   if (summary.duplicateActivityIds > 0) {

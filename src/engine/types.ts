@@ -691,6 +691,8 @@ export type Summary = {
    * one row. Counted because the import screen says so once and is then gone.
    */
   duplicateActivityIds: number;
+  /** Rows identical to another row in every field, dropped so the activity counts once. */
+  repeatedRows: number;
   pctFromP6: number; // in budget only
   pctFromOverride: number;
   inProgress: number;

@@ -249,3 +249,54 @@ describe('what is in the analysis', () => {
     expect(g.owner).toBe('ATS');
   });
 });
+
+describe('temporary support', () => {
+  it('counts a change only between its start and its last day', () => {
+    const s = team(4, [{ id: 't', from: '2027-01-01', until: '2027-03-31', delta: 2 }]);
+    expect(peopleOn('2026-12-31', s)).toBe(4);
+    expect(peopleOn('2027-01-01', s)).toBe(6);
+    expect(peopleOn('2027-03-31', s)).toBe(6);
+    expect(peopleOn('2027-04-01', s)).toBe(4);
+  });
+
+  it('is permanent when no end date is given', () => {
+    const s = team(4, [{ id: 'p', from: '2027-01-01', delta: 2 }]);
+    expect(peopleOn('2030-01-01', s)).toBe(6);
+  });
+
+  it('finishes later when the support leaves before the work is done', () => {
+    const backlog = Array.from({ length: 8 }, (_, i) => row(`B${i}`, 80, '2026-08-01', '2026-09-15'));
+    const tasks = staffingTasks(backlog, opts);
+    const permanent = simulate(tasks, team(0, [{ id: 'a', from: '2026-10-01', delta: 4 }]), opts);
+    const temporary = simulate(tasks, team(0, [{ id: 'a', from: '2026-10-01', until: '2026-10-07', delta: 4 }]), opts);
+    expect(permanent.finish).toBe('2026-10-28');
+    // A week of four people, then nobody: never finishes.
+    expect(temporary.finish).toBeNull();
+  });
+});
+
+describe('hours burned', () => {
+  it('reports the hours paid for while there is nothing to work on', () => {
+    // One one-person activity of 80 h over two weeks; eight people supplied.
+    const tasks = staffingTasks([row('A', 80, '2026-10-01', '2026-10-14')], opts);
+    const r = simulate(tasks, team(8), opts);
+    expect(r.burn.supplied).toBeCloseTo(8 * 40 * 2, 6);
+    expect(r.burn.worked).toBeCloseTo(80, 6);
+    expect(r.burn.idle).toBeCloseTo(560, 6);
+    expect(r.burn.idleWeeks).toBe(2);
+  });
+
+  it('has no idle hours when the team is exactly the size of the work', () => {
+    const tasks = staffingTasks([row('A', 80, '2026-10-01', '2026-10-14')], opts);
+    expect(simulate(tasks, team(1), opts).burn.idle).toBeCloseTo(0, 6);
+  });
+
+  it('reports the hours lost to an efficiency below 1.0', () => {
+    const o = { ...opts, efficiency: 0.8 };
+    const tasks = staffingTasks([row('A', 80, '2026-10-01', '2026-10-14')], o);
+    const r = simulate(tasks, team(1), o);
+    // 80 budget hours take 100 at 0.8: 20 of them earn nothing.
+    expect(r.burn.worked).toBeCloseTo(100, 6);
+    expect(r.burn.lostToEfficiency).toBeCloseTo(20, 6);
+  });
+});

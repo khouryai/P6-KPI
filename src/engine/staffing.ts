@@ -34,7 +34,12 @@ import { normKey } from './keys';
 import { addDaysISO, isValidISO, isoToMs } from './dates';
 
 /** A dated change to a scenario's headcount: "+2 from 1 Mar", or "-1 from 1 Jun". */
-export type StaffChange = { id: string; from: string; delta: number; note?: string };
+/**
+ * A dated change to a scenario's headcount: "+2 from 1 Mar", or "-1 from 1 Jun".
+ * `until` is the last day it applies, for a temporary assignment; absent, it is
+ * permanent.
+ */
+export type StaffChange = { id: string; from: string; delta: number; until?: string; note?: string };
 
 export type StaffScenario = {
   id: string;
@@ -138,6 +143,30 @@ export type ScenarioResult = {
   /** Remaining effort at each week end, for the chart. */
   series: StaffingPoint[];
   lateTasks: number;
+  /**
+   * Where the people's hours went, from the data date to the finish (or to the end
+   * of the horizon when it never finishes). After the finish the team is taken to
+   * be released, so it burns nothing.
+   */
+  burn: {
+    /** Hours the scenario's people gave the project. */
+    supplied: number;
+    /** Hours spent working on the activities. */
+    worked: number;
+    /**
+     * Hours paid for with nothing to work on: no backlog left, the next activity's
+     * planned start not reached, or every open activity already at its crew's pace.
+     * This is what over-staffing costs.
+     */
+    idle: number;
+    /**
+     * Hours worked that earned nothing, because an efficiency below 1.0 makes every
+     * budget hour take longer. Negative when the efficiency is above 1.0.
+     */
+    lostToEfficiency: number;
+    /** Weeks in which at least a quarter of the hours supplied stood idle. */
+    idleWeeks: number;
+  };
 };
 
 /** About fifteen years. Anything that has not finished by then is reported as never. */
@@ -155,7 +184,11 @@ export function weeklyHours(opts: Pick<StaffingOptions, 'hoursPerPersonPerMonth'
 /** Headcount in force on a day: the starting figure plus every change on or before it. */
 export function peopleOn(day: string, s: StaffScenario): number {
   let n = s.people;
-  for (const c of s.changes) if (isValidISO(c.from) && c.from <= day) n += c.delta;
+  for (const c of s.changes) {
+    if (!isValidISO(c.from) || c.from > day) continue;
+    if (c.until && isValidISO(c.until) && day > c.until) continue;
+    n += c.delta;
+  }
   return Math.max(0, n);
 }
 
@@ -237,7 +270,16 @@ export function simulate(tasks: StaffingTask[], scenario: StaffScenario, opts: S
   const left = tasks.map((t) => t.effortHours);
   const done: (string | null)[] = tasks.map(() => null);
   const backlogIdx = tasks.map((t, i) => (t.backlog ? i : -1)).filter((i) => i >= 0);
-  const lastChange = scenario.changes.filter((c) => isValidISO(c.from)).reduce((m, c) => (c.from > m ? c.from : m), opts.dataDate);
+  // The last day the headcount can still change: a start, or the day after an end.
+  const lastChange = scenario.changes
+    .flatMap((c) => [c.from, c.until && isValidISO(c.until) ? addDaysISO(c.until, 1) : ''])
+    .filter((x) => isValidISO(x))
+    .reduce((m, x) => (x > m ? x : m), opts.dataDate);
+  let supplied = 0;
+  let worked = 0;
+  let weekSupplied = 0;
+  let weekIdle = 0;
+  let idleWeeks = 0;
 
   let remaining = left.reduce((s, h) => s + h, 0);
   let open = tasks.length;
@@ -251,6 +293,7 @@ export function simulate(tasks: StaffingTask[], scenario: StaffScenario, opts: S
     let cap = peopleOn(day, scenario) * dayNet;
     // Nobody left and nobody coming: the rest never finishes.
     if (cap <= EPS && day >= lastChange) break;
+    const capToday = cap;
     for (let i = first; i < tasks.length && cap > EPS; i++) {
       if (left[i] <= EPS || tasks[i].availableFrom > day) continue;
       const take = Math.min(left[i], cap, Math.max(tasks[i].crew * dayGross, tasks[i].plannedPace));
@@ -263,8 +306,17 @@ export function simulate(tasks: StaffingTask[], scenario: StaffScenario, opts: S
         open--;
       }
     }
+    supplied += capToday;
+    worked += capToday - cap;
+    weekSupplied += capToday;
+    weekIdle += cap;
     while (first < tasks.length && left[first] <= EPS) first++;
     if (backlogClear === null && backlogIdx.every((i) => left[i] <= EPS)) backlogClear = day;
+    if ((d + 1) % 7 === 0 || open === 0) {
+      if (weekSupplied > EPS && weekIdle / weekSupplied >= 0.25) idleWeeks++;
+      weekSupplied = 0;
+      weekIdle = 0;
+    }
     if ((d + 1) % 7 === 0) series.push({ date: addDaysISO(opts.dataDate, d + 1), remaining: Math.max(0, remaining) });
   }
   if (open === 0 && series[series.length - 1].remaining > EPS) series.push({ date: addDaysISO(opts.dataDate, d), remaining: 0 });
@@ -286,6 +338,13 @@ export function simulate(tasks: StaffingTask[], scenario: StaffScenario, opts: S
     tasks: forecasts,
     series,
     lateTasks: forecasts.filter((t) => t.slipDays === null ? t.forecastFinish === null : t.slipDays > 0).length,
+    burn: {
+      supplied,
+      worked,
+      idle: Math.max(0, supplied - worked),
+      lostToEfficiency: worked * (1 - (opts.efficiency > 0 ? opts.efficiency : 1)),
+      idleWeeks,
+    },
   };
 }
 

@@ -427,3 +427,29 @@ describe('the window itself', () => {
     expect(log.activities.every((a) => ids.has(a.activityId))).toBe(true);
   });
 });
+
+describe('an Activity ID the export repeats', () => {
+  it('drops a row that repeats another exactly, so the activity is counted once', () => {
+    const base = scenario();
+    const copy = { ...base.current[1], sortOrder: 99 };
+    const once = computeModel(base);
+    const twice = computeModel({ ...base, current: [...base.current, copy] });
+    expect(twice.rows).toHaveLength(once.rows.length);
+    expect(twice.summary.totalBudgetHours).toBe(once.summary.totalBudgetHours);
+    expect(twice.summary.repeatedRows).toBe(1);
+  });
+
+  it('lists an ID carried on two different rows once in the log, with their hours added', () => {
+    const base = scenario();
+    const other = makeActivity({ activityId: 'A-P2-TC-X10-FA-0002', activityName: '[T&C] X10 (Ph2) - Test Type', startDate: '2026-08-23', finishDate: '2026-08-27', actualStart: true, sortOrder: 50 });
+    const m = computeModel({ ...base, current: [...base.current, other] });
+    const log = periodLog(m.rows, '2026-08-18', '2026-08-31');
+    const rows = log.activities.filter((a) => a.activityId === 'A-P2-TC-X10-FA-0002');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].rows).toBe(2);
+    const both = m.rows.filter((r) => r.activityId === 'A-P2-TC-X10-FA-0002').reduce((s, r) => s + r.budgetHours, 0);
+    expect(rows[0].budgetHours).toBeCloseTo(both, 9);
+    expect(new Set(log.activities.map((a) => a.activityId)).size).toBe(log.activities.length);
+    expect(log.earnedHours).toBeCloseTo(log.activities.reduce((s, a) => s + a.earnedHours, 0), 9);
+  });
+});

@@ -527,7 +527,8 @@ export function Staffing() {
                   <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Later changes</div>
                   {s.changes.length === 0 && <div className="text-[12px] text-[var(--text-subtle)]">None.</div>}
                   {s.changes.map((c) => (
-                    <div key={c.id} className="mt-1 flex items-center gap-1.5 text-[12px]">
+                    <div key={c.id} className="mt-1.5 rounded border border-[var(--line-soft)] p-1.5 text-[12px]">
+                    <div className="flex items-center gap-1.5">
                       <input
                         className="input w-16"
                         type="number"
@@ -541,6 +542,18 @@ export function Staffing() {
                       <button className="btn-link danger text-[11px]" onClick={() => editScenario(s.id, { changes: s.changes.filter((x) => x.id !== c.id) })}>
                         ×
                       </button>
+                    </div>
+                    <div className="mt-1 flex items-center gap-1.5" title="The last day of a temporary assignment. Leave it blank for a permanent one.">
+                      <span className="w-16 text-right text-[var(--text-muted)]">until</span>
+                      <input
+                        className="input"
+                        type="date"
+                        min={c.from || undefined}
+                        value={c.until ?? ''}
+                        onChange={(e) => editChange(s.id, c.id, { until: e.target.value || undefined })}
+                      />
+                      <span className="text-[11px] text-[var(--text-subtle)]">{c.until ? 'temporary' : 'permanent'}</span>
+                    </div>
                     </div>
                   ))}
                   <button
@@ -569,6 +582,35 @@ export function Staffing() {
                       <span className="text-[var(--text-muted)]">Activities finishing late</span>
                       <span className="tabular-nums">{r.lateTasks} of {r.tasks.length}</span>
                     </div>
+                    <div className="mt-2 border-t border-[var(--line-soft)] pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                      Hours to {r.finish ? 'the finish' : 'the end of the horizon'}
+                    </div>
+                    <div className="flex justify-between" title="Hours the scenario's people give the project, from the data date to the finish.">
+                      <span className="text-[var(--text-muted)]">Supplied</span>
+                      <span className="tabular-nums">{fmtHours(r.burn.supplied)} h</span>
+                    </div>
+                    <div className="flex justify-between" title="Hours paid for with nothing to work on: no backlog left, the next activity not yet at its planned start, or every open activity already at its crew's pace. What over-staffing costs.">
+                      <span className="text-[var(--text-muted)]">Idle — over-staffed</span>
+                      <span className={`tabular-nums ${r.burn.idle > 0.05 * r.burn.supplied ? 'tone-bad font-semibold' : ''}`}>
+                        {fmtHours(r.burn.idle)} h{r.burn.supplied > 0 ? ` (${Math.round((r.burn.idle / r.burn.supplied) * 100)}%)` : ''}
+                      </span>
+                    </div>
+                    <div
+                      className="flex justify-between"
+                      title={`Hours worked that earn nothing because the efficiency is ${saved.efficiency}: at 0.8 every budget hour takes 1.25 hours.`}
+                    >
+                      <span className="text-[var(--text-muted)]">{r.burn.lostToEfficiency < 0 ? 'Gained by efficiency' : 'Lost to efficiency'}</span>
+                      <span className={`tabular-nums ${r.burn.lostToEfficiency > 0.5 ? 'tone-bad font-semibold' : ''}`}>{fmtHours(Math.abs(r.burn.lostToEfficiency))} h</span>
+                    </div>
+                    <div className="flex justify-between" title="Idle hours plus hours lost to efficiency: everything paid for that earns no budget.">
+                      <span className="font-semibold">Burned, not earned</span>
+                      <b className="tabular-nums">{fmtHours(r.burn.idle + Math.max(0, r.burn.lostToEfficiency))} h</b>
+                    </div>
+                    {r.burn.idleWeeks > 0 && (
+                      <div className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                        {r.burn.idleWeeks} {r.burn.idleWeeks === 1 ? 'week' : 'weeks'} with a quarter or more of the team idle.
+                      </div>
+                    )}
                     <div className="mt-2">
                       <Badge tone={!finishOk ? 'bad' : r.lateTasks > 0 ? 'warn' : 'good'}>{verdict}</Badge>
                     </div>

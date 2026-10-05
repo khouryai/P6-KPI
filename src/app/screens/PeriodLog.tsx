@@ -283,7 +283,14 @@ export function PeriodLog() {
       value: (a) => a.activityId,
       render: (a) => (
         <div className="min-w-0">
-          <div className="mono text-[var(--text-muted)]">{a.activityId}</div>
+          <div className="mono text-[var(--text-muted)]">
+            {a.activityId}
+            {a.rows > 1 && (
+              <span className="ml-1.5 text-[10.5px]" title={`The schedule carries this Activity ID on ${a.rows} rows. They are listed once here, with their hours added together.`}>
+                ×{a.rows} rows
+              </span>
+            )}
+          </div>
           <div className="cell-text font-semibold" title={a.activityName}>{a.activityName}</div>
         </div>
       ),

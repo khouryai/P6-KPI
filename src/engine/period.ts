@@ -110,7 +110,61 @@ export type PeriodActivity = {
   spreadToDataDate: boolean;
   /** Calendar days between the baseline finish and the actual one. Negative is early. */
   finishVarianceDays: number | null;
+  /**
+   * How many schedule rows this line stands for. More than one when the export
+   * carries the same Activity ID on several rows: the log lists the ID once, with
+   * their hours added together, because the review is about the activity.
+   */
+  rows: number;
 };
+
+/**
+ * Which outcome a merged line takes when its rows disagree. Anything still owed
+ * outranks anything done: an ID half of which is missed is a missed activity.
+ */
+const MERGE_ORDER: PeriodOutcome[] = ['MISSED', 'NOT STARTED', 'STARTED', 'CONTINUED', 'COMPLETED', 'COMPLETED EARLY'];
+
+const minDate = (xs: (string | null)[]) => xs.filter((x): x is string => !!x).sort()[0] ?? null;
+const maxDate = (xs: (string | null)[]) => xs.filter((x): x is string => !!x).sort().pop() ?? null;
+
+/** One line per Activity ID. A single row passes through untouched. */
+export function mergeRepeatedIds(list: PeriodActivity[]): PeriodActivity[] {
+  const byId = new Map<string, PeriodActivity[]>();
+  for (const a of list) {
+    const k = a.activityId.trim().toLowerCase();
+    const g = byId.get(k);
+    if (g) g.push(a);
+    else byId.set(k, [a]);
+  }
+  return [...byId.values()].map((g) => {
+    if (g.length === 1) return g[0];
+    const first = g[0];
+    const budgetHours = g.reduce((s, a) => s + a.budgetHours, 0);
+    const earnedHours = g.reduce((s, a) => s + a.earnedHours, 0);
+    const contributions = g.map((a) => a.phaseContribution).filter((x): x is number => x !== null);
+    const baselineFinish = maxDate(g.map((a) => a.baselineFinish));
+    // Finished only when every row of it has.
+    const actualFinish = g.every((a) => a.actualFinish) ? maxDate(g.map((a) => a.actualFinish)) : null;
+    return {
+      ...first,
+      outcome: MERGE_ORDER.find((o) => g.some((a) => a.outcome === o)) ?? first.outcome,
+      plannedHours: g.reduce((s, a) => s + a.plannedHours, 0),
+      earnedHours,
+      budgetHours,
+      phaseContribution: contributions.length ? contributions.reduce((s, x) => s + x, 0) : null,
+      pctComplete: budgetHours > 0 ? g.reduce((s, a) => s + a.pctComplete * a.budgetHours, 0) / budgetHours : first.pctComplete,
+      baselineStart: minDate(g.map((a) => a.baselineStart)),
+      baselineFinish,
+      actualStart: minDate(g.map((a) => a.actualStart)),
+      actualFinish,
+      p6ActualStart: minDate(g.map((a) => a.p6ActualStart)),
+      p6ActualFinish: g.every((a) => a.p6ActualFinish) ? maxDate(g.map((a) => a.p6ActualFinish)) : null,
+      spreadToDataDate: g.some((a) => a.spreadToDataDate),
+      finishVarianceDays: baselineFinish && actualFinish ? daysBetween(baselineFinish, actualFinish) : null,
+      rows: g.reduce((s, a) => s + a.rows, 0),
+    };
+  });
+}
 
 /**
  * The same log, for one phase of the job.
@@ -337,8 +391,13 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
       progressAsOf: r.progressAsOf,
       spreadToDataDate: r.earnWindowSource === 'IN PROGRESS' && Math.abs(earnedHours) > 1e-9,
       finishVarianceDays: r.baselineFinish && actualFinish ? daysBetween(r.baselineFinish, actualFinish) : null,
+      rows: 1,
     });
   }
+  // The same Activity ID on several rows is one activity to the review.
+  const merged = mergeRepeatedIds(activities);
+  activities.length = 0;
+  activities.push(...merged);
 
   const plannedHours = activities.reduce((s, a) => s + a.plannedHours, 0);
   const earnedHours = activities.reduce((s, a) => s + a.earnedHours, 0);
@@ -349,15 +408,24 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
   // "Due to finish" is a baseline question, so it is counted over every in-budget
   // activity rather than over the rows above: one can be due to finish in the window
   // having accrued nothing in it.
-  const dueToFinish = inBudget.filter((r) => within(r.baselineFinish, lo, hi)).length;
+  const idOf = (r: BudgetRow) => r.activityId.trim().toLowerCase();
+  const dueIds = new Set(inBudget.filter((r) => within(r.baselineFinish, lo, hi)).map(idOf));
+  const dueToFinish = dueIds.size;
   // Finished BY the end of the window, not inside it: one that beat its baseline and
   // finished the week before was not late, and counting it as a miss would make the
   // one thing this pair is for — did we finish what we said we would — read wrong.
-  const finishedOnTime = inBudget.filter((r) => {
-    if (!within(r.baselineFinish, lo, hi) || r.pctComplete < 1 - 1e-9) return false;
-    const done = r.actualFinish ?? r.earnEnd;
-    return !!done && done <= hi;
-  }).length;
+  // Counted by Activity ID: an ID is on time only when every row of it is.
+  const late = new Set(
+    inBudget
+      .filter((r) => {
+        if (!within(r.baselineFinish, lo, hi)) return false;
+        if (r.pctComplete < 1 - 1e-9) return true;
+        const done = r.actualFinish ?? r.earnEnd;
+        return !done || done > hi;
+      })
+      .map(idOf),
+  );
+  const finishedOnTime = [...dueIds].filter((id) => !late.has(id)).length;
 
   const totalBudget = inBudget.reduce((s, r) => s + r.budgetHours, 0);
   const earnedBy = (rs: BudgetRow[], date: string) => rs.reduce((s, r) => s + r.earnedHours * accruedFraction(date, r.earnStart, r.earnEnd), 0);
@@ -385,7 +453,7 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
       return {
         key,
         label: rs[0].phaseName,
-        activities: rs.length,
+        activities: new Set(rs.map(idOf)).size,
         budgetHours,
         plannedHours: planned,
         earnedHours: earned,
