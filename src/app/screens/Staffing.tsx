@@ -5,6 +5,8 @@ import { Page, Panel, Notice, SortableTable, CellInput, Badge, type Column, type
 import { DEFAULT_CAPACITY } from '../../engine/capacity';
 import {
   FULL_SCOPE,
+  applyTaskEdits,
+  type TaskEdit,
   peopleOn,
   phaseLines,
   plannedByPhase,
@@ -60,6 +62,8 @@ type Saved = {
   utilisation: number | null;
   scenarios: StaffScenario[];
   selected: string;
+  /** Changes to single activities, for the simulation only. Keyed on the lower-cased Activity ID. */
+  edits: Record<string, TaskEdit>;
   scope: StaffingScope;
 };
 
@@ -89,6 +93,7 @@ function defaults(group: string, dataDate: string): Saved {
     ],
     selected: 'current',
     scope: DEFAULT_SCOPE,
+    edits: {},
   };
 }
 
@@ -103,7 +108,7 @@ function read(): Saved | null {
     const old = (v.scope ?? {}) as Partial<StaffingScope> & { phase?: string };
     const phases = Array.isArray(old.phases) ? old.phases : old.phase ? [old.phase] : [];
     const { phase: _gone, ...rest } = old;
-    return { ...v, scope: { ...DEFAULT_SCOPE, ...rest, phases } };
+    return { ...v, edits: v.edits ?? {}, scope: { ...DEFAULT_SCOPE, ...rest, phases } };
   } catch {
     return null;
   }
@@ -203,7 +208,22 @@ export function Staffing() {
     : null;
 
   // Everything the group has left, then the part of it the scope keeps.
-  const allTasks = useMemo(() => (opts ? staffingTasks(model.rows, opts) : []), [model.rows, opts?.group, opts?.dataDate, opts?.efficiency]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The tasks as the schedule has them, then with this simulation's own edits on top.
+  const baseTasks = useMemo(() => (opts ? staffingTasks(model.rows, opts) : []), [model.rows, opts?.group, opts?.dataDate, opts?.efficiency]); // eslint-disable-line react-hooks/exhaustive-deps
+  const allTasks = useMemo(() => (opts ? applyTaskEdits(baseTasks, saved.edits, opts) : baseTasks), [baseTasks, saved.edits]); // eslint-disable-line react-hooks/exhaustive-deps
+  const original = useMemo(() => new Map(baseTasks.map((t) => [normKey(t.activityId), t])), [baseTasks]);
+  const editCount = allTasks.filter((t) => t.simEdited).length;
+  /** Set or clear one field of one activity's simulation edit; an edit with nothing left in it goes. */
+  const editTask = (activityId: string, patch: Partial<TaskEdit>) =>
+    setSaved((sv) => {
+      const k = normKey(activityId);
+      const next: TaskEdit = { ...(sv.edits[k] ?? {}), ...patch };
+      for (const f of Object.keys(next) as (keyof TaskEdit)[]) if (next[f] === undefined || next[f] === false) delete next[f];
+      const edits = { ...sv.edits };
+      if (Object.keys(next).length) edits[k] = next;
+      else delete edits[k];
+      return { ...sv, edits };
+    });
   const tasks = useMemo(() => allTasks.filter((t) => !outOfScope(t, scope)), [allTasks, scope]);
   const leftOut = useMemo(() => {
     const by = new Map<string, { n: number; h: number }>();
@@ -220,7 +240,8 @@ export function Staffing() {
   // The type list shows every type the other filters keep, ticked or not, so a type
   // taken out can be put back.
   const typeGroups = useMemo(
-    () => groupByType(allTasks.filter((t) => !outOfScope(t, { ...scope, excludedTypes: [] }))),
+    // Removed activities stay listed under their type, so they can be put back.
+    () => groupByType(allTasks.filter((t) => !outOfScope({ ...t, removed: false }, { ...scope, excludedTypes: [] }))),
     [allTasks, scope],
   );
   const support = allTasks.filter((t) => t.role === 'support');
@@ -352,16 +373,82 @@ export function Staffing() {
       hint: 'BACKLOG: the current schedule says it should already have finished. These are worked first, oldest first.',
       render: (t) => <Badge tone={t.backlog ? 'warn' : t.inProgress ? 'info' : 'muted'}>{t.backlog ? 'BACKLOG' : t.inProgress ? 'IN PROGRESS' : 'UPCOMING'}</Badge>,
     },
-    { key: 'pstart', label: 'Planned start', value: (t) => t.plannedStart ?? '', render: (t) => fmtDate(t.plannedStart) },
-    { key: 'pfinish', label: 'Planned finish', value: (t) => t.plannedFinish ?? '', render: (t) => fmtDate(t.plannedFinish) },
-    { key: 'budget', label: 'Budget left h', value: (t) => t.remainingBudget, num: true, optional: true, render: (t) => fmtHours(t.remainingBudget, 1) },
+    {
+      key: 'pstart',
+      label: 'Planned start',
+      value: (t) => t.plannedStart ?? '',
+      hint: 'Editable, for this simulation only. Budget Master and every other screen keep the schedule’s date.',
+      render: (t) => <SimDate t={t} which="start" orig={original.get(normKey(t.activityId))?.plannedStart ?? null} onCommit={(v) => editTask(t.activityId, { start: v })} />,
+    },
+    {
+      key: 'pfinish',
+      label: 'Planned finish',
+      value: (t) => t.plannedFinish ?? '',
+      hint: 'Editable, for this simulation only. Moving it before the data date makes the activity backlog.',
+      render: (t) => <SimDate t={t} which="finish" orig={original.get(normKey(t.activityId))?.plannedFinish ?? null} onCommit={(v) => editTask(t.activityId, { finish: v })} />,
+    },
+    {
+      key: 'budget',
+      label: 'Budget left h',
+      value: (t) => t.remainingBudget,
+      num: true,
+      hint: 'Editable, for this simulation only: the budget hours still to earn. Effort is this over the efficiency factor.',
+      render: (t) => {
+        const o = original.get(normKey(t.activityId))?.remainingBudget;
+        return (
+          <CellInput
+            type="number"
+            className={`cell-input w-20 text-right${o !== undefined && Math.abs(o - t.remainingBudget) > 1e-6 ? ' font-semibold' : ''}`}
+            value={String(Math.round(t.remainingBudget * 10) / 10)}
+            onCommit={(v) => {
+              const n = Number(v);
+              editTask(t.activityId, { hours: v.trim() === '' || !Number.isFinite(n) || (o !== undefined && Math.abs(n - o) < 0.05) ? undefined : Math.max(0, n) });
+            }}
+          />
+        );
+      },
+    },
     { key: 'effort', label: 'Effort h', value: (t) => t.effortHours, num: true, hint: 'Budget left divided by the efficiency factor: the hours it will actually take.', render: (t) => fmtHours(t.effortHours, 1) },
-    { key: 'crew', label: 'Crew', value: (t) => t.crew, num: true, hint: `Heads of ${saved.group} on the activity. It cannot go faster than this many people working full weeks.` },
+    {
+      key: 'crew',
+      label: 'Crew',
+      value: (t) => t.crew,
+      num: true,
+      hint: `Heads of ${saved.group} on the activity — editable, for this simulation only. It cannot go faster than this many people working full weeks.`,
+      render: (t) => (
+        <CellInput
+          type="number"
+          className="cell-input w-14 text-right"
+          value={String(t.crew)}
+          onCommit={(v) => {
+            const n = Number(v);
+            const o = original.get(normKey(t.activityId))?.crew;
+            editTask(t.activityId, { crew: v.trim() === '' || !Number.isFinite(n) || n < 1 || n === o ? undefined : n });
+          }}
+        />
+      ),
+    },
+    {
+      key: 'sim',
+      label: 'In sim',
+      value: (t) => (t.removed ? 0 : 1),
+      hint: 'Untick to leave this one activity out of the simulation. Nothing changes in Budget Master.',
+      render: (t) => (
+        <span className="flex items-center gap-1.5 whitespace-nowrap">
+          <input type="checkbox" checked={!t.removed} aria-label={`Include ${t.activityId} in the simulation`} onChange={() => editTask(t.activityId, { removed: !t.removed || undefined })} />
+          {t.simEdited && (
+            <button className="btn-link text-[11px]" title="Changed for this simulation only. Click to put it back as the schedule has it." onClick={() => setSaved((sv) => { const e = { ...sv.edits }; delete e[normKey(t.activityId)]; return { ...sv, edits: e }; })}>
+              <Badge tone="purple">sim · reset</Badge>
+            </button>
+          )}
+        </span>
+      ),
+    },
     {
       key: 'ffinish',
       label: 'Forecast finish',
       value: (t) => t.forecastFinish ?? '',
-      render: (t) => (t.forecastFinish ? <b>{fmtDate(t.forecastFinish)}</b> : <span className="tone-bad">not reached</span>),
+      render: (t) => (t.removed ? <span className="text-[var(--text-subtle)]">removed</span> : t.forecastFinish ? <b>{fmtDate(t.forecastFinish)}</b> : <span className="tone-bad">not reached</span>),
     },
     { key: 'slip', label: 'Slip', value: (t) => t.slipDays ?? null, num: true, render: (t) => <Slip days={t.slipDays} /> },
   ];
@@ -487,7 +574,13 @@ export function Staffing() {
           meta={
             <>
               <b>{tasks.length}</b> of {allTasks.length} activities with {saved.group} work left, {fmtHours(totalHours)} of {fmtHours(allTasks.reduce((s, t) => s + t.effortHours, 0))} h
-              {leftOut.size > 0 && <> · left out: {[...leftOut.entries()].map(([why, c]) => `${c.n} by ${why}`).join(', ')}</>}
+              {leftOut.size > 0 && <> · left out: {[...leftOut.entries()].map(([why, c]) => (why === 'removed' ? `${c.n} removed in the simulation` : `${c.n} by ${why}`)).join(', ')}</>}
+              {editCount > 0 && (
+                <>
+                  {' '}· <b>{editCount}</b> {editCount === 1 ? 'activity' : 'activities'} changed for the simulation only{' '}
+                  <button className="btn-link text-[11px]" onClick={() => { if (window.confirm(`Put all ${editCount} back as the schedule has them?`)) patch({ edits: {} }); }}>reset all</button>
+                </>
+              )}
             </>
           }
           className="mb-3"
@@ -824,7 +917,12 @@ export function Staffing() {
                   </div>
                   <SortableTable
                     tableId="staffing-type-detail"
-                    rows={selected.tasks.filter((t) => t.activityType === openGroup.activityType).length ? selected.tasks.filter((t) => t.activityType === openGroup.activityType) : openGroup.tasks.map((t) => ({ ...t, forecastFinish: null, slipDays: null }))}
+                    rows={openGroup.tasks.map((t) => {
+                      // Its forecast under the scenario chosen, or none when it is out of the run.
+                      const f = selected.tasks.find((x) => x.activityId === t.activityId);
+                      return f ?? { ...t, forecastFinish: null, slipDays: null };
+                    })}
+                    rowClass={(t) => (t.removed ? 'row-muted' : '')}
                     columns={taskColumns}
                     rowKey={(t) => t.activityId}
                     defaultSort={{ key: 'pfinish', dir: 'asc' }}
@@ -866,5 +964,24 @@ export function Staffing() {
         </>
       )}
     </Page>
+  );
+}
+
+/**
+ * A planned date that can be changed for the simulation. Bold with the schedule's
+ * date in the tooltip when it differs; keying the schedule's date, or clearing it,
+ * puts it back.
+ */
+function SimDate({ t, which, orig, onCommit }: { t: StaffingTask; which: 'start' | 'finish'; orig: string | null; onCommit: (v: string | undefined) => void }) {
+  const value = which === 'start' ? t.plannedStart : t.plannedFinish;
+  const changed = (value ?? null) !== (orig ?? null);
+  return (
+    <CellInput
+      type="date"
+      className={`cell-input${changed ? ' font-semibold' : ''}`}
+      value={value ?? ''}
+      title={changed ? `Changed for the simulation. The schedule has ${fmtDate(orig)}.` : 'The schedule’s date. Change it to try another in the simulation only.'}
+      onCommit={(v) => onCommit(!v || v === orig ? undefined : v)}
+    />
   );
 }

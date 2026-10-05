@@ -117,6 +117,10 @@ export type StaffingTask = {
   inProgress: boolean;
   /** The first day the crew may work on it. */
   availableFrom: string;
+  /** Taken out of this simulation by hand. */
+  removed?: boolean;
+  /** Changed for this simulation only; Budget Master knows nothing of it. */
+  simEdited?: boolean;
   /**
    * The crew-hours a day its planned dates allow: remaining budget over what is
    * left of its window. 0 when it has no usable window.
@@ -222,13 +226,7 @@ export function staffingTasks(rows: BudgetRow[], opts: StaffingOptions): Staffin
     );
     const plannedStart = isValidISO(r.currentStart) ? r.currentStart : isValidISO(r.baselineStart) ? r.baselineStart : null;
     const plannedFinish = isValidISO(r.currentFinish) ? r.currentFinish : isValidISO(r.baselineFinish) ? r.baselineFinish : null;
-    const backlog = plannedFinish !== null && plannedFinish < opts.dataDate;
     const inProgress = !!r.actualStart || r.pctComplete > EPS;
-    const availableFrom = backlog || inProgress || !plannedStart || plannedStart < opts.dataDate ? opts.dataDate : plannedStart;
-    // Backlog's window has gone, so it keeps the pace of its whole original window.
-    const windowFrom = backlog ? plannedStart : availableFrom;
-    const windowDays = plannedFinish && windowFrom && plannedFinish >= windowFrom ? daysBetween(windowFrom, plannedFinish) + 1 : 0;
-    const plannedPace = windowDays > 0 ? remainingBudget / windowDays : 0;
 
     // Owned when the Subsystem names this group, or names nobody and this group is
     // the whole crew. Anything else has this group on it to help somebody else.
@@ -247,19 +245,67 @@ export function staffingTasks(rows: BudgetRow[], opts: StaffingOptions): Staffin
       location: r.location,
       owner: r.disciplines.join(', '),
       role: own ? 'own' : 'support',
-      plannedStart,
-      plannedFinish,
       remainingBudget,
       effortHours: remainingBudget / eff,
       crew,
-      backlog,
       inProgress,
-      availableFrom,
-      plannedPace,
+      ...timing(plannedStart, plannedFinish, remainingBudget, inProgress, opts.dataDate),
     });
   }
-  // Backlog first, oldest due first; then the schedule's own order. Undated work
-  // goes last, because nothing says when it is wanted.
+  return sortTasks(out);
+}
+
+/** Everything about a task that follows from its dates. */
+function timing(plannedStart: string | null, plannedFinish: string | null, remainingBudget: number, inProgress: boolean, dataDate: string) {
+  const backlog = plannedFinish !== null && plannedFinish < dataDate;
+  const availableFrom = backlog || inProgress || !plannedStart || plannedStart < dataDate ? dataDate : plannedStart;
+  // Backlog's window has gone, so it keeps the pace of its whole original window.
+  const windowFrom = backlog ? plannedStart : availableFrom;
+  const windowDays = plannedFinish && windowFrom && plannedFinish >= windowFrom ? daysBetween(windowFrom, plannedFinish) + 1 : 0;
+  const plannedPace = windowDays > 0 ? remainingBudget / windowDays : 0;
+  return { plannedStart, plannedFinish, backlog, availableFrom, plannedPace };
+}
+
+/**
+ * A change to one activity for the simulation only. Nothing here reaches Budget
+ * Master or any other screen: it is a what-if, kept with the scenarios.
+ */
+export type TaskEdit = {
+  /** Leave the activity out of the simulation altogether. */
+  removed?: boolean;
+  start?: string;
+  finish?: string;
+  /** Budget hours left, in place of what the budget says. */
+  hours?: number;
+  /** Heads of the group on it, in place of the crew the library gives. */
+  crew?: number;
+};
+
+/** The tasks with the simulation's own edits laid over them, in pick-up order again. */
+export function applyTaskEdits(tasks: StaffingTask[], edits: Record<string, TaskEdit>, opts: StaffingOptions): StaffingTask[] {
+  const eff = opts.efficiency > 0 ? opts.efficiency : 1;
+  return sortTasks(
+    tasks.map((t) => {
+      const e = edits[normKey(t.activityId)];
+      if (!e) return t;
+      const start = e.start && isValidISO(e.start) ? e.start : t.plannedStart;
+      const finish = e.finish && isValidISO(e.finish) ? e.finish : t.plannedFinish;
+      const remainingBudget = e.hours !== undefined && Number.isFinite(e.hours) && e.hours >= 0 ? e.hours : t.remainingBudget;
+      return {
+        ...t,
+        remainingBudget,
+        effortHours: remainingBudget / eff,
+        crew: e.crew !== undefined && e.crew >= 1 ? e.crew : t.crew,
+        removed: !!e.removed,
+        simEdited: true,
+        ...timing(start, finish, remainingBudget, t.inProgress, opts.dataDate),
+      };
+    }),
+  );
+}
+
+/** Backlog first, oldest due first; then the schedule's own order. Undated work last. */
+function sortTasks(out: StaffingTask[]): StaffingTask[] {
   const far = '9999-12-31';
   return out.sort(
     (a, b) =>
@@ -376,6 +422,7 @@ export function targetDate(tasks: StaffingTask[], opts: Pick<StaffingOptions, 'f
 
 /** Why a task is left out of the analysis, or null when it is in. */
 export function outOfScope(t: StaffingTask, scope: StaffingScope): string | null {
+  if (t.removed) return 'removed';
   if (t.role === 'support' && !scope.includeSupport) return 'support';
   if (scope.phases.length && !scope.phases.includes(t.phase)) return 'phase';
   if (scope.workType && t.workType !== scope.workType) return 'work type';

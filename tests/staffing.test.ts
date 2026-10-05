@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { BudgetRow } from '../src/engine/types';
-import { FULL_SCOPE, groupByType, phaseLines, plannedByPhase, outOfScope, peopleNeeded, peopleOn, plannedRemaining, simulate, staffingTasks, type StaffScenario, type StaffingOptions } from '../src/engine/staffing';
+import { FULL_SCOPE, applyTaskEdits, groupByType, phaseLines, plannedByPhase, outOfScope, peopleNeeded, peopleOn, plannedRemaining, simulate, staffingTasks, type StaffScenario, type StaffingOptions } from '../src/engine/staffing';
 
 const HPM = (40 * 52) / 12; // 173.33 h a month = 40 h a week
 const opts: StaffingOptions = { group: 'IXL', dataDate: '2026-10-01', efficiency: 1, hoursPerPersonPerMonth: HPM, utilisation: 1 };
@@ -331,5 +331,40 @@ describe('several phases at once', () => {
     // One person: P1 first, then P2 a week late.
     expect(lines[0].forecastFinish).toBe('2026-10-07');
     expect(lines[1].slipDays).toBe(7);
+  });
+});
+
+describe('changes made for the simulation only', () => {
+  const rows = [row('A', 80, '2026-10-01', '2026-10-14'), row('B', 80, '2026-10-01', '2026-10-14')];
+
+  it('takes a removed activity out of the analysis', () => {
+    const ts = applyTaskEdits(staffingTasks(rows, opts), { a: { removed: true } }, opts);
+    expect(ts.filter((t) => !outOfScope(t, FULL_SCOPE)).map((t) => t.activityId)).toEqual(['B']);
+  });
+
+  it('moves an activity’s dates, and with them whether it is backlog and when it can start', () => {
+    const later = applyTaskEdits(staffingTasks(rows, opts), { a: { start: '2026-11-01', finish: '2026-11-14' } }, opts);
+    const a = later.find((t) => t.activityId === 'A')!;
+    expect(a.availableFrom).toBe('2026-11-01');
+    expect(a.simEdited).toBe(true);
+    const r = simulate(later, team(2), opts);
+    expect(r.tasks.find((t) => t.activityId === 'A')!.forecastFinish).toBe('2026-11-14');
+
+    const overdue = applyTaskEdits(staffingTasks(rows, opts), { b: { start: '2026-08-01', finish: '2026-09-01' } }, opts);
+    expect(overdue[0].activityId).toBe('B');
+    expect(overdue[0].backlog).toBe(true);
+  });
+
+  it('takes a different number of hours left, after the efficiency factor', () => {
+    const o = { ...opts, efficiency: 0.5 };
+    const [a] = applyTaskEdits(staffingTasks([rows[0]], o), { a: { hours: 20 } }, o);
+    expect(a.remainingBudget).toBe(20);
+    expect(a.effortHours).toBe(40);
+  });
+
+  it('leaves the rows it was built from untouched', () => {
+    const before = JSON.stringify(rows);
+    applyTaskEdits(staffingTasks(rows, opts), { a: { removed: true, start: '2026-12-01' } }, opts);
+    expect(JSON.stringify(rows)).toBe(before);
   });
 });
