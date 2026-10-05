@@ -62,6 +62,7 @@ const SCREENS = [
   ['period', 'Two-Week Log'],
   ['team', 'Earned vs Actual'],
   ['capacity', 'Capacity'],
+  ['staffing', 'Staffing Scenarios'],
   ['report', 'Status Report'],
   ['idrules', 'Activity ID Rules'],
   ['settings', 'Settings'],

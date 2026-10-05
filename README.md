@@ -50,6 +50,7 @@ The workbook never has to be opened again, and neither does Excel:
 | An Activity ID that parses wrong | **Activity ID Rules**: say that any ID containing `HTT` is at location HTT, or that `LMA` means Phase 1. First match wins, each rule reports how many activities it actually catches, and the import is never rewritten — delete the rule and everything goes back. |
 | What a new import changes | **Import**: before you confirm, the preview says which activities slipped and by how many days, which were pulled in, which completed, which are new and which are gone. |
 | Staffing the work ahead | **Capacity**: what the forecast asks of each group in each fiscal year or month, against the headcount you key. Says which periods are short, and by how many hours. |
+| What-if on people | **Staffing Scenarios**: pick a resource group (IXL by default) and up to four scenarios side by side — eight people, four people, four with two more from a date you choose. Each one says when the group's work finishes against the planned finish, when the **backlog** (work the current schedule says should already be done) is cleared, and which activities run late, with a week-by-week chart of the work left against what the schedule expects. Effort is the remaining budget divided by an **efficiency factor** you key (1.0 is to budget; the factor the group has achieved is one click away). The backlog is worked first, then each activity no earlier than its planned start and no faster than its own crew. It also says the fewest people that hold the planned finish. Scenarios are kept in this browser only and never change the headcount on Capacity. |
 | A page to hand over | **Status Report**: the fortnight first — its cards, its activities and why each was missed — then the phase curves you pick, then progress by phase. It reads as the Two-Week Log reads, because that is where the review happens. The whole job's position is off unless you ask for it. Print it, save it as a PDF, or save it as PNGs sized for a Word page — portrait or landscape, one image per page, stamped with their real size so Word places them without shrinking them. |
 | Defaults, dates, storage, backups | **Settings** |
 | Hand a spreadsheet to project controls | **Settings → Export workbook**, plus curve CSV and chart PNG on the Dashboard. |
@@ -154,10 +155,12 @@ The only schedule data in the repo is the anonymised fixture in `fixtures/`, reb
 
 ```
 src/engine     pure calculation engine (no storage, no UI): pricing, progress,
-               curve, rollup, burn, capacity, trend, schedule diff
+               curve, rollup, burn, capacity, staffing, trend,
+               schedule diff
 src/storage    StorageAdapter: File System Access, IndexedDB, memory; atomic writes, lock, conflicts
 src/app        React screens: Dashboard, Import, Library, Locations, Budget Master,
-               Progress, Two-Week Log, Earned vs Actual, Settings
+               Progress, Two-Week Log, Earned vs Actual, Capacity,
+               Staffing Scenarios, Settings
 server/        serve.ps1 (no-install Windows server), serve.mjs (Node equivalent),
                build plugins for the service worker and the single-file bundle
 dist/          built application, committed

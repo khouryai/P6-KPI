@@ -32,6 +32,7 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
       { id: 'period', label: 'Two-Week Log' },
       { id: 'team', label: `Earned vs ${TERMS.built}` },
       { id: 'capacity', label: 'Capacity' },
+      { id: 'staffing', label: 'Staffing Scenarios' },
       { id: 'report', label: 'Status Report' },
     ],
   },

@@ -25,6 +25,7 @@ const Subsystems = lazy(() => import('./screens/Subsystems').then((m) => ({ defa
 const TeamHours = lazy(() => import('./screens/TeamHours').then((m) => ({ default: m.TeamHours })));
 const StatusReport = lazy(() => import('./screens/StatusReport').then((m) => ({ default: m.StatusReport })));
 const Capacity = lazy(() => import('./screens/Capacity').then((m) => ({ default: m.Capacity })));
+const Staffing = lazy(() => import('./screens/Staffing').then((m) => ({ default: m.Staffing })));
 const PeriodLog = lazy(() => import('./screens/PeriodLog').then((m) => ({ default: m.PeriodLog })));
 const IdRules = lazy(() => import('./screens/IdRules').then((m) => ({ default: m.IdRules })));
 const Settings = lazy(() => import('./screens/Settings').then((m) => ({ default: m.Settings })));
@@ -69,6 +70,9 @@ function Shell() {
       break;
     case 'capacity':
       screen = <Capacity />;
+      break;
+    case 'staffing':
+      screen = <Staffing />;
       break;
     case 'period':
       screen = <PeriodLog />;
