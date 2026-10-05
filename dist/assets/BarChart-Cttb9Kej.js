@@ -1,0 +1,1 @@
+import{r as a,a6 as t,a7 as o}from"./index-Vm18TCvU.js";var i=["axis","item"],p=a.forwardRef((r,e)=>a.createElement(t,{chartName:"BarChart",defaultTooltipEventType:"axis",validateTooltipEventTypes:i,tooltipPayloadSearcher:o,categoricalChartProps:r,ref:e}));export{p as B};

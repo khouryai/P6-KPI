@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { BudgetRow } from '../src/engine/types';
-import { FULL_SCOPE, groupByType, outOfScope, peopleNeeded, peopleOn, plannedRemaining, simulate, staffingTasks, type StaffScenario, type StaffingOptions } from '../src/engine/staffing';
+import { FULL_SCOPE, groupByType, phaseLines, plannedByPhase, outOfScope, peopleNeeded, peopleOn, plannedRemaining, simulate, staffingTasks, type StaffScenario, type StaffingOptions } from '../src/engine/staffing';
 
 const HPM = (40 * 52) / 12; // 173.33 h a month = 40 h a week
 const opts: StaffingOptions = { group: 'IXL', dataDate: '2026-10-01', efficiency: 1, hoursPerPersonPerMonth: HPM, utilisation: 1 };
@@ -218,7 +218,7 @@ describe('what is in the analysis', () => {
     expect(outOfScope(theirs, { ...FULL_SCOPE, includeSupport: false })).toBe('support');
     expect(outOfScope(mine, { ...FULL_SCOPE, includeSupport: false })).toBeNull();
     expect(outOfScope(mine, { ...FULL_SCOPE, workType: 'AC' })).toBe('work type');
-    expect(outOfScope(mine, { ...FULL_SCOPE, phase: 'P2' })).toBe('phase');
+    expect(outOfScope(mine, { ...FULL_SCOPE, phases: ['P2'] })).toBe('phase');
     expect(outOfScope(mine, { ...FULL_SCOPE, location: 'Y' })).toBe('location');
     expect(outOfScope(mine, { ...FULL_SCOPE, excludedTypes: ['test'] })).toBe('type');
   });
@@ -298,5 +298,38 @@ describe('hours burned', () => {
     // 80 budget hours take 100 at 0.8: 20 of them earn nothing.
     expect(r.burn.worked).toBeCloseTo(100, 6);
     expect(r.burn.lostToEfficiency).toBeCloseTo(20, 6);
+  });
+});
+
+describe('several phases at once', () => {
+  const p = (id: string, phase: string, hours: number, start: string, finish: string) =>
+    row(id, hours, start, finish, { phase, phaseName: `Phase ${phase.slice(1)}` });
+
+  it('keeps every phase picked and leaves out the rest', () => {
+    const ts = staffingTasks([p('A', 'P1', 40, '2026-10-01', '2026-10-07'), p('B', 'P2', 40, '2026-10-01', '2026-10-07'), p('C', 'P3', 40, '2026-10-01', '2026-10-07')], opts);
+    const scope = { ...FULL_SCOPE, phases: ['P1', 'P3'] };
+    expect(ts.filter((t) => !outOfScope(t, scope)).map((t) => t.activityId)).toEqual(['A', 'C']);
+  });
+
+  it('stacks the phases’ planned demand week by week, so an overlap shows', () => {
+    // P1 and P2 both planned in the first week: 70 h and 35 h over 7 days.
+    const ts = staffingTasks([p('A', 'P1', 70, '2026-10-01', '2026-10-07'), p('B', 'P2', 35, '2026-10-01', '2026-10-07'), p('C', 'P2', 70, '2026-10-08', '2026-10-14')], opts);
+    const [w1, w2] = plannedByPhase(ts, ['2026-10-08', '2026-10-15'], opts.dataDate);
+    expect(w1.P1).toBeCloseTo(70);
+    expect(w1.P2).toBeCloseTo(35);
+    expect(w2.P1 ?? 0).toBeCloseTo(0);
+    expect(w2.P2).toBeCloseTo(70);
+  });
+
+  it('records the hours worked in each phase each week, and a finish per phase', () => {
+    const ts = staffingTasks([p('A', 'P1', 40, '2026-10-01', '2026-10-07'), p('B', 'P2', 40, '2026-10-01', '2026-10-07')], opts);
+    const r = simulate(ts, team(1), opts);
+    const worked = r.series.slice(1).reduce((s, x) => s + (x.workedByPhase?.P1 ?? 0) + (x.workedByPhase?.P2 ?? 0), 0);
+    expect(worked).toBeCloseTo(80, 6);
+    const lines = phaseLines(r);
+    expect(lines.map((l) => l.phase)).toEqual(['P1', 'P2']);
+    // One person: P1 first, then P2 a week late.
+    expect(lines[0].forecastFinish).toBe('2026-10-07');
+    expect(lines[1].slipDays).toBe(7);
   });
 });

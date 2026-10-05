@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, ComposedChart, Bar } from 'recharts';
 import { useApp } from '../state';
 import { Page, Panel, Notice, SortableTable, CellInput, Badge, type Column, type HeroStat } from '../components/ui';
 import { DEFAULT_CAPACITY } from '../../engine/capacity';
 import {
   FULL_SCOPE,
+  peopleOn,
+  phaseLines,
+  plannedByPhase,
+  type PhaseLine,
   groupByType,
   outOfScope,
   targetDate,
@@ -41,6 +45,9 @@ const KEY = 'tc-staffing';
 const MAX_SCENARIOS = 4;
 /** Validated as a categorical set (CVD-safe on the light surface); fixed order, never cycled. */
 const SERIES = ['#0b6bcb', '#d97706', '#6d28d9', '#00875a'];
+/** Phases are their own categorical set, fixed order, never cycled: a ninth folds into Other. */
+const PHASE_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
+const OTHER = '#9a9da4';
 const INK = '#1a1a1a';
 const GRID = '#e4e7ec';
 const AXIS = '#6e7179';
@@ -91,7 +98,12 @@ function read(): Saved | null {
     if (!raw) return null;
     const v = JSON.parse(raw) as Saved;
     // Saved before the scope existed: everything else stands, the scope starts fresh.
-    return Array.isArray(v.scenarios) ? { ...v, scope: { ...DEFAULT_SCOPE, ...(v.scope ?? {}) } } : null;
+    if (!Array.isArray(v.scenarios)) return null;
+    // A scope saved when only one phase could be picked carries `phase`.
+    const old = (v.scope ?? {}) as Partial<StaffingScope> & { phase?: string };
+    const phases = Array.isArray(old.phases) ? old.phases : old.phase ? [old.phase] : [];
+    const { phase: _gone, ...rest } = old;
+    return { ...v, scope: { ...DEFAULT_SCOPE, ...rest, phases } };
   } catch {
     return null;
   }
@@ -253,6 +265,56 @@ export function Staffing() {
   }, [results, tasks, dataDate, plannedFinish]);
 
   const selected = results.find((r) => r.scenario.id === saved.selected) ?? results[0];
+
+  /*
+   * By phase, week by week. The colour belongs to the phase, not to its rank, so a
+   * phase keeps its colour whichever others are picked alongside it.
+   */
+  const [phaseView, setPhaseView] = useState<'planned' | 'worked'>('planned');
+  const phaseColor = useMemo(() => {
+    const m = new Map<string, string>();
+    options.phases.forEach(([code], i) => m.set(code, PHASE_COLORS[i] ?? OTHER));
+    return m;
+  }, [options.phases]);
+  const phaseName = useMemo(() => new Map(options.phases.map(([c, n]) => [c, n] as const)), [options.phases]);
+  const inPhases = useMemo(() => [...new Set(tasks.map((t) => t.phase))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), [tasks]);
+  const phaseChart = useMemo(() => {
+    if (!dataDate || !selected || chart.length < 2) return [];
+    const ends = chart.slice(1).map((c) => c.date as string);
+    const planned = plannedByPhase(tasks, ends, dataDate);
+    const { net } = weeklyHours({ hoursPerPersonPerMonth: hpm, utilisation: util });
+    return ends.map((end, w) => {
+      const row: Record<string, number | string> = { date: end };
+      const src = phaseView === 'planned' ? planned[w] : (selected.series[w + 1]?.workedByPhase ?? {});
+      for (const ph of inPhases) row[`p_${ph}`] = src[ph] ?? 0;
+      // The team on the first day of the week, at a full week's hours.
+      row.capacity = peopleOn(addDaysISO(end, -7), selected.scenario) * net;
+      return row;
+    });
+  }, [chart, tasks, selected, phaseView, inPhases, dataDate, hpm, util]);
+  const overWeeks = phaseChart.filter((r) => inPhases.reduce((s, ph) => s + (r[`p_${ph}`] as number), 0) > (r.capacity as number) + 0.5).length;
+  const lines: PhaseLine[] = useMemo(() => (selected ? phaseLines(selected) : []), [selected]);
+  const phaseColumns: Column<PhaseLine>[] = [
+    {
+      key: 'phase',
+      label: 'Phase',
+      locked: true,
+      value: (l) => l.phase,
+      render: (l) => (
+        <span className="flex items-center gap-1.5">
+          <span style={{ width: 9, height: 9, borderRadius: 2, background: phaseColor.get(l.phase) ?? OTHER, display: 'inline-block' }} />
+          <b>{l.phaseName}</b>
+        </span>
+      ),
+    },
+    { key: 'count', label: 'Activities', value: (l) => l.activities, num: true },
+    { key: 'effort', label: 'Effort h', value: (l) => l.effortHours, num: true, render: (l) => fmtHours(l.effortHours) },
+    { key: 'backlog', label: 'Backlog', value: (l) => l.backlogHours, num: true, render: (l) => (l.backlogHours > 0.5 ? <span className="tone-warn font-semibold">{fmtHours(l.backlogHours)} h</span> : '—') },
+    { key: 'pstart', label: 'Planned start', value: (l) => l.plannedStart ?? '', render: (l) => fmtDate(l.plannedStart) },
+    { key: 'pfinish', label: 'Planned finish', value: (l) => l.plannedFinish ?? '', render: (l) => fmtDate(l.plannedFinish) },
+    { key: 'ffinish', label: 'Forecast finish', value: (l) => l.forecastFinish ?? '', render: (l) => (l.forecastFinish ? <b>{fmtDate(l.forecastFinish)}</b> : <span className="tone-bad">not reached</span>) },
+    { key: 'slip', label: 'Slip', value: (l) => l.slipDays ?? null, num: true, render: (l) => <Slip days={l.slipDays} /> },
+  ];
 
   const addScenario = () => {
     if (saved.scenarios.length >= MAX_SCENARIOS) return;
@@ -446,15 +508,29 @@ export function Staffing() {
                 </button>
               </span>
             </div>
-            <label>
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Phase</div>
-              <select className="input" value={scope.phase} onChange={(e) => setScope({ phase: e.target.value })}>
-                <option value="">All</option>
-                {options.phases.map(([code, name]) => (
-                  <option key={code} value={code}>{name}</option>
-                ))}
-              </select>
-            </label>
+            <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                Phases <span className="font-normal normal-case tracking-normal">— pick several to see them overlap</span>
+              </div>
+              <span className="seg flex-wrap">
+                <button className={`seg-btn${scope.phases.length === 0 ? ' is-on' : ''}`} onClick={() => setScope({ phases: [] })}>
+                  All
+                </button>
+                {options.phases.map(([code, name]) => {
+                  const on = scope.phases.includes(code);
+                  return (
+                    <button
+                      key={code}
+                      className={`seg-btn${on ? ' is-on' : ''}`}
+                      aria-pressed={on}
+                      onClick={() => setScope({ phases: on ? scope.phases.filter((x) => x !== code) : [...scope.phases, code] })}
+                    >
+                      {name}
+                    </button>
+                  );
+                })}
+              </span>
+            </div>
             <label>
               <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Work type</div>
               <select className="input" value={scope.workType} onChange={(e) => setScope({ workType: e.target.value })}>
@@ -484,8 +560,8 @@ export function Staffing() {
                 )}
               </span>
             </label>
-            {(scope.phase || scope.workType || scope.location || scope.finishBy || scope.excludedTypes.length > 0) && (
-              <button className="btn btn-mini" onClick={() => setScope({ phase: '', workType: '', location: '', finishBy: null, excludedTypes: [] })}>
+            {(scope.phases.length > 0 || scope.workType || scope.location || scope.finishBy || scope.excludedTypes.length > 0) && (
+              <button className="btn btn-mini" onClick={() => setScope({ phases: [], workType: '', location: '', finishBy: null, excludedTypes: [] })}>
                 Clear filters
               </button>
             )}
@@ -670,6 +746,60 @@ export function Staffing() {
               </ResponsiveContainer>
             </div>
           </Panel>
+
+          {selected && phaseChart.length > 0 && (
+            <Panel
+              title={
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="card-title">By phase</h2>
+                  <span className="seg">
+                    <button className={`seg-btn${phaseView === 'planned' ? ' is-on' : ''}`} onClick={() => setPhaseView('planned')}>As P6 plans it</button>
+                    <button className={`seg-btn${phaseView === 'worked' ? ' is-on' : ''}`} onClick={() => setPhaseView('worked')}>As the team works it</button>
+                  </span>
+                  <span className="seg">
+                    {results.map((r) => (
+                      <button key={r.scenario.id} className={`seg-btn${selected.scenario.id === r.scenario.id ? ' is-on' : ''}`} onClick={() => patch({ selected: r.scenario.id })}>
+                        {r.scenario.name}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              }
+              meta={
+                phaseView === 'planned'
+                  ? `${saved.group} hours each week as the schedule plans them, stacked by phase, against ${selected.scenario.name}’s hours (line). ${overWeeks} ${overWeeks === 1 ? 'week asks' : 'weeks ask'} for more than the team has.${backlogHours > 0.5 ? ` Plus ${fmtHours(backlogHours)} h of backlog, due now.` : ''}`
+                  : `${saved.group} hours each week as ${selected.scenario.name} actually works them — backlog first, then the schedule — stacked by phase, against the team’s hours (line).`
+              }
+              className="mb-3"
+            >
+              <div className="w-full" style={{ height: 300 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={phaseChart} margin={{ top: 12, right: 32, left: 8, bottom: 0 }} barCategoryGap={1}>
+                    <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 10.5, fill: AXIS }} tickLine={false} axisLine={{ stroke: GRID }} minTickGap={36} tickFormatter={(v: string) => fmtDate(v)} />
+                    <YAxis tick={{ fontSize: 10.5, fill: AXIS }} tickLine={false} axisLine={false} width={58} tickFormatter={(v: number) => fmtHours(v)} />
+                    <Tooltip content={<ChartTip />} cursor={{ fill: 'rgba(15,17,21,0.04)' }} />
+                    <Legend wrapperStyle={{ fontSize: 11.5, paddingTop: 8 }} />
+                    {inPhases.map((ph) => (
+                      <Bar key={ph} dataKey={`p_${ph}`} name={phaseName.get(ph) ?? ph} stackId="phase" fill={phaseColor.get(ph) ?? OTHER} isAnimationActive={false} />
+                    ))}
+                    <Line type="stepAfter" dataKey="capacity" name={`${selected.scenario.name} — team hours`} stroke={INK} strokeWidth={2} dot={false} isAnimationActive={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-3">
+                <SortableTable
+                  tableId="staffing-phases"
+                  exportName={`Staffing ${saved.group} phases ${selected.scenario.name}`}
+                  rows={lines}
+                  columns={phaseColumns}
+                  rowKey={(l) => l.phase}
+                  defaultSort={{ key: 'phase', dir: 'asc' }}
+                  maxHeight="260px"
+                />
+              </div>
+            </Panel>
+          )}
 
           {selected && (
             <Panel

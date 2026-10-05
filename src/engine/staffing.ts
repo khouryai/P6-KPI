@@ -76,8 +76,11 @@ export type StaffingOptions = {
  */
 export type StaffingScope = {
   includeSupport: boolean;
-  /** Raw phase code ('' for all). */
-  phase: string;
+  /**
+   * Raw phase codes to keep. Empty keeps every phase. Several at once is the point:
+   * phases that run side by side draw on the same people.
+   */
+  phases: string[];
   workType: string;
   location: string;
   /** Activity types taken out by hand. */
@@ -86,7 +89,7 @@ export type StaffingScope = {
   finishBy: string | null;
 };
 
-export const FULL_SCOPE: StaffingScope = { includeSupport: true, phase: '', workType: '', location: '', excludedTypes: [], finishBy: null };
+export const FULL_SCOPE: StaffingScope = { includeSupport: true, phases: [], workType: '', location: '', excludedTypes: [], finishBy: null };
 
 export type StaffingTask = {
   activityId: string;
@@ -128,7 +131,14 @@ export type TaskForecast = StaffingTask & {
   slipDays: number | null;
 };
 
-export type StaffingPoint = { date: string; remaining: number };
+export type StaffingPoint = {
+  date: string;
+  remaining: number;
+  /** Hours worked in the week ending here, by raw phase code. Absent on the first point. */
+  workedByPhase?: Record<string, number>;
+  /** Hours the people supplied in the week ending here. */
+  supplied?: number;
+};
 
 export type ScenarioResult = {
   scenario: StaffScenario;
@@ -279,6 +289,8 @@ export function simulate(tasks: StaffingTask[], scenario: StaffScenario, opts: S
   let worked = 0;
   let weekSupplied = 0;
   let weekIdle = 0;
+  let weekByPhase: Record<string, number> = {};
+  let weekSuppliedForSeries = 0;
   let idleWeeks = 0;
 
   let remaining = left.reduce((s, h) => s + h, 0);
@@ -299,6 +311,7 @@ export function simulate(tasks: StaffingTask[], scenario: StaffScenario, opts: S
       const take = Math.min(left[i], cap, Math.max(tasks[i].crew * dayGross, tasks[i].plannedPace));
       left[i] -= take;
       cap -= take;
+      weekByPhase[tasks[i].phase] = (weekByPhase[tasks[i].phase] ?? 0) + take;
       remaining -= take;
       if (left[i] <= EPS) {
         left[i] = 0;
@@ -309,6 +322,7 @@ export function simulate(tasks: StaffingTask[], scenario: StaffScenario, opts: S
     supplied += capToday;
     worked += capToday - cap;
     weekSupplied += capToday;
+    weekSuppliedForSeries += capToday;
     weekIdle += cap;
     while (first < tasks.length && left[first] <= EPS) first++;
     if (backlogClear === null && backlogIdx.every((i) => left[i] <= EPS)) backlogClear = day;
@@ -317,9 +331,15 @@ export function simulate(tasks: StaffingTask[], scenario: StaffScenario, opts: S
       weekSupplied = 0;
       weekIdle = 0;
     }
-    if ((d + 1) % 7 === 0) series.push({ date: addDaysISO(opts.dataDate, d + 1), remaining: Math.max(0, remaining) });
+    if ((d + 1) % 7 === 0) {
+      series.push({ date: addDaysISO(opts.dataDate, d + 1), remaining: Math.max(0, remaining), workedByPhase: weekByPhase, supplied: weekSuppliedForSeries });
+      weekByPhase = {};
+      weekSuppliedForSeries = 0;
+    }
   }
-  if (open === 0 && series[series.length - 1].remaining > EPS) series.push({ date: addDaysISO(opts.dataDate, d), remaining: 0 });
+  if (open === 0 && series[series.length - 1].remaining > EPS) {
+    series.push({ date: addDaysISO(opts.dataDate, Math.ceil(d / 7) * 7), remaining: 0, workedByPhase: weekByPhase, supplied: weekSuppliedForSeries });
+  }
 
   const forecasts: TaskForecast[] = tasks.map((t, i) => ({
     ...t,
@@ -357,7 +377,7 @@ export function targetDate(tasks: StaffingTask[], opts: Pick<StaffingOptions, 'f
 /** Why a task is left out of the analysis, or null when it is in. */
 export function outOfScope(t: StaffingTask, scope: StaffingScope): string | null {
   if (t.role === 'support' && !scope.includeSupport) return 'support';
-  if (scope.phase && t.phase !== scope.phase) return 'phase';
+  if (scope.phases.length && !scope.phases.includes(t.phase)) return 'phase';
   if (scope.workType && t.workType !== scope.workType) return 'work type';
   if (scope.location && t.location !== scope.location) return 'location';
   if (scope.excludedTypes.some((x) => normKey(x) === normKey(t.activityType))) return 'type';
@@ -430,6 +450,76 @@ export function plannedRemaining(tasks: StaffingTask[], dates: string[], dataDat
     }
     return { date, remaining: rem };
   });
+}
+
+/**
+ * What the schedule asks of the group each week, by phase, with no regard to how
+ * many people there are: each activity's effort spread evenly over what is left of
+ * its planned window. Where the phases stack above the team's hours, the plan asks
+ * for more than the team has. Backlog is left out — it is due now, all of it, and
+ * is reported on its own rather than drawn as one impossible first week.
+ */
+export function plannedByPhase(tasks: StaffingTask[], weekEnds: string[], dataDate: string): Record<string, number>[] {
+  const out = weekEnds.map(() => ({}) as Record<string, number>);
+  for (const t of tasks) {
+    if (t.backlog || !t.plannedFinish) continue;
+    const from = t.plannedStart && t.plannedStart > dataDate ? t.plannedStart : dataDate;
+    if (t.plannedFinish < from) continue;
+    const days = daysBetween(from, t.plannedFinish) + 1;
+    const perDay = t.effortHours / days;
+    let prev = dataDate;
+    weekEnds.forEach((end, w) => {
+      // The week runs from `prev` up to the day before `end`.
+      const lo = from > prev ? from : prev;
+      const lastDay = addDaysISO(end, -1);
+      const hi = t.plannedFinish! < lastDay ? t.plannedFinish! : lastDay;
+      if (hi >= lo) out[w][t.phase] = (out[w][t.phase] ?? 0) + perDay * (daysBetween(lo, hi) + 1);
+      prev = end;
+    });
+  }
+  return out;
+}
+
+/** One phase of the analysis: how big, when planned, and when the scenario finishes it. */
+export type PhaseLine = {
+  phase: string;
+  phaseName: string;
+  activities: number;
+  effortHours: number;
+  backlogHours: number;
+  plannedStart: string | null;
+  plannedFinish: string | null;
+  /** null when any of its activities is not reached. */
+  forecastFinish: string | null;
+  slipDays: number | null;
+};
+
+export function phaseLines(result: ScenarioResult): PhaseLine[] {
+  const by = new Map<string, TaskForecast[]>();
+  for (const t of result.tasks) {
+    const g = by.get(t.phase);
+    if (g) g.push(t);
+    else by.set(t.phase, [t]);
+  }
+  return [...by.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+    .map(([phase, g]) => {
+      const starts = g.map((t) => t.plannedStart).filter((x): x is string => !!x).sort();
+      const finishes = g.map((t) => t.plannedFinish).filter((x): x is string => !!x).sort();
+      const plannedFinish = finishes[finishes.length - 1] ?? null;
+      const forecastFinish = g.every((t) => t.forecastFinish) ? g.map((t) => t.forecastFinish!).sort().pop()! : null;
+      return {
+        phase,
+        phaseName: g[0].phaseName,
+        activities: g.length,
+        effortHours: g.reduce((s, t) => s + t.effortHours, 0),
+        backlogHours: g.filter((t) => t.backlog).reduce((s, t) => s + t.effortHours, 0),
+        plannedStart: starts[0] ?? null,
+        plannedFinish,
+        forecastFinish,
+        slipDays: forecastFinish && plannedFinish ? daysBetween(plannedFinish, forecastFinish) : null,
+      };
+    });
 }
 
 /**
