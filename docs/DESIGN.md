@@ -677,7 +677,8 @@ leaving them unexplained makes the team carry it. The log does neither.
   row's own gap, `planned − Σ shortfall + ahead = earned` holds exactly; a test pins it
   across three years of fortnights. The **workable plan** is planned less the
   constraint hours, and achieved over it sits *beside* achieved over plan, never in
-  place of it.
+  place of it. The waterfall draws only four steps — planned, held by constraints,
+  workable plan, achieved; the rest of the gap is in the reasons list beside it.
 - **The current schedule** is the same spread over P6's current dates — the S-curve's
   forecast line read for the window — summed over every in-budget row, so it can
   include activities the current schedule moved into the window. Planned minus current

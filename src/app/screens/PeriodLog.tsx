@@ -1070,12 +1070,11 @@ export function PeriodLog() {
           every later period then correctly reports nothing for it. The total earned never changes — only which weeks it belongs to.
         </p>
         <p className="mt-1 text-[12px] text-[var(--text-muted)]">
-          <b>From planned to achieved</b> never takes anything out of the plan. It splits the gap, hour for hour, by why: each activity&rsquo;s planned hours in
-          the window less what it earned, filed under the reason on its row. A reason marked <b>constraint</b> — a predecessor not done, no access, not ready — puts
-          those hours under <b>Held by constraints</b>, and the <b>workable plan</b> is planned less exactly those hours. MISSED and NOT STARTED rows with no reason sit
-          under <b>No reason given yet</b> until somebody answers them; running rows that are slower than the baseline spread sit under <b>Running behind plan</b>.
-          Only MISSED and NOT STARTED rows take a reason: once an activity starts, it is no longer waiting on anything, so its reason stops applying and
-          whatever it is still short of its plan is pace. The steps always add back to achieved.
+          <b>From planned to achieved</b> never takes anything out of the plan. A MISSED or NOT STARTED row whose reason is marked <b>constraint</b> — a
+          predecessor not done, no access, not ready — puts what it fell short of its plan under <b>Held by constraints</b>, and the <b>workable plan</b> is planned
+          less exactly those hours. Achieved is then read against both. The rest of the gap — the team&rsquo;s own reasons, and rows nobody has answered yet — is in
+          the list beside it, with the hours each one accounts for. Only MISSED and NOT STARTED rows take a reason: once an activity starts it is no longer
+          waiting on anything, so its reason stops applying. The steps always add back to achieved.
         </p>
         <p className="mt-1 text-[12px] text-[var(--text-muted)]">
           <b>Current schedule</b> is the same spread taken over P6&rsquo;s current dates instead of the baseline&rsquo;s — the S-curve&rsquo;s forecast line, read for this
