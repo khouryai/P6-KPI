@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { computeModel } from '../src/engine/compute';
-import { periodLog, periodBridge, addDays, canTakeReason, needsReason, SHORTFALL_CAUSES, type PeriodActivity, type PeriodBridge } from '../src/engine/period';
+import { periodLog, periodBridge, addDays, needsReason, SHORTFALL_CAUSES, type PeriodActivity, type PeriodBridge } from '../src/engine/period';
 import { bridgeFor, isOutsideControl, setMissedReason, setOutsideControl } from '../src/app/missedReasons';
 import { fixtureModelInput, makeActivity } from './helpers';
 import { DEFAULT_SETTINGS } from '../src/engine/types';
@@ -91,17 +91,44 @@ describe('the scenario reads as intended', () => {
 });
 
 describe('which rows take a reason', () => {
-  it('missed and not started are owed one; finished rows are not offered one', () => {
+  it('missed and not started take one; finished rows do not', () => {
     expect(needsReason(row(PRED))).toBe(true);
     expect(needsReason(row(IDLE))).toBe(true);
-    expect(canTakeReason(row(DONE))).toBe(false);
+    expect(needsReason(row(DONE))).toBe(false);
   });
 
-  it('a running row behind its plan can take one without being owed one', () => {
-    const running = { ...row(SLOW), outcome: 'CONTINUED' as const };
-    expect(needsReason(running)).toBe(false);
-    expect(canTakeReason(running)).toBe(true);
-    expect(canTakeReason({ ...running, earnedHours: running.plannedHours + 1 })).toBe(false);
+  it('a running row does not take one, however far behind its plan it is', () => {
+    expect(needsReason({ ...row(SLOW), outcome: 'STARTED' })).toBe(false);
+    expect(needsReason({ ...row(SLOW), outcome: 'CONTINUED' })).toBe(false);
+  });
+
+  /*
+   * The complaint this came from: an activity given a reason while it waited was
+   * then started, moved to STARTED, and still offered — and was still filed under —
+   * the reason it no longer had.
+   */
+  it('keying a start drops the reason it was given while it waited', () => {
+    const { box, update } = harness();
+    setMissedReason(update, PRED, TO, 'Predecessor work not complete');
+    const waiting = bridgeFor(box.log, log.activities, TO);
+    expect(waiting.shortfall.CONSTRAINT).toBeCloseTo(row(PRED).plannedHours, 6);
+
+    const started = computeModel({
+      ...scenario(),
+      testProgress: scenario().testProgress.map((t) => (t.activityId === PRED ? { ...t, pctOverride: 0.05, testStartOverride: '2026-08-28' } : t)),
+    });
+    const after = periodLog(started.rows, FROM, TO);
+    const pred = after.activities.find((a) => a.activityId === PRED)!;
+    expect(pred.outcome).toBe('STARTED');
+    expect(needsReason(pred)).toBe(false);
+
+    const b = bridgeFor(box.log, after.activities, TO);
+    balances(b);
+    expect(b.shortfall.CONSTRAINT).toBe(0);
+    expect(b.byReason).toEqual([]);
+    expect(b.shortfall.PACE).toBeCloseTo(Math.max(0, pred.plannedHours - pred.earnedHours), 6);
+    // The answer is still on file for the period it was given in.
+    expect(box.log.entries).toHaveLength(1);
   });
 });
 
@@ -154,9 +181,9 @@ describe('the bridge from planned to achieved', () => {
     expect(isOutsideControl(box.log, 'Weather')).toBe(false);
   });
 
-  it('a running row with no reason is pace, not an unanswered miss', () => {
+  it('a running row is pace, not an unanswered miss, even when the lookup has a reason for it', () => {
     const running = log.activities.map((a) => (a.activityId === SLOW ? { ...a, outcome: 'CONTINUED' as const } : a));
-    const b = periodBridge(running, () => null);
+    const b = periodBridge(running, (a) => (a.activityId === SLOW ? { reason: 'Weather', outsideControl: true } : null));
     balances(b);
     expect(b.shortfall.PACE).toBeCloseTo(row(SLOW).plannedHours - row(SLOW).earnedHours, 6);
     expect(b.activitiesBy.PACE).toBe(1);

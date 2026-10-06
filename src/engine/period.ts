@@ -590,8 +590,12 @@ export type PeriodBridge = {
 };
 
 /**
- * Whether a row is one the review owes a reason for. MISSED and NOT STARTED are:
- * they are the activities the plan was counting on that did not happen.
+ * Whether a row takes a reason: MISSED and NOT STARTED, the activities the plan was
+ * counting on that did not happen. Nothing else does. Once an activity has started
+ * it is no longer behind for want of starting, so a reason given while it was
+ * waiting stops applying — it is kept on file for the period it was given in, but
+ * the row no longer offers it and the bridge no longer reads it. Whatever such a row
+ * still falls short of its baseline spread is pace.
  */
 export function needsReason(a: PeriodActivity): boolean {
   return a.outcome === 'MISSED' || a.outcome === 'NOT STARTED';
@@ -600,16 +604,6 @@ export function needsReason(a: PeriodActivity): boolean {
 /** The hours this row fell short of its own plan in the window. Zero when it kept up. */
 export function rowShortfall(a: PeriodActivity): number {
   return Math.max(0, a.plannedHours - a.earnedHours);
-}
-
-/**
- * Whether a row can take a reason at all: any row the review owes one for, and any
- * running row that fell behind its plan — "resource not available" on a test that
- * is crawling is as much an answer as one on a test that never began.
- */
-export function canTakeReason(a: PeriodActivity): boolean {
-  if (needsReason(a)) return true;
-  return (a.outcome === 'STARTED' || a.outcome === 'CONTINUED') && rowShortfall(a) > 1e-6;
 }
 
 export function periodBridge(activities: PeriodActivity[], reasonOf: (a: PeriodActivity) => BridgeReason): PeriodBridge {
@@ -625,11 +619,11 @@ export function periodBridge(activities: PeriodActivity[], reasonOf: (a: PeriodA
     ahead += Math.max(0, a.earnedHours - a.plannedHours);
     const short = rowShortfall(a);
     /*
-     * A reason is read for every row that can take one, even one with no shortfall
-     * in hours — a NOT STARTED activity whose baseline starts on the window's last
-     * day has a story and almost no hours, and it still belongs in the tally.
+     * A reason is read for every row that takes one, even one with no shortfall in
+     * hours — a NOT STARTED activity whose baseline starts on the window's last day
+     * has a story and almost no hours, and it still belongs in the tally.
      */
-    const r = canTakeReason(a) ? reasonOf(a) : null;
+    const r = needsReason(a) ? reasonOf(a) : null;
     let cause: ShortfallCause;
     if (a.outcome === 'COMPLETED' || a.outcome === 'COMPLETED EARLY') cause = 'EARLIER';
     else if (r) cause = r.outsideControl ? 'CONSTRAINT' : 'TEAM';

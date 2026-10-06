@@ -88,7 +88,7 @@ export function bridgeSteps(b: PeriodBridge): BridgeStep[] {
   down(
     'pace',
     'Running behind plan',
-    'Activities under way with no reason given, earning slower than the baseline spread. Give one a reason on its row and its hours move to that step.',
+    'Activities under way, earning slower than the baseline spread. They have started, so they are not waiting on anything and take no reason.',
     b.shortfall.PACE,
     BRIDGE_COLOURS.pace,
     b.activitiesBy.PACE,

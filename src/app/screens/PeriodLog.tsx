@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, ActualDateCell, Panel, Notice, Badge, type Column, type HeroStat } from '../components/ui';
-import { periodLog, addDays, OUTCOMES, canTakeReason, needsReason, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
+import { periodLog, addDays, OUTCOMES, needsReason, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
 import { fmtHours, fmtPct, fmtDate, todayISO, num } from '../format';
 import { isValidISO } from '../../engine/dates';
 import { normKey } from '../../engine/keys';
@@ -93,15 +93,12 @@ function MissedReasonCell({
   value,
   options,
   carriedFrom,
-  optional,
   outside,
   onChange,
   onAdd,
 }: {
   value: string;
   options: string[];
-  /** A running row behind plan: a reason is welcome but not owed. */
-  optional?: boolean;
   /** The chosen reason is outside the team's control, so its hours leave the workable plan. */
   outside?: boolean;
   /** The period this answer was written against, when it was not this one. */
@@ -118,7 +115,7 @@ function MissedReasonCell({
       title={
         (carriedFrom
           ? `${value}\n\nCarried from the period ending ${fmtDate(carriedFrom)}. It stays with the activity until somebody gives this period its own answer; picking one here records it against this period.`
-          : value || (optional ? 'Running behind its plan. A reason is optional here — give one and its hours move to that reason in the bridge.' : 'Say why this activity is behind. Pick a reason, or add one of your own.')) + control
+          : value || 'Say why this activity is behind. Pick a reason, or add one of your own.') + control
       }
       onChange={(e) => {
         if (e.target.value !== ADD_REASON) return onChange(e.target.value);
@@ -129,7 +126,7 @@ function MissedReasonCell({
         onChange(reason);
       }}
     >
-      <option value="">{optional ? '— optional —' : '— why? —'}</option>
+      <option value="">— why? —</option>
       {options.map((o) => (
         <option key={o} value={o}>{o}</option>
       ))}
@@ -321,7 +318,7 @@ export function PeriodLog() {
       if (!list.length) continue;
       lines.push(`${o} (${list.length})`);
       for (const a of list) {
-        const why = canTakeReason(a) ? effectiveReasonFor(missedReasons, a.activityId, log.to)?.entry.reason : undefined;
+        const why = needsReason(a) ? effectiveReasonFor(missedReasons, a.activityId, log.to)?.entry.reason : undefined;
         const note = keyed(a.activityId)?.note;
         lines.push(
           `  ${a.activityId}  ${a.activityName}  ${fmtPct(a.pctComplete, 0)} complete${percent ? '' : `  ${fmtHours(a.earnedHours, 1)} h earned`}${why ? `  [${why}]` : ''}${note ? `  — ${note}` : ''}`,
@@ -372,16 +369,15 @@ export function PeriodLog() {
     {
       key: 'reason',
       label: 'Why behind',
-      value: (a) => (canTakeReason(a) ? effectiveReasonFor(missedReasons, a.activityId, log.to)?.entry.reason ?? '' : ''),
-      hint: 'Why this activity is behind its baseline: missed, not started, or running slow. A reason outside the team’s control (a predecessor, access, readiness) takes its hours out of the workable plan. It sticks with the Activity ID, so nudging the end date by a day does not lose it; each answer is still stamped with the period it was given for, and a shown answer from another period is marked as carried.',
+      value: (a) => (needsReason(a) ? effectiveReasonFor(missedReasons, a.activityId, log.to)?.entry.reason ?? '' : ''),
+      hint: 'Why this activity is behind its baseline: missed, or not started. Once it starts the question goes away and the column clears. A reason outside the team’s control (a predecessor, access, readiness) takes its hours out of the workable plan. It sticks with the Activity ID, so nudging the end date by a day does not lose it; each answer is still stamped with the period it was given for, and a shown answer from another period is marked as carried.',
       render: (a) => {
-        if (!canTakeReason(a)) return <span className="text-[var(--text-subtle)]">—</span>;
+        if (!needsReason(a)) return <span className="text-[var(--text-subtle)]">—</span>;
         const eff = effectiveReasonFor(missedReasons, a.activityId, log.to);
         return (
           <MissedReasonCell
             value={eff?.entry.reason ?? ''}
             options={catalogue}
-            optional={!needsReason(a)}
             outside={eff ? outsideOf(eff.entry.reason) : false}
             carriedFrom={eff?.carried ? eff.entry.periodEnd : undefined}
             onChange={(reason) => setMissedReason(actions.update, a.activityId, log.to, reason)}
@@ -973,7 +969,7 @@ export function PeriodLog() {
           <div className="grid gap-4 lg:grid-cols-[1fr_340px] lg:gap-8">
             <PlanBridge bridge={bridge} val={val} />
             <div className="text-[12px]">
-              <div className="eyebrow mb-1.5">Why {reasonedCount} {reasonedCount === 1 ? 'activity is' : 'activities are'} behind</div>
+              <div className="eyebrow mb-1.5">{reasonedCount === 0 ? 'Missed or not started' : `Why ${reasonedCount} ${reasonedCount === 1 ? 'activity is' : 'activities are'} behind`}</div>
               {bridge.byReason.length === 0 && reasonTally.unexplained === 0 && <div className="text-[var(--text-muted)]">Nothing behind in this window.</div>}
               <table className="w-full">
                 <tbody>
@@ -1077,8 +1073,9 @@ export function PeriodLog() {
           <b>From planned to achieved</b> never takes anything out of the plan. It splits the gap, hour for hour, by why: each activity&rsquo;s planned hours in
           the window less what it earned, filed under the reason on its row. A reason marked <b>constraint</b> — a predecessor not done, no access, not ready — puts
           those hours under <b>Held by constraints</b>, and the <b>workable plan</b> is planned less exactly those hours. MISSED and NOT STARTED rows with no reason sit
-          under <b>No reason given yet</b> until somebody answers them; running rows that are simply slower than the baseline spread sit under <b>Running behind plan</b>
-          unless they are given a reason too. The steps always add back to achieved.
+          under <b>No reason given yet</b> until somebody answers them; running rows that are slower than the baseline spread sit under <b>Running behind plan</b>.
+          Only MISSED and NOT STARTED rows take a reason: once an activity starts, it is no longer waiting on anything, so its reason stops applying and
+          whatever it is still short of its plan is pace. The steps always add back to achieved.
         </p>
         <p className="mt-1 text-[12px] text-[var(--text-muted)]">
           <b>Current schedule</b> is the same spread taken over P6&rsquo;s current dates instead of the baseline&rsquo;s — the S-curve&rsquo;s forecast line, read for this

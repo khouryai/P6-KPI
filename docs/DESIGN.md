@@ -662,8 +662,11 @@ still waiting on another team's predecessor puts half its budget into this windo
 plan. Taking those activities out of the plan would hide the problem from the project;
 leaving them unexplained makes the team carry it. The log does neither.
 
-- **Reasons go on NOT STARTED as well as MISSED** (and, optionally, on a running row
-  behind its plan). They are the same per-activity, per-period entries as before.
+- **Reasons go on NOT STARTED as well as MISSED**, and on nothing else. They are the
+  same per-activity, per-period entries as before. Once an activity starts it is no
+  longer waiting on anything, so the row stops offering a reason and the bridge stops
+  reading one; a reason given while it waited stays on file for that period, and
+  whatever the running activity is still short of its baseline spread is pace.
 - **Each reason is a constraint or the team's own.** `MissedReasonLog.outsideControl`
   holds what a person set; otherwise `DEFAULT_OUTSIDE_CONTROL` decides; a reason
   somebody typed is the team's own until they say otherwise, so nothing shrinks the

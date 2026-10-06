@@ -3,7 +3,7 @@ import { useApp } from '../state';
 import { Page, Panel, Notice, Badge, SortableTable, type Column, type HeroStat } from '../components/ui';
 import { CurveChart } from '../components/CurveChart';
 import { buildCurve, rowTotals } from '../../engine/compute';
-import { periodLog, addDays, OUTCOMES, canTakeReason, needsReason, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
+import { periodLog, addDays, OUTCOMES, needsReason, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
 import { trendFrom } from '../../engine/trend';
 import { effectiveReasonFor, tallyReasons, bridgeFor, isOutsideControl } from '../missedReasons';
 import { PlanBridge, bridgePaint, BRIDGE_COLOURS } from '../components/PlanBridge';
@@ -296,15 +296,15 @@ export function StatusReport() {
     {
       key: 'reason',
       label: 'Why behind',
-      value: (a) => (canTakeReason(a) ? reasonFor(a.activityId)?.entry.reason ?? '' : ''),
+      value: (a) => (needsReason(a) ? reasonFor(a.activityId)?.entry.reason ?? '' : ''),
       exportValue: (a) => {
-        const eff = canTakeReason(a) ? reasonFor(a.activityId) : undefined;
+        const eff = needsReason(a) ? reasonFor(a.activityId) : undefined;
         return eff ? `${eff.entry.reason}${outsideOf(eff.entry.reason) ? ' (constraint)' : ''}` : '';
       },
       render: (a) => {
-        if (!canTakeReason(a)) return <span className="text-[var(--text-subtle)]">—</span>;
+        if (!needsReason(a)) return <span className="text-[var(--text-subtle)]">—</span>;
         const eff = reasonFor(a.activityId);
-        if (!eff) return needsReason(a) ? <span className="tone-bad text-[12px]">no reason given yet</span> : <span className="text-[var(--text-subtle)]">—</span>;
+        if (!eff) return <span className="tone-bad text-[12px]">no reason given yet</span>;
         const outside = outsideOf(eff.entry.reason);
         return (
           <span
@@ -784,7 +784,7 @@ export function StatusReport() {
             <PlanBridge bridge={bridge} val={val} />
             {reasonLines().length > 0 && (
               <div className="mt-3 border-t border-[var(--line-soft)] pt-3">
-                <div className="eyebrow mb-1.5">Why {reasonedCount} {reasonedCount === 1 ? 'activity is' : 'activities are'} behind</div>
+                <div className="eyebrow mb-1.5">{reasonedCount === 0 ? 'Missed or not started' : `Why ${reasonedCount} ${reasonedCount === 1 ? 'activity is' : 'activities are'} behind`}</div>
                 <ul className="grid gap-x-6 gap-y-0.5 text-[12px] text-[var(--text-muted)] sm:grid-cols-2">
                   {reasonLines().map((l) => (
                     <li key={l}>{l}</li>
