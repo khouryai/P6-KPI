@@ -790,6 +790,29 @@ select.cell-input { padding: 3px 22px 3px 6px; }
   font-size: 13px;
 }
 
+/* The bridge from planned to achieved. A waterfall laid on its side so every step
+   keeps its own words; the bars float between the running totals either side. */
+.bridge { display: flex; flex-direction: column; gap: 6px; }
+.bridge-row { display: flex; align-items: center; gap: 10px; }
+.bridge-key {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 200px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.bridge-row.is-total .bridge-key { color: var(--text); font-weight: 600; }
+.bridge-key i { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.bridge-n { color: var(--text-subtle); font-weight: 400; }
+.bridge-track { position: relative; flex: 1; height: 14px; min-width: 80px; border-radius: 4px; background: var(--surface-3); }
+.bridge-track > span { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+.bridge-val { width: 92px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12.5px; }
+.bridge-val.is-down { color: var(--bad); }
+.bridge-val.is-up { color: var(--good); }
+@media (max-width: 640px) { .bridge-key { width: 132px; } }
+
 .outcome-tile {
   display: flex;
   flex-direction: column;
@@ -860,6 +883,24 @@ select.cell-input { padding: 3px 22px 3px 6px; }
   cursor: pointer;
 }
 .reason-chip-x:hover { background: var(--bad-light); color: var(--bad); }
+/* Whether a reason is the team's own or a constraint outside its control. Its own
+   word, so it never relies on the colour. A button in the list, a label elsewhere. */
+.reason-ctl {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--surface-3);
+  font-family: var(--f-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.reason-ctl.is-outside { background: var(--info-light); border-color: var(--info-border); color: var(--info); }
+button.reason-ctl { cursor: pointer; }
+button.reason-ctl:hover { border-color: var(--border-strong); }
 
 /* ---------------------------------------------------------------------------
    Choosing columns. The trigger sits above the table's top-right corner, which

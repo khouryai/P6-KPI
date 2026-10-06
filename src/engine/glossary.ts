@@ -87,9 +87,17 @@ export const GLOSSARY: Record<string, string> = {
   'Phase of plan': 'The achieved-against-planned figure for this activity\u2019s whole phase over this period. The same for every activity of the phase: it judges the phase, not the row.',
   'Phase complete': 'How complete this activity\u2019s phase is at the end of the period, measured against that phase\u2019s own budget rather than the whole job\u2019s.',
   'Why missed': 'Why this activity did not finish when the baseline said it would. It stays with the Activity ID, so moving the end date does not lose it; each answer is stamped with the period it was given for, and one shown from another period is marked as carried.',
+  'Why behind': 'Why this activity is behind its baseline: missed, not started, or running slower than planned. A reason outside the team\u2019s control (a predecessor, access, readiness) moves its hours out of the workable plan. It stays with the Activity ID, so moving the end date does not lose it; each answer is stamped with the period it was given for, and one shown from another period is marked as carried.',
+  'Sched. start': 'Start date in the current schedule, and how many days its logic has moved it past the baseline start. Once the activity has started it is the actual start.',
+  'Current schedule': 'Budget hours the current schedule puts inside this period: the same spread as planned, over P6\u2019s current dates instead of the baseline\u2019s. Planned minus this is the slip the schedule\u2019s own logic already carries.',
+  'Current sched. h': 'Budget hours the current schedule puts inside this period for this activity, over P6\u2019s current start and finish.',
+  'Current sched.': 'This activity\u2019s current-schedule hours in the period, as a share of the whole project budget.',
+  'Of current schedule': 'Achieved hours over what the current schedule puts in this period.',
+  'Of workable plan': 'Achieved hours over the workable plan: planned, less the hours held by reasons outside the team\u2019s control. The full plan is never hidden \u2014 this is the figure beside it.',
   'Progress as at': 'The date an unfinished activity\u2019s percent complete was true as at. Until it is set the hours spread from its actual start to the data date, so a stale activity shows movement in every month and every review; setting it lands them in the weeks the work was really done. It is not a finish \u2014 the activity is still open.',
   'Progress note': 'Anything about this activity worth saying at a review. Kept against the Activity ID and shared with the Progress screen \u2014 write it in either place. Not the Budget Master note, which explains a pricing or visibility decision.',
   'Missed explained': 'How many of the period\u2019s missed activities have a reason recorded against them. The rest are the ones the review has not asked about yet.',
+  'Behind explained': 'How many of the period\u2019s missed and not-started activities have a reason recorded against them. The rest are the ones the review has not asked about yet.',
 
   // --- progress ------------------------------------------------------------
   '%': 'Percent complete. The percent you keyed, or P6 duration when nobody has keyed one.',

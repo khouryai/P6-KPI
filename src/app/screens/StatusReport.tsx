@@ -3,9 +3,10 @@ import { useApp } from '../state';
 import { Page, Panel, Notice, Badge, SortableTable, type Column, type HeroStat } from '../components/ui';
 import { CurveChart } from '../components/CurveChart';
 import { buildCurve, rowTotals } from '../../engine/compute';
-import { periodLog, addDays, OUTCOMES, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
+import { periodLog, addDays, OUTCOMES, canTakeReason, needsReason, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
 import { trendFrom } from '../../engine/trend';
-import { effectiveReasonFor, tallyReasons } from '../missedReasons';
+import { effectiveReasonFor, tallyReasons, bridgeFor, isOutsideControl } from '../missedReasons';
+import { PlanBridge, bridgePaint, BRIDGE_COLOURS } from '../components/PlanBridge';
 import { downloadBytes, stamp } from '../export';
 import { paintReport, paintTableFromDom, PAINT_TARGETS, paintChartWidth, type PaintBlock, type PaintTone } from '../reportPaint';
 import { fmtHours, fmtPct, fmtDate, todayISO } from '../format';
@@ -60,8 +61,9 @@ function achievedTone(a: number | null): 'good' | 'warn' | 'bad' | 'muted' {
   return a >= 1 ? 'good' : a >= 0.8 ? 'warn' : 'bad';
 }
 
-const PLANNED = '#6d28d9';
-const ACHIEVED = '#00875a';
+const PLANNED = BRIDGE_COLOURS.planned;
+const ACHIEVED = BRIDGE_COLOURS.achieved;
+const CURRENT = BRIDGE_COLOURS.current;
 
 /**
  * The status report.
@@ -106,7 +108,9 @@ export function StatusReport() {
   const [showPhaseTable, setShowPhaseTable] = useState(true);
   const [showLog, setShowLog] = useState(true);
   const [showLogActivities, setShowLogActivities] = useState(true);
-  const [logOutcomes, setLogOutcomes] = useState<PeriodOutcome[]>(['MISSED', 'COMPLETED']);
+  /** The planned-to-achieved bridge: where the plan went, and how much of it was workable. */
+  const [showBridge, setShowBridge] = useState(true);
+  const [logOutcomes, setLogOutcomes] = useState<PeriodOutcome[]>(['MISSED', 'NOT STARTED', 'COMPLETED']);
   const [showTrend, setShowTrend] = useState(false);
   /** What the picture is meant to be dropped into, which sets how big its type comes out. */
   const [pngTarget, setPngTarget] = useState<keyof typeof PAINT_TARGETS>('landscape');
@@ -150,12 +154,22 @@ export function StatusReport() {
     [log.phases],
   );
 
-  const missed = useMemo(() => log.activities.filter((a) => a.outcome === 'MISSED'), [log.activities]);
+  /** Missed and not started: the rows a reason is owed for, read exactly as the Two-Week Log reads them. */
+  const behind = useMemo(() => log.activities.filter(needsReason), [log.activities]);
   const reasonTally = useMemo(
-    () => tallyReasons(state.data.missedReasons, missed.map((a) => a.activityId), end),
-    [state.data.missedReasons, missed, end],
+    () => tallyReasons(state.data.missedReasons, behind.map((a) => a.activityId), end),
+    [state.data.missedReasons, behind, end],
   );
   const reasonFor = (id: string) => effectiveReasonFor(state.data.missedReasons, id, end);
+  const outsideOf = (reason: string) => isOutsideControl(state.data.missedReasons, reason);
+  const bridge = useMemo(() => bridgeFor(state.data.missedReasons, log.activities, end), [state.data.missedReasons, log.activities, end]);
+  const phaseBridge = useMemo(
+    () => new Map(log.phases.map((p) => [p.key, bridgeFor(state.data.missedReasons, log.activities.filter((a) => a.phase === p.key), end)])),
+    [state.data.missedReasons, log.activities, log.phases, end],
+  );
+  const constrained = bridge.shortfall.CONSTRAINT > 1e-9;
+  /** Every activity the reasons panel lists: the ones with a reason, and the ones still owed one. */
+  const reasonedCount = bridge.byReason.reduce((n, t) => n + t.activities, 0) + reasonTally.unexplained;
 
   /**
    * Hours, or the same hours as a share of the whole job. Every figure on the page
@@ -166,7 +180,14 @@ export function StatusReport() {
   const budget = log.projectBudgetHours;
   const val = (hours: number, digits = 0) => (percent ? fmtPct(budget ? hours / budget : 0, 2) : `${fmtHours(hours, digits)} h`);
   const variance = log.earnedHours - log.plannedHours;
-  const achievedWidth = log.achievement === null ? 0 : Math.min(100, Math.round(log.achievement * 100));
+  /** Planned, the current schedule and achieved on one scale, as the Two-Week Log draws them. */
+  const barMax = Math.max(log.plannedHours, log.currentPlannedHours, log.earnedHours, 1e-9);
+  const barPct = (h: number) => Math.min(1, Math.max(0, h / barMax));
+  const planBars = [
+    { key: 'planned', label: 'Planned', short: 'Planned', hours: log.plannedHours, color: PLANNED },
+    { key: 'current', label: 'Current schedule', short: 'Current', hours: log.currentPlannedHours, color: CURRENT },
+    { key: 'achieved', label: 'Achieved', short: 'Achieved', hours: log.earnedHours, color: ACHIEVED },
+  ];
 
   const heading = title.trim() || 'Testing and Commissioning — Status Report';
 
@@ -182,10 +203,17 @@ export function StatusReport() {
         { label: 'Curves', value: String(curves.length), tone: 'blue' },
       ]
     : [{ label: 'Curves', value: String(curves.length), tone: 'blue' }];
-  if (showLog && missed.length > 0) {
+  if (showLog && constrained) {
     heroStats.splice(3, 0, {
-      label: 'Missed explained',
-      value: `${missed.length - reasonTally.unexplained}/${missed.length}`,
+      label: 'Of workable plan',
+      value: bridge.workableAchievement === null ? '—' : fmtPct(bridge.workableAchievement, 0),
+      tone: bridge.workableAchievement === null ? 'muted' : bridge.workableAchievement >= 1 ? 'good' : bridge.workableAchievement >= 0.8 ? 'amber' : 'red',
+    });
+  }
+  if (showLog && behind.length > 0) {
+    heroStats.splice(heroStats.length - 1, 0, {
+      label: 'Behind explained',
+      value: `${behind.length - reasonTally.unexplained}/${behind.length}`,
       tone: reasonTally.unexplained === 0 ? 'good' : 'amber',
     });
   }
@@ -267,18 +295,27 @@ export function StatusReport() {
      */
     {
       key: 'reason',
-      label: 'Why missed',
-      value: (a) => reasonFor(a.activityId)?.entry.reason ?? '',
+      label: 'Why behind',
+      value: (a) => (canTakeReason(a) ? reasonFor(a.activityId)?.entry.reason ?? '' : ''),
+      exportValue: (a) => {
+        const eff = canTakeReason(a) ? reasonFor(a.activityId) : undefined;
+        return eff ? `${eff.entry.reason}${outsideOf(eff.entry.reason) ? ' (constraint)' : ''}` : '';
+      },
       render: (a) => {
-        if (a.outcome !== 'MISSED') return <span className="text-[var(--text-subtle)]">—</span>;
+        if (!canTakeReason(a)) return <span className="text-[var(--text-subtle)]">—</span>;
         const eff = reasonFor(a.activityId);
-        if (!eff) return <span className="tone-bad text-[12px]">no reason given yet</span>;
+        if (!eff) return needsReason(a) ? <span className="tone-bad text-[12px]">no reason given yet</span> : <span className="text-[var(--text-subtle)]">—</span>;
+        const outside = outsideOf(eff.entry.reason);
         return (
           <span
             className="cell-text"
-            title={eff.carried ? `Carried from the period ending ${fmtDate(eff.entry.periodEnd)}.` : eff.entry.reason}
+            title={
+              (eff.carried ? `Carried from the period ending ${fmtDate(eff.entry.periodEnd)}. ` : '') +
+              (outside ? 'Outside the team’s control: its hours are held by a constraint, not counted against the workable plan.' : 'The team’s own reason.')
+            }
           >
             {eff.entry.reason}
+            {outside && <span className="ml-1 tone-info">(constraint)</span>}
             {eff.carried && <span className="ml-1 text-[var(--text-subtle)]">(carried)</span>}
           </span>
         );
@@ -292,6 +329,14 @@ export function StatusReport() {
       num: true,
       optional: true,
       render: (a) => <span className="text-[var(--text-muted)]">{val(a.plannedHours, 1)}</span>,
+    },
+    {
+      key: 'curplanned',
+      label: percent ? 'Current sched.' : 'Current sched. h',
+      value: (a) => a.currentPlannedHours,
+      num: true,
+      optional: true,
+      render: (a) => <span className="text-[var(--text-muted)]">{val(a.currentPlannedHours, 1)}</span>,
     },
     {
       key: 'earned',
@@ -340,6 +385,23 @@ export function StatusReport() {
     { key: 'loc', label: 'Loc', value: (a) => a.location, optional: true },
     { key: 'bls', label: 'BL start', value: (a) => a.baselineStart, optional: true, render: (a) => fmtDate(a.baselineStart) },
     { key: 'as', label: 'Actual start', value: (a) => a.actualStart, optional: true, render: (a) => fmtDate(a.actualStart) },
+    {
+      key: 'cs',
+      label: 'Sched. start',
+      value: (a) => a.currentStart,
+      optional: true,
+      exportValue: (a) => `${fmtDate(a.currentStart)}${a.startSlipDays ? ` (${a.startSlipDays > 0 ? '+' : ''}${a.startSlipDays}d)` : ''}`,
+      render: (a) => (
+        <span className="whitespace-nowrap">
+          {fmtDate(a.currentStart)}
+          {a.startSlipDays !== null && a.startSlipDays !== 0 && (
+            <span className={`ml-1 text-[11px] font-semibold tone-${a.startSlipDays > 0 ? 'bad' : 'good'}`}>
+              {a.startSlipDays > 0 ? '+' : ''}{a.startSlipDays}d
+            </span>
+          )}
+        </span>
+      ),
+    },
   ];
 
   const phaseColumns: Column<GroupStat>[] = [
@@ -375,6 +437,22 @@ export function StatusReport() {
     { label: 'Planned', value: val(log.plannedHours), tone: 'muted' },
     { label: 'Achieved', value: val(log.earnedHours), tone: 'good' },
     { label: 'Of plan', value: log.achievement === null ? '—' : fmtPct(log.achievement, 0), tone: achievedTone(log.achievement) },
+    {
+      label: 'Of current schedule',
+      value: log.currentAchievement === null ? '—' : fmtPct(log.currentAchievement, 0),
+      sub: `${val(log.currentPlannedHours)} scheduled`,
+      tone: achievedTone(log.currentAchievement),
+    },
+    ...(constrained
+      ? ([
+          {
+            label: 'Of workable plan',
+            value: bridge.workableAchievement === null ? '—' : fmtPct(bridge.workableAchievement, 0),
+            sub: `${val(bridge.shortfall.CONSTRAINT)} held by constraints`,
+            tone: achievedTone(bridge.workableAchievement),
+          },
+        ] as Tile[])
+      : []),
     { label: 'Against plan', value: `${variance >= 0 ? '+' : ''}${val(variance)}`, tone: variance >= 0 ? 'good' : 'bad' },
     { label: 'Project complete', value: fmtPct(log.pctAtEnd, 1), sub: `from ${fmtPct(log.pctAtStart, 1)}`, tone: 'info' },
     {
@@ -420,6 +498,25 @@ export function StatusReport() {
     },
   ];
 
+  /** One phase's fortnight in a sentence, for the page and the picture alike. */
+  const phaseLine = (p: (typeof activePhases)[number]) => {
+    const pb = phaseBridge.get(p.key);
+    return (
+      `${p.label} — ${p.achievement === null ? 'nothing planned' : `${fmtPct(p.achievement, 0)} of plan`}` +
+      (pb && pb.shortfall.CONSTRAINT > 1e-9 && pb.workableAchievement !== null ? `, ${fmtPct(pb.workableAchievement, 0)} of workable` : '') +
+      `, moved ${fmtPct(p.pctAtStart, 1)} → ${fmtPct(p.pctAtEnd, 1)}`
+    );
+  };
+  const bridgeMeta = constrained && bridge.workableAchievement !== null ? `${fmtPct(bridge.workableAchievement, 0)} of the workable plan` : 'every planned hour, accounted for';
+  /** Why the missed and not-started activities are behind, reason by reason, with the hours each held back. */
+  const reasonLines = (): string[] => {
+    const out = bridge.byReason.map(
+      (t) => `${t.activities} × ${t.reason}${t.outsideControl ? ' (constraint)' : ''}${t.hours > 1e-9 ? ` — ${val(t.hours)}` : ''}`,
+    );
+    if (reasonTally.unexplained > 0) out.push(`${reasonTally.unexplained} × no reason given yet${bridge.shortfall.UNEXPLAINED > 1e-9 ? ` — ${val(bridge.shortfall.UNEXPLAINED)}` : ''}`);
+    return out;
+  };
+
   /**
    * The page, as the painter wants it: the same figures, the same order, and the
    * tables taken from the same `Column` definitions the screen renders.
@@ -438,20 +535,16 @@ export function StatusReport() {
       out.push({ kind: 'stats', items: periodStats });
       out.push({
         kind: 'bars',
-        rows: [
-          { label: 'Planned', value: val(log.plannedHours), pct: 1, color: PLANNED },
-          { label: 'Achieved', value: val(log.earnedHours), pct: achievedWidth / 100, color: ACHIEVED },
-        ],
+        rows: planBars.map((b) => ({ label: b.short, value: val(b.hours), pct: barPct(b.hours), color: b.color })),
       });
       if (activePhases.length > 0) {
-        out.push({
-          kind: 'lines',
-          items: activePhases.map(
-            (p) =>
-              `${p.label} — ${p.achievement === null ? 'nothing planned' : `${fmtPct(p.achievement, 0)} of plan`}, ` +
-              `moved ${fmtPct(p.pctAtStart, 1)} → ${fmtPct(p.pctAtEnd, 1)}`,
-          ),
-        });
+        out.push({ kind: 'lines', items: activePhases.map(phaseLine) });
+      }
+      if (showBridge && (log.plannedHours > 1e-9 || log.earnedHours > 1e-9)) {
+        out.push({ kind: 'section', text: 'From planned to achieved', meta: bridgeMeta });
+        out.push(bridgePaint(bridge, val));
+        const reasons = reasonLines();
+        if (reasons.length) out.push({ kind: 'lines', items: reasons });
       }
       if (showLogActivities) {
         out.push({ kind: 'stats', items: OUTCOMES.map((o) => ({ label: o, value: String(log.counts[o]), tone: OUTCOME_TONE[o] })) });
@@ -554,6 +647,12 @@ export function StatusReport() {
               </select>
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px]">
+              <label
+                className="flex cursor-pointer items-center gap-1.5"
+                title="Planned to achieved, step by step: what constraints outside the team's control held back, what is the team's own, and what nobody has explained yet."
+              >
+                <input type="checkbox" checked={showBridge} onChange={(e) => setShowBridge(e.target.checked)} disabled={!showLog} /> Planned to achieved
+              </label>
               <label className="flex cursor-pointer items-center gap-1.5">
                 <input type="checkbox" checked={showLogActivities} onChange={(e) => setShowLogActivities(e.target.checked)} disabled={!showLog} /> Activities
               </label>
@@ -569,7 +668,7 @@ export function StatusReport() {
               ))}
             </div>
             <div className="mt-1.5 text-[11.5px] text-[var(--text-subtle)]">
-              Why each activity was missed sits in its own row, the way the Two-Week Log shows it.
+              Why each activity is behind sits in its own row, the way the Two-Week Log shows it. Reasons and whether they are constraints are set there.
             </div>
           </div>
 
@@ -642,16 +741,13 @@ export function StatusReport() {
             <Tiles items={periodStats} />
 
             <div className="plan-bar mt-4">
-              <div className="plan-bar-row">
-                <span className="plan-bar-key"><i style={{ background: PLANNED }} /> Planned</span>
-                <div className="plan-bar-track"><span style={{ width: '100%', background: PLANNED }} /></div>
-                <span className="plan-bar-val">{val(log.plannedHours)}</span>
-              </div>
-              <div className="plan-bar-row">
-                <span className="plan-bar-key"><i style={{ background: ACHIEVED }} /> Achieved</span>
-                <div className="plan-bar-track"><span style={{ width: `${achievedWidth}%`, background: ACHIEVED }} /></div>
-                <span className="plan-bar-val">{val(log.earnedHours)}</span>
-              </div>
+              {planBars.map((b) => (
+                <div key={b.key} className="plan-bar-row" title={b.label}>
+                  <span className="plan-bar-key"><i style={{ background: b.color }} /> {b.short}</span>
+                  <div className="plan-bar-track"><span style={{ width: `${barPct(b.hours) * 100}%`, background: b.color }} /></div>
+                  <span className="plan-bar-val">{val(b.hours)}</span>
+                </div>
+              ))}
             </div>
 
             {activePhases.length > 0 && (
@@ -664,12 +760,36 @@ export function StatusReport() {
                       <span className={`font-semibold tone-${achievedTone(p.achievement)}`}>
                         {p.achievement === null ? 'nothing planned' : `${fmtPct(p.achievement, 0)} of plan`}
                       </span>
+                      {(() => {
+                        const pb = phaseBridge.get(p.key);
+                        return pb && pb.shortfall.CONSTRAINT > 1e-9 ? (
+                          <span className={`font-semibold tone-${achievedTone(pb.workableAchievement)}`}>
+                            {pb.workableAchievement === null ? '—' : fmtPct(pb.workableAchievement, 0)} of workable
+                          </span>
+                        ) : null;
+                      })()}
                       <span className="text-[var(--text-muted)]">
                         moved <b className="text-[var(--text)]">{fmtPct(p.pctAtStart, 1)}</b> → <b className="text-[var(--text)]">{fmtPct(p.pctAtEnd, 1)}</b>
                       </span>
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </Panel>
+        )}
+
+        {showLog && showBridge && (log.plannedHours > 1e-9 || log.earnedHours > 1e-9) && (
+          <Panel className="mt-3" title="From planned to achieved" meta={bridgeMeta}>
+            <PlanBridge bridge={bridge} val={val} />
+            {reasonLines().length > 0 && (
+              <div className="mt-3 border-t border-[var(--line-soft)] pt-3">
+                <div className="eyebrow mb-1.5">Why {reasonedCount} {reasonedCount === 1 ? 'activity is' : 'activities are'} behind</div>
+                <ul className="grid gap-x-6 gap-y-0.5 text-[12px] text-[var(--text-muted)] sm:grid-cols-2">
+                  {reasonLines().map((l) => (
+                    <li key={l}>{l}</li>
+                  ))}
+                </ul>
               </div>
             )}
           </Panel>

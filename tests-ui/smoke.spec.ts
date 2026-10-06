@@ -214,7 +214,7 @@ test('the status report puts the reason an activity was missed on its own row', 
   await page.locator('.no-print input[type=date]').fill('2026-01-16');
   await expect(page.locator(String.raw`.report .tbl`).last()).toBeVisible();
   // The answer sits on the activity, not in a tally somewhere above it.
-  await expect(page.locator('.report th', { hasText: 'Why missed' })).toHaveCount(1);
+  await expect(page.locator('.report th', { hasText: 'Why behind' })).toHaveCount(1);
   await expect(page.locator('.report th', { hasText: 'Outcome' })).toHaveCount(1);
 });
 

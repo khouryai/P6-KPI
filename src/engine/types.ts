@@ -248,6 +248,15 @@ export type MissedReasonLog = {
    * orphan an answer somebody gave; typing it again puts it straight back.
    */
   removed?: string[];
+  /**
+   * Which reasons are outside the team's control, keyed by the reason's normalised
+   * text. A reason held here as true takes its activity's shortfall out of the
+   * workable plan; false keeps it as the team's own. Absent means the built-in
+   * answer (`DEFAULT_OUTSIDE_CONTROL`), and a reason somebody typed defaults to the
+   * team's own — nothing shrinks the plan the team is judged against unless a
+   * person has said it should.
+   */
+  outsideControl?: Record<string, boolean>;
 };
 
 /** The reasons offered before anybody has typed one of their own. */
@@ -258,6 +267,22 @@ export const DEFAULT_MISSED_REASONS: string[] = [
   'Materials or equipment not delivered',
   'Resource not available',
   'Testing failed, retest required',
+  'Client or third party hold',
+  'Weather',
+  'Re-sequenced by the plan',
+];
+
+/**
+ * The built-in reasons that are, by default, outside the team's control: the work
+ * was planned but not workable, because something it depends on was not ready.
+ * "Resource not available" and "Testing failed, retest required" are not here —
+ * those are the team's own, until somebody on the job says otherwise.
+ */
+export const DEFAULT_OUTSIDE_CONTROL: string[] = [
+  'Access not available',
+  'Predecessor work not complete',
+  'Design or documentation not issued',
+  'Materials or equipment not delivered',
   'Client or third party hold',
   'Weather',
   'Re-sequenced by the plan',

@@ -22,7 +22,11 @@ export type PaintBlock =
   | { kind: 'title'; text: string; sub?: string; right?: string[] }
   | { kind: 'section'; text: string; meta?: string }
   | { kind: 'stats'; items: { label: string; value: string; sub?: string; tone?: PaintTone }[] }
-  | { kind: 'bars'; rows: { label: string; value: string; pct: number; color: string }[] }
+  /**
+   * Horizontal bars on one shared track. `start` floats a bar off zero (a waterfall
+   * step), `hatch` stripes it, and `labelWidth` makes room for longer labels.
+   */
+  | { kind: 'bars'; labelWidth?: number; rows: { label: string; value: string; pct: number; start?: number; color: string; hatch?: boolean }[] }
   | { kind: 'lines'; items: string[] }
   | { kind: 'table'; head: string[]; num: boolean[]; rows: string[][]; tone?: (PaintTone | null)[] }
   | { kind: 'chart'; el: HTMLElement }
@@ -302,16 +306,35 @@ function draw(ctx: CanvasRenderingContext2D, b: PaintBlock, x: number, y: number
         ctx.fillStyle = C.muted;
         ctx.font = `11.5px ${SANS}`;
         ctx.fillText(r.label, x + 18, top + 15);
-        const trackX = x + 92;
-        const trackW = width - 92 - 92;
+        const keyW = b.labelWidth ?? 92;
+        const trackX = x + keyW;
+        const trackW = width - keyW - 92;
         ctx.fillStyle = '#eef0f3';
         ctx.beginPath();
         ctx.roundRect(trackX, top + 3, trackW, 16, 5);
         ctx.fill();
+        const start = Math.max(0, Math.min(1, r.start ?? 0));
+        const barX = trackX + start * trackW;
+        const barW = Math.max(r.start === undefined ? 0 : 2, Math.min(1 - start, Math.max(0, r.pct)) * trackW);
         ctx.fillStyle = r.color;
         ctx.beginPath();
-        ctx.roundRect(trackX, top + 3, Math.max(0, Math.min(1, r.pct)) * trackW, 16, 5);
+        ctx.roundRect(barX, top + 3, barW, 16, 5);
         ctx.fill();
+        if (r.hatch) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.roundRect(barX, top + 3, barW, 16, 5);
+          ctx.clip();
+          ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+          ctx.lineWidth = 3;
+          for (let hx = barX - 16; hx < barX + barW + 16; hx += 7) {
+            ctx.beginPath();
+            ctx.moveTo(hx, top + 19);
+            ctx.lineTo(hx + 16, top + 3);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
         ctx.fillStyle = C.ink;
         ctx.font = `600 12.5px ${SANS}`;
         ctx.textAlign = 'right';

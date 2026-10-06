@@ -654,6 +654,36 @@ because the percent had not caught up would be unusable. The outcome keeps its o
 `finishedOn`, which is that date once the activity reads 100%, falling back to the
 end of the earn window for the activity at 100% that nothing has dated.
 
+### Planned is never trimmed; the gap is explained
+
+A fortnight's planned figure is the baseline's, and it routinely holds hours the team
+could never have worked: a 20-day activity whose baseline started ten days ago and is
+still waiting on another team's predecessor puts half its budget into this window's
+plan. Taking those activities out of the plan would hide the problem from the project;
+leaving them unexplained makes the team carry it. The log does neither.
+
+- **Reasons go on NOT STARTED as well as MISSED** (and, optionally, on a running row
+  behind its plan). They are the same per-activity, per-period entries as before.
+- **Each reason is a constraint or the team's own.** `MissedReasonLog.outsideControl`
+  holds what a person set; otherwise `DEFAULT_OUTSIDE_CONTROL` decides; a reason
+  somebody typed is the team's own until they say otherwise, so nothing shrinks the
+  plan the team is measured against without a person deciding it should.
+- **`periodBridge`** files every row's planned-minus-earned under one cause —
+  constraint, team, no reason yet, running behind pace, or done in an earlier window —
+  and the hours earned beyond plan under *ahead*. Because every term is a share of a
+  row's own gap, `planned − Σ shortfall + ahead = earned` holds exactly; a test pins it
+  across three years of fortnights. The **workable plan** is planned less the
+  constraint hours, and achieved over it sits *beside* achieved over plan, never in
+  place of it.
+- **The current schedule** is the same spread over P6's current dates — the S-curve's
+  forecast line read for the window — summed over every in-budget row, so it can
+  include activities the current schedule moved into the window. Planned minus current
+  is the slip the schedule's own logic already carries, with nobody tagging anything;
+  it is only as good as that logic.
+
+The Status Report reads the same figures through the same helpers
+(`bridgeFor`, `components/PlanBridge.tsx`) and paints the same bridge into the PNG.
+
 ### Editing an actual date
 
 `ActualDateCell` (in `components/ui.tsx`, shared by the Two-Week Log and Test

@@ -64,6 +64,13 @@ export type PeriodActivity = {
   plannedHours: number;
   /** Budget hours actually earned inside the window. */
   earnedHours: number;
+  /**
+   * Budget hours the CURRENT schedule puts inside the window: the same spread as
+   * planned, over P6's current start and finish instead of the baseline's. Where
+   * logic has pushed an activity back because a predecessor is late, this is what
+   * moves, so the gap between it and planned is the slip the schedule itself admits.
+   */
+  currentPlannedHours: number;
   /** The whole activity's budget, for context on a row that only part-accrued. */
   budgetHours: number;
   /**
@@ -80,6 +87,14 @@ export type PeriodActivity = {
   pctComplete: number;
   baselineStart: string | null;
   baselineFinish: string | null;
+  /** P6's current start and finish: actual where actual, otherwise its forecast. */
+  currentStart: string | null;
+  currentFinish: string | null;
+  /**
+   * Calendar days the current schedule has moved the start past the baseline's.
+   * Positive is later, negative is pulled forward. null until both dates exist.
+   */
+  startSlipDays: number | null;
   /**
    * When the work really began and really finished: the test window dates where
    * they were keyed, otherwise P6's dates and only where P6 flags them actual.
@@ -126,6 +141,7 @@ const MERGE_ORDER: PeriodOutcome[] = ['MISSED', 'NOT STARTED', 'STARTED', 'CONTI
 
 const minDate = (xs: (string | null)[]) => xs.filter((x): x is string => !!x).sort()[0] ?? null;
 const maxDate = (xs: (string | null)[]) => xs.filter((x): x is string => !!x).sort().pop() ?? null;
+const slip = (baseline: string | null, current: string | null) => (baseline && current ? daysBetween(baseline, current) : null);
 
 /** One line per Activity ID. A single row passes through untouched. */
 export function mergeRepeatedIds(list: PeriodActivity[]): PeriodActivity[] {
@@ -150,11 +166,15 @@ export function mergeRepeatedIds(list: PeriodActivity[]): PeriodActivity[] {
       outcome: MERGE_ORDER.find((o) => g.some((a) => a.outcome === o)) ?? first.outcome,
       plannedHours: g.reduce((s, a) => s + a.plannedHours, 0),
       earnedHours,
+      currentPlannedHours: g.reduce((s, a) => s + a.currentPlannedHours, 0),
       budgetHours,
       phaseContribution: contributions.length ? contributions.reduce((s, x) => s + x, 0) : null,
       pctComplete: budgetHours > 0 ? g.reduce((s, a) => s + a.pctComplete * a.budgetHours, 0) / budgetHours : first.pctComplete,
       baselineStart: minDate(g.map((a) => a.baselineStart)),
       baselineFinish,
+      currentStart: minDate(g.map((a) => a.currentStart)),
+      currentFinish: maxDate(g.map((a) => a.currentFinish)),
+      startSlipDays: slip(minDate(g.map((a) => a.baselineStart)), minDate(g.map((a) => a.currentStart))),
       actualStart: minDate(g.map((a) => a.actualStart)),
       actualFinish,
       p6ActualStart: minDate(g.map((a) => a.p6ActualStart)),
@@ -185,8 +205,12 @@ export type PeriodPhase = {
   budgetHours: number;
   plannedHours: number;
   earnedHours: number;
+  /** What the current schedule puts in the window for this phase. */
+  currentPlannedHours: number;
   /** Earned ÷ planned for this phase. null when the phase planned nothing. */
   achievement: number | null;
+  /** Earned ÷ current-schedule planned. null when the current schedule has nothing here. */
+  currentAchievement: number | null;
   /** The phase's own percent complete at each end of the window. */
   pctAtStart: number;
   pctAtEnd: number;
@@ -195,7 +219,7 @@ export type PeriodPhase = {
 };
 
 /** One slice of the window, for the chart. A fortnight splits into two weeks. */
-export type PeriodSlice = { from: string; to: string; label: string; planned: number; earned: number };
+export type PeriodSlice = { from: string; to: string; label: string; planned: number; currentPlanned: number; earned: number };
 
 export type PeriodLog = {
   from: string;
@@ -207,6 +231,16 @@ export type PeriodLog = {
   earnedHours: number;
   /** Earned ÷ planned. null when nothing was planned, which is not 0%. */
   achievement: number | null;
+  /**
+   * Hours the CURRENT schedule puts in the window, over every in-budget activity —
+   * including any the current schedule has pulled into the window that the
+   * baseline never had here, which is why it is summed over the rows rather than
+   * over the activities listed. It is the S-curve's forecast line, read for these
+   * two weeks.
+   */
+  currentPlannedHours: number;
+  /** Earned ÷ current-schedule planned. null when the current schedule has nothing here. */
+  currentAchievement: number | null;
   /** Earned hours in the window as a share of the whole project budget. */
   shareOfBudget: number;
   /** Planned hours in the window as a share of the whole project budget. */
@@ -315,6 +349,7 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
   for (const r of inBudget) {
     const plannedHours = accruedIn(r.budgetHours, r.baselineStart, r.baselineFinish, lo, hi);
     const earnedHours = accruedIn(r.earnedHours, r.earnStart, r.earnEnd, lo, hi);
+    const currentPlannedHours = accruedIn(r.budgetHours, r.currentStart, r.currentFinish, lo, hi);
     /*
      * Done, and when.
      *
@@ -378,12 +413,16 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
       outcome,
       plannedHours,
       earnedHours,
+      currentPlannedHours,
       budgetHours: r.budgetHours,
       phaseContribution: (phaseBudget.get(r.phase) ?? 0) > 0 ? earnedHours / (phaseBudget.get(r.phase) as number) : null,
       phaseBudgetHours: phaseBudget.get(r.phase) ?? 0,
       pctComplete: r.pctComplete,
       baselineStart: r.baselineStart,
       baselineFinish: r.baselineFinish,
+      currentStart: r.currentStart,
+      currentFinish: r.currentFinish,
+      startSlipDays: slip(r.baselineStart, r.currentStart),
       actualStart,
       actualFinish,
       p6ActualStart: r.activity.actualStart ? r.activity.startDate : null,
@@ -428,6 +467,7 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
   const finishedOnTime = [...dueIds].filter((id) => !late.has(id)).length;
 
   const totalBudget = inBudget.reduce((s, r) => s + r.budgetHours, 0);
+  const currentPlannedHours = inBudget.reduce((s, r) => s + accruedIn(r.budgetHours, r.currentStart, r.currentFinish, lo, hi), 0);
   const earnedBy = (rs: BudgetRow[], date: string) => rs.reduce((s, r) => s + r.earnedHours * accruedFraction(date, r.earnStart, r.earnEnd), 0);
 
   /*
@@ -448,6 +488,7 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
       const budgetHours = rs.reduce((s, r) => s + r.budgetHours, 0);
       const planned = rs.reduce((s, r) => s + accruedIn(r.budgetHours, r.baselineStart, r.baselineFinish, lo, hi), 0);
       const earned = rs.reduce((s, r) => s + accruedIn(r.earnedHours, r.earnStart, r.earnEnd, lo, hi), 0);
+      const current = rs.reduce((s, r) => s + accruedIn(r.budgetHours, r.currentStart, r.currentFinish, lo, hi), 0);
       const c = Object.fromEntries(OUTCOMES.map((o) => [o, 0])) as Record<PeriodOutcome, number>;
       for (const a of activities) if (a.phase === key) c[a.outcome] += 1;
       return {
@@ -457,7 +498,9 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
         budgetHours,
         plannedHours: planned,
         earnedHours: earned,
+        currentPlannedHours: current,
         achievement: Math.abs(planned) > 1e-9 ? earned / planned : null,
+        currentAchievement: Math.abs(current) > 1e-9 ? earned / current : null,
         pctAtStart: budgetHours ? earnedBy(rs, before) / budgetHours : 0,
         pctAtEnd: budgetHours ? earnedBy(rs, hi) / budgetHours : 0,
         counts: c,
@@ -471,6 +514,8 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
     plannedHours,
     earnedHours,
     achievement: Math.abs(plannedHours) > 1e-9 ? earnedHours / plannedHours : null,
+    currentPlannedHours,
+    currentAchievement: Math.abs(currentPlannedHours) > 1e-9 ? earnedHours / currentPlannedHours : null,
     shareOfBudget: totalBudget ? earnedHours / totalBudget : 0,
     plannedShareOfBudget: totalBudget ? plannedHours / totalBudget : 0,
     projectBudgetHours: totalBudget,
@@ -483,8 +528,132 @@ export function periodLog(rows: BudgetRow[], from: string, to: string): PeriodLo
     slices: sliceWindow(lo, hi).map((s) => ({
       ...s,
       planned: inBudget.reduce((sum, r) => sum + accruedIn(r.budgetHours, r.baselineStart, r.baselineFinish, s.from, s.to), 0),
+      currentPlanned: inBudget.reduce((sum, r) => sum + accruedIn(r.budgetHours, r.currentStart, r.currentFinish, s.from, s.to), 0),
       earned: inBudget.reduce((sum, r) => sum + accruedIn(r.earnedHours, r.earnStart, r.earnEnd, s.from, s.to), 0),
     })),
     phases,
+  };
+}
+
+/**
+ * Where the planned hours went.
+ *
+ * "58% of plan" is true and useless on its own: it cannot tell a review whether the
+ * crews under-delivered or whether half the fortnight's plan was never workable
+ * because another team's predecessor is not done. Dropping those activities from
+ * the plan would hide the problem from the project; leaving them in unexplained
+ * makes the team carry it. This does neither. The whole baseline plan stays, and
+ * the gap between it and what was achieved is split, hour for hour, by why:
+ *
+ *   planned − constrained − team − unexplained − pace − earlier + ahead = achieved
+ *
+ * exactly, because every term is a share of some row's own planned-minus-earned and
+ * the rows are the same rows the totals are summed over.
+ */
+export type ShortfallCause =
+  /** A reason was given and it is one outside the team's control: a predecessor, access, readiness. */
+  | 'CONSTRAINT'
+  /** A reason was given and it is the team's own: resource, a failed test. */
+  | 'TEAM'
+  /** MISSED or NOT STARTED with no reason yet. The review still owes an answer. */
+  | 'UNEXPLAINED'
+  /** Running, no reason given, simply earning slower than the baseline spread. */
+  | 'PACE'
+  /** Already finished before the plan expected it: those hours were earned in an earlier window. */
+  | 'EARLIER';
+
+export const SHORTFALL_CAUSES: ShortfallCause[] = ['CONSTRAINT', 'TEAM', 'UNEXPLAINED', 'PACE', 'EARLIER'];
+
+/** What the bridge needs to know about one row's reason, if it has one. */
+export type BridgeReason = { reason: string; outsideControl: boolean } | null;
+
+export type BridgeReasonLine = { reason: string; outsideControl: boolean; hours: number; activities: number };
+
+export type PeriodBridge = {
+  planned: number;
+  earned: number;
+  /** Shortfall hours by cause. All zero or positive. */
+  shortfall: Record<ShortfallCause, number>;
+  /** Activities whose shortfall landed under each cause. */
+  activitiesBy: Record<ShortfallCause, number>;
+  /** Hours earned beyond plan, row by row: work ahead of its dates, or not in the plan here at all. */
+  ahead: number;
+  /**
+   * The plan the team could actually work: planned minus what constraints outside
+   * its control held back. Never below zero.
+   */
+  workablePlanned: number;
+  /** Earned ÷ workable planned. null when nothing workable was planned. */
+  workableAchievement: number | null;
+  /** The constrained and team hours, reason by reason, biggest first. */
+  byReason: BridgeReasonLine[];
+};
+
+/**
+ * Whether a row is one the review owes a reason for. MISSED and NOT STARTED are:
+ * they are the activities the plan was counting on that did not happen.
+ */
+export function needsReason(a: PeriodActivity): boolean {
+  return a.outcome === 'MISSED' || a.outcome === 'NOT STARTED';
+}
+
+/** The hours this row fell short of its own plan in the window. Zero when it kept up. */
+export function rowShortfall(a: PeriodActivity): number {
+  return Math.max(0, a.plannedHours - a.earnedHours);
+}
+
+/**
+ * Whether a row can take a reason at all: any row the review owes one for, and any
+ * running row that fell behind its plan — "resource not available" on a test that
+ * is crawling is as much an answer as one on a test that never began.
+ */
+export function canTakeReason(a: PeriodActivity): boolean {
+  if (needsReason(a)) return true;
+  return (a.outcome === 'STARTED' || a.outcome === 'CONTINUED') && rowShortfall(a) > 1e-6;
+}
+
+export function periodBridge(activities: PeriodActivity[], reasonOf: (a: PeriodActivity) => BridgeReason): PeriodBridge {
+  const shortfall = Object.fromEntries(SHORTFALL_CAUSES.map((c) => [c, 0])) as Record<ShortfallCause, number>;
+  const activitiesBy = Object.fromEntries(SHORTFALL_CAUSES.map((c) => [c, 0])) as Record<ShortfallCause, number>;
+  const lines = new Map<string, BridgeReasonLine>();
+  let planned = 0;
+  let earned = 0;
+  let ahead = 0;
+  for (const a of activities) {
+    planned += a.plannedHours;
+    earned += a.earnedHours;
+    ahead += Math.max(0, a.earnedHours - a.plannedHours);
+    const short = rowShortfall(a);
+    /*
+     * A reason is read for every row that can take one, even one with no shortfall
+     * in hours — a NOT STARTED activity whose baseline starts on the window's last
+     * day has a story and almost no hours, and it still belongs in the tally.
+     */
+    const r = canTakeReason(a) ? reasonOf(a) : null;
+    let cause: ShortfallCause;
+    if (a.outcome === 'COMPLETED' || a.outcome === 'COMPLETED EARLY') cause = 'EARLIER';
+    else if (r) cause = r.outsideControl ? 'CONSTRAINT' : 'TEAM';
+    else if (needsReason(a)) cause = 'UNEXPLAINED';
+    else cause = 'PACE';
+    if (r && (cause === 'CONSTRAINT' || cause === 'TEAM')) {
+      const line = lines.get(r.reason) ?? { reason: r.reason, outsideControl: r.outsideControl, hours: 0, activities: 0 };
+      line.hours += short;
+      line.activities += 1;
+      lines.set(r.reason, line);
+    }
+    if (short <= 1e-9) continue;
+    shortfall[cause] += short;
+    activitiesBy[cause] += 1;
+  }
+  const workablePlanned = Math.max(0, planned - shortfall.CONSTRAINT);
+  return {
+    planned,
+    earned,
+    shortfall,
+    activitiesBy,
+    ahead,
+    workablePlanned,
+    workableAchievement: workablePlanned > 1e-9 ? earned / workablePlanned : null,
+    byReason: [...lines.values()].sort((a, b) => b.hours - a.hours || b.activities - a.activities || a.reason.localeCompare(b.reason)),
   };
 }
