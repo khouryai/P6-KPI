@@ -679,11 +679,34 @@ leaving them unexplained makes the team carry it. The log does neither.
   constraint hours, and achieved over it sits *beside* achieved over plan, never in
   place of it. The waterfall draws only four steps — planned, held by constraints,
   workable plan, achieved; the rest of the gap is in the reasons list beside it.
-- **The current schedule** is the same spread over P6's current dates — the S-curve's
-  forecast line read for the window — summed over every in-budget row, so it can
-  include activities the current schedule moved into the window. Planned minus current
-  is the slip the schedule's own logic already carries, with nobody tagging anything;
-  it is only as good as that logic.
+- **The plan is the schedule update in force when the window began**, not the
+  baseline and not today's current schedule. The baseline still expects work a late
+  predecessor pushed out months ago; today's current schedule has been statused to the
+  data date, so for weeks already gone it holds what actually happened and always reads
+  near 100%. `periodLog(rows, from, to, plan)` takes a `PeriodPlan` built by
+  `planFromUpdate` from the latest current-schedule import whose data date is on or
+  before the window's first day (`updateFor` in `src/app/updateDates.ts`). An activity
+  in progress at the update plans only its remaining work, from the update's data date
+  to its forecast finish. Outcomes, due-to-finish and days late are judged against the
+  update's dates; the baseline's hours are carried beside them (`baselinePlannedHours`),
+  and baseline minus planned is the slip already in the schedule before the window.
+  The baseline is one switch away (`against` in `periodWindow.ts`, shared with the
+  Status Report).
+- **Each update knows its data date.** An import only ever recorded when it arrived,
+  so the current schedule in use takes Settings' data date, and the one it replaces
+  is stamped as it is replaced (`outgoingDataDate` reads the files' own actual dates
+  to tell whether Settings still describes the outgoing schedule). Stamps are editable
+  on Import; an unstamped import falls back to its import day, flagged.
+
+### One row per Activity ID
+
+`oneRowPerId` (in `compute.ts`) keeps the first row of each Activity ID, in both the
+current schedule and the baseline, and leaves the rest out: the ID is the activity, and
+pricing each row counted its hours once per row and matched every repeat to the
+baseline's first row — which drew the planned curve off the forecast even with the same
+file imported as both. Rows of one ID that disagree on the dates are flagged
+(`summary.duplicateDateConflicts`, listed on Import and counted on the Dashboard) for
+checking in P6; the first row's dates are used.
 
 The Status Report reads the same figures through the same helpers
 (`bridgeFor`, `components/PlanBridge.tsx`) and paints the same bridge into the PNG.

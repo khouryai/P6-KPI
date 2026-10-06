@@ -99,7 +99,7 @@ export function Dashboard() {
     { label: 'Percent complete still from P6 duration', count: s.pctFromP6, to: href('budget', { flag: 'pctp6' }), note: 'Key a percent complete to replace P6’s duration arithmetic with what you know.' },
     { label: 'In-budget activities with no Remaining Duration', count: s.noRemainingDuration, to: href('import'), note: 'P6 can say nothing about their progress, so they read 0%. Usually the column was not mapped on import.' },
     { label: 'Dates changed — raise with the scheduler', count: s.datesEdited, to: href('budget', { flag: 'dates' }), note: 'Activities using dates you keyed instead of P6’s. Budget Master puts P6’s dates beside yours.' },
-    { label: 'Activities sharing an Activity ID', count: s.duplicateActivityIds, to: href('import'), note: 'The ID is what every percent, override and note is keyed on, so each of those reaches only the first of them.' },
+    { label: 'Duplicate Activity IDs with different dates', count: s.duplicateDateConflicts.length, to: href('import'), note: 'Each ID is imported once, from its first row, but these rows disagreed on the dates. Check them in P6; Import lists every set of dates.' },
     { label: 'Progress rows not matching an activity', count: s.testProgressNotMatching, to: href('progress', { flag: 'unmatched' }), note: 'Open the list: it says what each one is and whether losing it costs anything.' },
     { label: 'Your edits pointing at an activity that is gone', count: s.staleOverrides, to: href('budget'), note: 'Kept in case the Activity ID comes back. Doing nothing until it does.' },
   ];

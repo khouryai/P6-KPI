@@ -6,7 +6,9 @@ import { buildCurve, rowTotals } from '../../engine/compute';
 import { periodLog, addDays, OUTCOMES, needsReason, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
 import { trendFrom } from '../../engine/trend';
 import { effectiveReasonFor, tallyReasons, bridgeFor, isOutsideControl } from '../missedReasons';
-import { PlanBridge, bridgePaint, BRIDGE_COLOURS } from '../components/PlanBridge';
+import { PlanBridge, bridgePaint, bridgePlan, BRIDGE_COLOURS } from '../components/PlanBridge';
+import { usePeriodPlan } from '../planSource';
+import { usePeriodWindow } from '../periodWindow';
 import { downloadBytes, stamp } from '../export';
 import { paintReport, paintTableFromDom, PAINT_TARGETS, paintChartWidth, type PaintBlock, type PaintTone } from '../reportPaint';
 import { fmtHours, fmtPct, fmtDate, todayISO } from '../format';
@@ -63,7 +65,7 @@ function achievedTone(a: number | null): 'good' | 'warn' | 'bad' | 'muted' {
 
 const PLANNED = BRIDGE_COLOURS.planned;
 const ACHIEVED = BRIDGE_COLOURS.achieved;
-const CURRENT = BRIDGE_COLOURS.current;
+const UPDATE = BRIDGE_COLOURS.update;
 
 /**
  * The status report.
@@ -130,7 +132,19 @@ export function StatusReport() {
   const trend = useMemo(() => trendFrom(model.burn.months, model.burn.project.budgetHours), [model.burn]);
 
   const from = addDays(end, -(span - 1));
-  const log = useMemo(() => periodLog(model.rows, from, end), [model.rows, from, end]);
+  /*
+   * Measured against the same plan the Two-Week Log is — the schedule update in
+   * force when the window began, or the baseline — and switched in the same place,
+   * so the report never reads a fortnight differently from the review it came from.
+   */
+  const { against, setAgainst } = usePeriodWindow();
+  const planState = usePeriodPlan(from, against);
+  const plan = planState.kind === 'ready' ? planState.plan : null;
+  const log = useMemo(() => periodLog(model.rows, from, end, plan), [model.rows, from, end, plan]);
+  const onUpdate = !!log.plan;
+  const planWord = log.plan ? log.plan.label : 'baseline';
+  const bPlan = bridgePlan(log.plan?.label);
+  const inherited = log.baselinePlannedHours - log.plannedHours;
 
   /** One curve per chosen selection, in the order they were chosen. */
   const curves = useMemo(
@@ -180,12 +194,12 @@ export function StatusReport() {
   const budget = log.projectBudgetHours;
   const val = (hours: number, digits = 0) => (percent ? fmtPct(budget ? hours / budget : 0, 2) : `${fmtHours(hours, digits)} h`);
   const variance = log.earnedHours - log.plannedHours;
-  /** Planned, the current schedule and achieved on one scale, as the Two-Week Log draws them. */
-  const barMax = Math.max(log.plannedHours, log.currentPlannedHours, log.earnedHours, 1e-9);
+  /** The baseline, the update and achieved on one scale, as the Two-Week Log draws them. */
+  const barMax = Math.max(log.plannedHours, log.baselinePlannedHours, log.earnedHours, 1e-9);
   const barPct = (h: number) => Math.min(1, Math.max(0, h / barMax));
   const planBars = [
-    { key: 'planned', label: 'Planned', short: 'Planned', hours: log.plannedHours, color: PLANNED },
-    { key: 'current', label: 'Current schedule', short: 'Current', hours: log.currentPlannedHours, color: CURRENT },
+    { key: 'baseline', label: 'Baseline', short: onUpdate ? 'Baseline' : 'Planned', hours: log.baselinePlannedHours, color: PLANNED },
+    ...(onUpdate ? [{ key: 'planned', label: `Planned (${planWord})`, short: 'Planned', hours: log.plannedHours, color: UPDATE }] : []),
     { key: 'achieved', label: 'Achieved', short: 'Achieved', hours: log.earnedHours, color: ACHIEVED },
   ];
 
@@ -330,14 +344,18 @@ export function StatusReport() {
       optional: true,
       render: (a) => <span className="text-[var(--text-muted)]">{val(a.plannedHours, 1)}</span>,
     },
-    {
-      key: 'curplanned',
-      label: percent ? 'Current sched.' : 'Current sched. h',
-      value: (a) => a.currentPlannedHours,
-      num: true,
-      optional: true,
-      render: (a) => <span className="text-[var(--text-muted)]">{val(a.currentPlannedHours, 1)}</span>,
-    },
+    ...(onUpdate
+      ? ([
+          {
+            key: 'blplanned',
+            label: percent ? 'Baseline' : 'Baseline h',
+            value: (a: PeriodActivity) => a.baselinePlannedHours,
+            num: true,
+            optional: true,
+            render: (a: PeriodActivity) => <span className="text-[var(--text-muted)]">{val(a.baselinePlannedHours, 1)}</span>,
+          },
+        ] as Column<PeriodActivity>[])
+      : []),
     {
       key: 'earned',
       label: percent ? 'Project achieved' : 'Project achieved h',
@@ -364,7 +382,10 @@ export function StatusReport() {
         </div>
       ),
     },
-    { key: 'blf', label: 'BL finish', value: (a) => a.baselineFinish, render: (a) => fmtDate(a.baselineFinish) },
+    ...(onUpdate
+      ? ([{ key: 'plf', label: 'Plan finish', value: (a: PeriodActivity) => a.planFinish, render: (a: PeriodActivity) => fmtDate(a.planFinish) }] as Column<PeriodActivity>[])
+      : []),
+    { key: 'blf', label: 'BL finish', value: (a) => a.baselineFinish, optional: onUpdate, render: (a) => fmtDate(a.baselineFinish) },
 
     { key: 'af', label: 'Actual finish', value: (a) => a.actualFinish, render: (a) => fmtDate(a.actualFinish) },
     {
@@ -437,12 +458,16 @@ export function StatusReport() {
     { label: 'Planned', value: val(log.plannedHours), tone: 'muted' },
     { label: 'Achieved', value: val(log.earnedHours), tone: 'good' },
     { label: 'Of plan', value: log.achievement === null ? '—' : fmtPct(log.achievement, 0), tone: achievedTone(log.achievement) },
-    {
-      label: 'Of current schedule',
-      value: log.currentAchievement === null ? '—' : fmtPct(log.currentAchievement, 0),
-      sub: `${val(log.currentPlannedHours)} scheduled`,
-      tone: achievedTone(log.currentAchievement),
-    },
+    ...(onUpdate
+      ? ([
+          {
+            label: 'Of baseline',
+            value: log.baselineAchievement === null ? '—' : fmtPct(log.baselineAchievement, 0),
+            sub: inherited > 1e-6 ? `${val(inherited)} slipped before the period` : `${val(log.baselinePlannedHours)} in the baseline`,
+            tone: achievedTone(log.baselineAchievement),
+          },
+        ] as Tile[])
+      : []),
     ...(constrained
       ? ([
           {
@@ -531,7 +556,7 @@ export function StatusReport() {
       },
     ];
     if (showLog) {
-      out.push({ kind: 'section', text: `Period ${fmtDate(from)} to ${fmtDate(end)}`, meta: `${log.days} days` });
+      out.push({ kind: 'section', text: `Period ${fmtDate(from)} to ${fmtDate(end)}`, meta: `${log.days} days · against the ${planWord}` });
       out.push({ kind: 'stats', items: periodStats });
       out.push({
         kind: 'bars',
@@ -542,7 +567,7 @@ export function StatusReport() {
       }
       if (showBridge && (log.plannedHours > 1e-9 || log.earnedHours > 1e-9)) {
         out.push({ kind: 'section', text: 'From planned to achieved', meta: bridgeMeta });
-        out.push(bridgePaint(bridge, val));
+        out.push(bridgePaint(bridge, val, bPlan));
         const reasons = reasonLines();
         if (reasons.length) out.push({ kind: 'lines', items: reasons });
       }
@@ -645,7 +670,19 @@ export function StatusReport() {
                 <option value={14}>2 weeks</option>
                 <option value={28}>4 weeks</option>
               </select>
+              <span className="seg" title="What the period is measured against — the same choice as on the Two-Week Log.">
+                <button className={`seg-btn${against === 'update' ? ' is-on' : ''}`} disabled={!showLog} onClick={() => setAgainst('update')}>Schedule update</button>
+                <button className={`seg-btn${against === 'baseline' ? ' is-on' : ''}`} disabled={!showLog} onClick={() => setAgainst('baseline')}>Baseline</button>
+              </span>
             </div>
+            {showLog && against === 'update' && planState.kind === 'none' && (
+              <div className="mt-1.5 text-[11.5px] tone-warn">No schedule update is dated on or before {fmtDate(from)}, so this period is measured against the baseline.</div>
+            )}
+            {showLog && planState.kind === 'ready' && planState.date.source !== 'settings' && planState.date.source !== 'stamped' && (
+              <div className="mt-1.5 text-[11.5px] tone-warn">
+                The update&rsquo;s data date ({fmtDate(planState.date.date)}) was {planState.date.source === 'estimated' ? 'estimated' : 'taken from its import day'} — check it on Import.
+              </div>
+            )}
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px]">
               <label
                 className="flex cursor-pointer items-center gap-1.5"
@@ -736,7 +773,7 @@ export function StatusReport() {
           <Panel
             className="mt-3"
             title={`Period ${fmtDate(from)} to ${fmtDate(end)}`}
-            meta={`${log.days} days`}
+            meta={`${log.days} days · against the ${planWord}`}
           >
             <Tiles items={periodStats} />
 
@@ -781,7 +818,7 @@ export function StatusReport() {
 
         {showLog && showBridge && (log.plannedHours > 1e-9 || log.earnedHours > 1e-9) && (
           <Panel className="mt-3" title="From planned to achieved" meta={bridgeMeta}>
-            <PlanBridge bridge={bridge} val={val} />
+            <PlanBridge bridge={bridge} val={val} plan={bPlan} />
             {reasonLines().length > 0 && (
               <div className="mt-3 border-t border-[var(--line-soft)] pt-3">
                 <div className="eyebrow mb-1.5">{reasonedCount === 0 ? 'Missed or not started' : `Why ${reasonedCount} ${reasonedCount === 1 ? 'activity is' : 'activities are'} behind`}</div>

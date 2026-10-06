@@ -213,33 +213,3 @@ describe('the bridge from planned to achieved', () => {
     }
   });
 });
-
-describe('the current schedule beside the baseline', () => {
-  it('a predecessor slip the schedule already carries shows as planned the current schedule no longer has here', () => {
-    expect(row(PRED).plannedHours).toBeGreaterThan(0);
-    expect(row(PRED).currentPlannedHours).toBe(0);
-    expect(row(PRED).startSlipDays).toBe(41);
-    expect(row(IDLE).currentPlannedHours).toBeCloseTo(row(IDLE).plannedHours, 6);
-    expect(row(IDLE).startSlipDays).toBe(0);
-    expect(log.currentPlannedHours).toBeLessThan(log.plannedHours);
-    expect(log.currentAchievement as number).toBeGreaterThan(log.achievement as number);
-  });
-
-  it('the phase carries the same figure', () => {
-    const p = log.phases.find((x) => x.key === row(PRED).phase)!;
-    expect(p.currentPlannedHours).toBeCloseTo(log.currentPlannedHours, 6);
-  });
-
-  it('every consecutive fortnight sums to what the forecast curve draws', () => {
-    const fixture = computeModel(fixtureModelInput());
-    let current = 0;
-    for (let i = 0; i < 365 * 8; i += 14) {
-      const from = addDays('2024-01-01', i);
-      current += periodLog(fixture.rows, from, addDays(from, 13)).currentPlannedHours;
-    }
-    const onCurve = fixture.rows
-      .filter((r) => r.status === 'IN BUDGET' && r.currentStart && r.currentFinish)
-      .reduce((s, r) => s + r.budgetHours, 0);
-    expect(current).toBeCloseTo(onCurve, 6);
-  });
-});

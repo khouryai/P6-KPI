@@ -12,13 +12,13 @@ import type { PaintBlock } from '../reportPaint';
 
 /*
  * Checked as a set for colour-vision separation, not picked by eye. Planned and
- * achieved are the violet and green the rest of the app uses for the same ideas,
- * and amber is kept for the current schedule because the S-curve already draws
- * the current schedule in amber.
+ * achieved are the violet and green the rest of the app uses for the same ideas;
+ * violet is the baseline. A schedule update is amber, the colour the S-curve already
+ * draws P6's own schedule dates in.
  */
 export const BRIDGE_COLOURS = {
   planned: '#6d28d9',
-  current: '#d97706',
+  update: '#d97706',
   constraint: '#1d4eaf',
   achieved: '#00875a',
 };
@@ -49,18 +49,27 @@ export type BridgeStep = {
  * All four show even when nothing is held by a constraint, so the page keeps one
  * shape from one fortnight to the next and a zero reads as "nothing tagged".
  */
-export function bridgeSteps(b: PeriodBridge): BridgeStep[] {
+/** Which plan the first step is, and its colour: the baseline, or a schedule update. */
+export type BridgePlan = { label: string; colour: string };
+const BASELINE_PLAN: BridgePlan = { label: 'baseline', colour: BRIDGE_COLOURS.planned };
+
+/** The bridge's plan for a log measured against `planLabel`, or the baseline when there is none. */
+export function bridgePlan(planLabel: string | null | undefined): BridgePlan {
+  return planLabel ? { label: planLabel, colour: BRIDGE_COLOURS.update } : BASELINE_PLAN;
+}
+
+export function bridgeSteps(b: PeriodBridge, plan: BridgePlan = BASELINE_PLAN): BridgeStep[] {
   const held = b.shortfall.CONSTRAINT;
   return [
     {
       key: 'planned',
-      label: 'Planned (baseline)',
-      hint: 'Everything the baseline expected to get done in this window. Nothing is taken out of it.',
+      label: `Planned (${plan.label})`,
+      hint: `Everything the ${plan.label} expected to get done in this window. Nothing is taken out of it.`,
       kind: 'total',
       hours: b.planned,
       from: 0,
       to: b.planned,
-      colour: BRIDGE_COLOURS.planned,
+      colour: plan.colour,
     },
     {
       key: 'constraint',
@@ -81,7 +90,7 @@ export function bridgeSteps(b: PeriodBridge): BridgeStep[] {
       hours: b.workablePlanned,
       from: 0,
       to: b.workablePlanned,
-      colour: BRIDGE_COLOURS.planned,
+      colour: plan.colour,
     },
     {
       key: 'achieved',
@@ -103,8 +112,8 @@ function peak(steps: BridgeStep[]): number {
   return Math.max(1e-9, ...steps.map((s) => s.to));
 }
 
-export function PlanBridge({ bridge, val }: { bridge: PeriodBridge; val: (hours: number, digits?: number) => string }) {
-  const steps = bridgeSteps(bridge);
+export function PlanBridge({ bridge, val, plan }: { bridge: PeriodBridge; val: (hours: number, digits?: number) => string; plan?: BridgePlan }) {
+  const steps = bridgeSteps(bridge, plan);
   const max = peak(steps);
   if (bridge.planned <= 1e-9 && bridge.earned <= 1e-9) return null;
   return (
@@ -137,12 +146,12 @@ export function PlanBridge({ bridge, val }: { bridge: PeriodBridge; val: (hours:
 }
 
 /** The same steps, for the PNG. */
-export function bridgePaint(bridge: PeriodBridge, val: (hours: number, digits?: number) => string): PaintBlock {
-  const steps = bridgeSteps(bridge);
+export function bridgePaint(bridge: PeriodBridge, val: (hours: number, digits?: number) => string, plan?: BridgePlan): PaintBlock {
+  const steps = bridgeSteps(bridge, plan);
   const max = peak(steps);
   return {
     kind: 'bars',
-    labelWidth: 190,
+    labelWidth: 230,
     rows: steps.map((s) => ({
       label: s.activities ? `${s.label} · ${s.activities}` : s.label,
       value: signed(s, val(s.hours)),
@@ -154,6 +163,6 @@ export function bridgePaint(bridge: PeriodBridge, val: (hours: number, digits?: 
 }
 
 /** The steps as lines of text, for the copy-as-text report. */
-export function bridgeText(bridge: PeriodBridge, val: (hours: number, digits?: number) => string): string[] {
-  return bridgeSteps(bridge).map((s) => `  ${s.label.padEnd(26)} ${signed(s, val(s.hours)).padStart(12)}${s.activities ? `  (${s.activities})` : ''}`);
+export function bridgeText(bridge: PeriodBridge, val: (hours: number, digits?: number) => string, plan?: BridgePlan): string[] {
+  return bridgeSteps(bridge, plan).map((s) => `  ${s.label.padEnd(34)} ${signed(s, val(s.hours)).padStart(12)}${s.activities ? `  (${s.activities})` : ''}`);
 }

@@ -143,6 +143,15 @@ export type ScheduleImport = {
   sourceFilename: string;
   rowCount: number;
   activities: P6Activity[];
+  /**
+   * The schedule's data date, once it is known. Stamped when a newer current
+   * schedule replaces this one, and correctable on the Import screen; the current
+   * schedule in use takes Settings' data date instead. Absent on every import
+   * written before the Two-Week Log measured fortnights against schedule updates.
+   */
+  dataDate?: string;
+  /** True when the stamp was worked out from the file's own actual dates rather than known. */
+  dataDateEstimated?: boolean;
 };
 
 export type ImportIndexEntry = Omit<ScheduleImport, 'activities'> & { file: string };
@@ -740,14 +749,17 @@ export type Summary = {
    */
   noRemainingDuration: number;
   /**
-   * Activities sharing an Activity ID with another activity in the same schedule.
-   * Everything keyed by hand — a percent, an override, a missed reason — matches
-   * by ID and so reaches only the first of them, and the ID stops being a name for
-   * one row. Counted because the import screen says so once and is then gone.
+   * Activity IDs the export carried on more than one row. Each is imported once,
+   * from its first row; counted because the import screen says so once and is then gone.
    */
   duplicateActivityIds: number;
-  /** Rows identical to another row in every field, dropped so the activity counts once. */
+  /** Rows left out of the import because their Activity ID was already in it. */
   repeatedRows: number;
+  /**
+   * The IDs among those whose rows disagreed on the start or finish, with every set
+   * of dates they carried. The first row's dates are used; these are for checking in P6.
+   */
+  duplicateDateConflicts: { activityId: string; dates: { start: string | null; finish: string | null }[] }[];
   /** Activities whose start or finish was keyed in place of P6's. */
   datesEdited: number;
   pctFromP6: number; // in budget only

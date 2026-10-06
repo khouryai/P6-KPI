@@ -41,7 +41,7 @@ describe('the remembered window', () => {
     // import moving the data date still moves an untouched log with it.
     const s = fakeStorage();
     return load(s).then((m) => {
-      expect(m.periodWindow()).toEqual({ end: null, span: 14 });
+      expect(m.periodWindow()).toEqual({ end: null, span: 14, against: 'update' });
     });
   });
 
@@ -50,11 +50,20 @@ describe('the remembered window', () => {
     const m = await load(s);
     m.setPeriodEnd('2026-09-09');
     m.setPeriodSpan(28);
-    expect(m.periodWindow()).toEqual({ end: '2026-09-09', span: 28 });
+    expect(m.periodWindow()).toEqual({ end: '2026-09-09', span: 28, against: 'update' });
 
     // A fresh load — the app reopened, or the screen was left and come back to.
     const again = await load(s);
-    expect(again.periodWindow()).toEqual({ end: '2026-09-09', span: 28 });
+    expect(again.periodWindow()).toEqual({ end: '2026-09-09', span: 28, against: 'update' });
+  });
+
+  it('remembers whether the window is measured against the update or the baseline', async () => {
+    const s = fakeStorage();
+    const m = await load(s);
+    m.setPeriodAgainst('baseline');
+    expect((await load(s)).periodWindow().against).toBe('baseline');
+    m.setPeriodAgainst('update');
+    expect((await load(s)).periodWindow().against).toBe('update');
   });
 
   it('hands the window back to the data date when the end is cleared', async () => {
@@ -74,7 +83,7 @@ describe('the remembered window', () => {
 
   it('still works in a private window, where storage throws', async () => {
     const m = await load(fakeStorage(true));
-    expect(m.periodWindow()).toEqual({ end: null, span: 14 });
+    expect(m.periodWindow()).toEqual({ end: null, span: 14, against: 'update' });
     // The choice holds for the session; it is only the remembering that is lost.
     m.setPeriodEnd('2026-09-09');
     expect(m.periodWindow().end).toBe('2026-09-09');
@@ -83,8 +92,8 @@ describe('the remembered window', () => {
   it('survives a stored value written by hand and now nonsense', async () => {
     const s = fakeStorage();
     s.map.set('tc-period-window', '{not json');
-    expect((await load(s)).periodWindow()).toEqual({ end: null, span: 14 });
+    expect((await load(s)).periodWindow()).toEqual({ end: null, span: 14, against: 'update' });
     s.map.set('tc-period-window', '{"end":"whenever","span":"lots"}');
-    expect((await load(s)).periodWindow()).toEqual({ end: null, span: 14 });
+    expect((await load(s)).periodWindow()).toEqual({ end: null, span: 14, against: 'update' });
   });
 });

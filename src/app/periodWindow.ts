@@ -22,10 +22,16 @@ export type PeriodWindow = {
   end: string | null;
   /** How many days the window covers. 7, 14 or 28 on the screen. */
   span: number;
+  /**
+   * What the window is measured against: the schedule update in force when it began,
+   * or the baseline. The update is the default — it is the plan the team was
+   * actually working to — and the baseline is one switch away for the contract view.
+   */
+  against: 'update' | 'baseline';
 };
 
 const KEY = 'tc-period-window';
-const DEFAULT: PeriodWindow = { end: null, span: 14 };
+const DEFAULT: PeriodWindow = { end: null, span: 14, against: 'update' };
 const listeners = new Set<() => void>();
 
 function read(): PeriodWindow {
@@ -37,6 +43,7 @@ function read(): PeriodWindow {
     return {
       end: typeof parsed.end === 'string' && isValidISO(parsed.end) ? parsed.end : null,
       span: Number.isFinite(span) && span > 0 ? span : DEFAULT.span,
+      against: parsed.against === 'baseline' ? 'baseline' : 'update',
     };
   } catch {
     // A private window, or a value written by hand and now unreadable. Neither is
@@ -63,7 +70,7 @@ export function periodWindow(): PeriodWindow {
 }
 
 function write(next: PeriodWindow): void {
-  if (next.end === current.end && next.span === current.span) return;
+  if (next.end === current.end && next.span === current.span && next.against === current.against) return;
   current = next;
   try {
     localStorage.setItem(KEY, JSON.stringify(next));
@@ -83,6 +90,11 @@ export function setPeriodSpan(days: number): void {
   write({ ...current, span: days > 0 ? days : DEFAULT.span });
 }
 
+/** Measure the window against the schedule update in force, or against the baseline. */
+export function setPeriodAgainst(against: 'update' | 'baseline'): void {
+  write({ ...current, against });
+}
+
 /**
  * The window the log is on, and the two ways to move it. `end` is what was chosen;
  * a screen resolves null against its own data date, which is the only place that
@@ -93,6 +105,8 @@ export function usePeriodWindow(): {
   span: number;
   setEnd: (iso: string | null) => void;
   setSpan: (days: number) => void;
+  against: 'update' | 'baseline';
+  setAgainst: (against: 'update' | 'baseline') => void;
 } {
   const w = useSyncExternalStore(
     subscribe,
@@ -101,5 +115,6 @@ export function usePeriodWindow(): {
   );
   const setEnd = useCallback((iso: string | null) => setPeriodEnd(iso), []);
   const setSpan = useCallback((days: number) => setPeriodSpan(days), []);
-  return { end: w.end, span: w.span, setEnd, setSpan };
+  const setAgainst = useCallback((a: 'update' | 'baseline') => setPeriodAgainst(a), []);
+  return { end: w.end, span: w.span, setEnd, setSpan, against: w.against, setAgainst };
 }

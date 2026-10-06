@@ -1,13 +1,16 @@
 import { useMemo, useState, useCallback } from 'react';
 import type { WorkBook } from 'xlsx';
 import { useApp } from '../state';
-import { Page, Notice, Badge } from '../components/ui';
+import { Page, Notice, Badge, CellInput } from '../components/ui';
+import { updateDataDate } from '../updateDates';
+import { isValidISO } from '../../engine/dates';
 import { parseTable, parseDelimitedText, type ParsedTable } from '../../engine/parse';
 import { detectLayout, columnCount, columnLabel, FIELD_ORDER, FIELD_LABELS, type ColumnMap, type Layout } from '../../engine/columns';
 import { readWorkbook, pickSheet, workbookGrid } from '../../engine/workbook';
 import { parseXer, isXer, xerToActivities, type XerTable } from '../../engine/xer';
 import { distinctActivityTypes, distinctLocations } from '../../engine/discover';
 import { diffSchedules, type ActivityChange } from '../../engine/scheduleDiff';
+import { oneRowPerId } from '../../engine/compute';
 import { normKey } from '../../engine/keys';
 import type { ImportKind, ImportIndexEntry, ScheduleImport, P6Activity } from '../../engine/types';
 import { fmtDateTime, fmtDate } from '../format';
@@ -19,7 +22,7 @@ type Pending =
   | { type: 'xer'; name: string; tables: Map<string, XerTable> };
 
 export function Import() {
-  const { state, actions } = useApp();
+  const { state, model, actions } = useApp();
   const [kind, setKind] = useState<ImportKind>('current');
   const [pending, setPending] = useState<Pending | null>(null);
   const [mapOverride, setMapOverride] = useState<Partial<ColumnMap> | null>(null);
@@ -154,6 +157,8 @@ export function Import() {
     if (!parsed) return null;
     const acts = parsed.activities;
     const real = acts.filter((a) => a.rowType === 'ACTIVITY');
+    /* One row per Activity ID is what the model will read: the rest are left out, and any that disagree on dates are flagged. */
+    const dupes = oneRowPerId(acts);
     const locs = distinctLocations(acts);
     const types = distinctActivityTypes(acts);
     const known = new Set(state.data.library.map((e) => normKey(e.matchKey)));
@@ -181,6 +186,7 @@ export function Import() {
     return {
       acts,
       real,
+      dupes,
       locs,
       types,
       newTypes,
@@ -225,6 +231,7 @@ export function Import() {
     }
   };
 
+  const conflicts = model.summary.duplicateDateConflicts;
   const history = [...state.data.importsIndex].sort((a, b) => b.importedAt.localeCompare(a.importedAt));
   const headerCells = grid && layout?.headerRow !== null && layout ? (grid[layout.headerRow as number] ?? null) : null;
   const cols = grid ? columnCount(grid) : 0;
@@ -371,14 +378,14 @@ export function Import() {
             {[
               ['Rows', preview.acts.length],
               ['WBS rows (never budgeted)', preview.acts.length - preview.real.length],
-              ['Activities', preview.real.length],
+              ['Activities', preview.real.length - preview.dupes.dropped],
               ['Title rows skipped', parsed.skippedBeforeHeader],
               ['Locations found', preview.locs.length],
               ['New locations', preview.newLocs.length],
               ['Activity types found', preview.types.length],
               ['New to the library', preview.newTypes.length],
               ['Unparseable dates', parsed.unparseableDates],
-              ['Duplicate Activity IDs', parsed.duplicateIds.length],
+              ['Duplicate Activity IDs', preview.dupes.duplicateIds],
               ['IDs with no location segment', preview.noId],
               [kind === 'current' ? 'Not in the baseline' : 'Not in the current schedule', preview.missingInOther ?? 'n/a'],
             ].map(([k, v]) => (
@@ -414,8 +421,38 @@ export function Import() {
             </div>
           )}
           {xer?.warnings.map((w) => <div key={w} className="mt-2"><Notice tone="warn">{w}</Notice></div>)}
-          {parsed.duplicateIds.length > 0 && (
-            <div className="mt-2"><Notice tone="warn">Duplicate Activity IDs (the first occurrence wins for baseline and test progress matching): {parsed.duplicateIds.join(', ')}</Notice></div>
+          {preview.dupes.duplicateIds > 0 && (
+            <div className="mt-2">
+              <Notice tone={preview.dupes.dateConflicts.length ? 'warn' : 'info'}>
+                <b>
+                  {preview.dupes.duplicateIds} Activity {preview.dupes.duplicateIds === 1 ? 'ID is' : 'IDs are'} on more than one row.
+                </b>{' '}
+                Each is imported once, from its first row; the other {preview.dupes.dropped} {preview.dupes.dropped === 1 ? 'row is' : 'rows are'} left out, so no
+                activity is priced twice.
+                {preview.dupes.dateConflicts.length > 0 && (
+                  <>
+                    {' '}
+                    <b>
+                      {preview.dupes.dateConflicts.length} of them {preview.dupes.dateConflicts.length === 1 ? 'has' : 'have'} rows with different dates
+                    </b>{' '}
+                    — the first row&rsquo;s are used. Check these in P6:
+                    <ul className="mt-1 max-h-40 overflow-auto">
+                      {preview.dupes.dateConflicts.map((c) => (
+                        <li key={c.activityId}>
+                          <span className="mono">{c.activityId}</span>:{' '}
+                          {c.dates.map((d, i) => (
+                            <span key={i}>
+                              {i > 0 && <span className="text-[var(--text-subtle)]"> · </span>}
+                              {i === 0 ? <b>{fmtDate(d.start)} – {fmtDate(d.finish)}</b> : <>{fmtDate(d.start)} – {fmtDate(d.finish)}</>}
+                            </span>
+                          ))}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </Notice>
+            </div>
           )}
           {parsed.warnings.length > 0 && (
             <details className="mt-2 text-[12px]">
@@ -459,6 +496,34 @@ export function Import() {
         </div>
       )}
 
+      {conflicts.length > 0 && (
+        <div className="card mt-4">
+          <h2 className="card-title">Duplicate Activity IDs with different dates</h2>
+          <p className="text-[12px] text-[var(--text-muted)]">
+            The current schedule carries these Activity IDs on more than one row, and the rows disagree on the dates. Each is imported once, from its first row —
+            those dates, in bold, are the ones every screen uses. Check them in P6 and re-export.
+          </p>
+          <table className="tbl mt-2">
+            <thead><tr><th>Activity ID</th><th>Dates on its rows (first row used)</th></tr></thead>
+            <tbody>
+              {conflicts.map((c) => (
+                <tr key={c.activityId}>
+                  <td className="mono">{c.activityId}</td>
+                  <td>
+                    {c.dates.map((d, i) => (
+                      <span key={i}>
+                        {i > 0 && <span className="text-[var(--text-subtle)]"> · </span>}
+                        {i === 0 ? <b>{fmtDate(d.start)} – {fmtDate(d.finish)}</b> : <>{fmtDate(d.start)} – {fmtDate(d.finish)}</>}
+                      </span>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className="card mt-4">
         <h2 className="card-title">Import history</h2>
         <p className="text-[12px] text-[var(--text-muted)]">
@@ -467,8 +532,14 @@ export function Import() {
           Nothing you keyed is touched either way — your renames, hidden and excluded flags, hours overrides, notes, percent complete, actual dates, missed reasons, the
           activity library, locations, {TERMS.subsystemPlural.toLowerCase()} and team hours all live in their own files, keyed on the Activity ID.
         </p>
+        <p className="mt-1 text-[12px] text-[var(--text-muted)]">
+          <b>Data date</b> is the date each current-schedule update was run to. The Two-Week Log measures a fortnight against the update in force when it began —
+          the latest one whose data date is on or before its first day — so a wrong date here moves which update a fortnight is judged against. The schedule in use
+          takes the data date in Settings. An older one keeps the date it had when it was replaced; correct it here if it is wrong. <i>estimated</i> means it was
+          worked out from the file&rsquo;s own actual dates, and <i>import day</i> means nothing recorded it.
+        </p>
         <table className="tbl mt-2">
-          <thead><tr><th>Imported</th><th>Kind</th><th>Source</th><th className="num">Rows</th><th>File</th><th></th></tr></thead>
+          <thead><tr><th>Imported</th><th>Kind</th><th>Data date</th><th>Source</th><th className="num">Rows</th><th>File</th><th></th></tr></thead>
           <tbody>
             {history.map((h) => {
               const inUse = (h.kind === 'current' ? state.data.current?.id : state.data.baseline?.id) === h.id;
@@ -476,6 +547,42 @@ export function Import() {
                 <tr key={h.file}>
                   <td>{fmtDateTime(h.importedAt)}</td>
                   <td><Badge tone={h.kind === 'current' ? 'info' : 'purple'}>{h.kind}</Badge> {inUse && <Badge tone="good">in use</Badge>}</td>
+                  <td className="whitespace-nowrap">
+                    {h.kind !== 'current' ? (
+                      <span className="text-[var(--text-subtle)]">—</span>
+                    ) : (() => {
+                      const d = updateDataDate(h, state.data.current?.id ?? null, state.data.settings.dataDate);
+                      if (d.source === 'settings') {
+                        return <span title="The schedule in use takes the data date in Settings.">{fmtDate(d.date)} <span className="text-[var(--text-subtle)]">Settings</span></span>;
+                      }
+                      return (
+                        <span className="flex items-center gap-1.5">
+                          <CellInput
+                            type="date"
+                            value={h.dataDate ?? ''}
+                            placeholder={d.date}
+                            title="The date this update was run to. It decides which Two-Week Log fortnights it is the plan for."
+                            onCommit={(v) =>
+                              actions.update('importsIndex', (list) =>
+                                list.map((e) =>
+                                  e.file === h.file
+                                    ? (() => {
+                                        const { dataDate: _d, dataDateEstimated: _e, ...rest } = e;
+                                        void _d;
+                                        void _e;
+                                        return isValidISO(v) ? { ...rest, dataDate: v } : rest;
+                                      })()
+                                    : e,
+                                ),
+                              )
+                            }
+                          />
+                          {d.source === 'estimated' && <span className="text-[11px] tone-warn">estimated</span>}
+                          {d.source === 'imported' && <span className="text-[11px] tone-warn" title={`Nothing recorded this update's data date, so the day it was imported (${fmtDate(d.date)}) is used.`}>import day</span>}
+                        </span>
+                      );
+                    })()}
+                  </td>
                   <td>{h.sourceFilename}</td>
                   <td className="num">{h.rowCount}</td>
                   <td className="text-[var(--text-muted)]">{h.file}</td>
@@ -495,7 +602,7 @@ export function Import() {
                 </tr>
               );
             })}
-            {history.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-[var(--text-subtle)]">No imports yet.</td></tr>}
+            {history.length === 0 && <tr><td colSpan={7} className="py-4 text-center text-[var(--text-subtle)]">No imports yet.</td></tr>}
           </tbody>
         </table>
       </div>
