@@ -1,0 +1,1 @@
+import{r as a,ab as t,ac as o}from"./index-BTq-tLiv.js";var i=["axis","item"],p=a.forwardRef((r,e)=>a.createElement(t,{chartName:"BarChart",defaultTooltipEventType:"axis",validateTooltipEventTypes:i,tooltipPayloadSearcher:o,categoricalChartProps:r,ref:e}));export{p as B};

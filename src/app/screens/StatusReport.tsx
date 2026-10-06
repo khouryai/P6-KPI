@@ -63,6 +63,9 @@ function achievedTone(a: number | null): 'good' | 'warn' | 'bad' | 'muted' {
   return a >= 1 ? 'good' : a >= 0.8 ? 'warn' : 'bad';
 }
 
+/** Where the chosen picture size is remembered. */
+const PNG_TARGET_KEY = 'tc-report-png-target';
+
 const PLANNED = BRIDGE_COLOURS.planned;
 const ACHIEVED = BRIDGE_COLOURS.achieved;
 const UPDATE = BRIDGE_COLOURS.update;
@@ -115,7 +118,23 @@ export function StatusReport() {
   const [logOutcomes, setLogOutcomes] = useState<PeriodOutcome[]>(['MISSED', 'NOT STARTED', 'COMPLETED']);
   const [showTrend, setShowTrend] = useState(false);
   /** What the picture is meant to be dropped into, which sets how big its type comes out. */
-  const [pngTarget, setPngTarget] = useState<keyof typeof PAINT_TARGETS>('landscape');
+  const [pngTarget, setPngTargetState] = useState<keyof typeof PAINT_TARGETS>(() => {
+    try {
+      const k = localStorage.getItem(PNG_TARGET_KEY);
+      return k && k in PAINT_TARGETS ? k : 'landscape';
+    } catch {
+      return 'landscape';
+    }
+  });
+  /** Remembered on this machine: whoever pastes these into the same document every month picks the size once. */
+  const setPngTarget = (k: keyof typeof PAINT_TARGETS) => {
+    setPngTargetState(k);
+    try {
+      localStorage.setItem(PNG_TARGET_KEY, String(k));
+    } catch {
+      /* private window: the choice holds for this visit */
+    }
+  };
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
 
@@ -736,8 +755,10 @@ export function StatusReport() {
               </select>
             </div>
             <div className="mt-1.5 text-[11.5px] text-[var(--text-subtle)]">
-              The picture comes out one image per page, sized and stamped so Word places it at that width without shrinking it. It carries the columns the tables
-              below are showing, in that order — hiding columns with <b>Columns</b> makes what is left bigger on the page.
+              The picture comes out one image per page, exactly the size chosen, drawn at 400 dots to the inch and stamped so Word places it at that size. Pick
+              the size it will sit at in the document — enlarging a picture past it is what makes it soft. In Word, tick <b>Do not compress images in file</b>{' '}
+              (File → Options → Advanced), or Word takes it down to its own resolution when it saves. It carries the columns the tables below are showing, in that
+              order — hiding columns with <b>Columns</b> makes what is left bigger on the page.
             </div>
           </div>
 
