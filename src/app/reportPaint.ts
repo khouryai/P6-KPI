@@ -505,6 +505,12 @@ export const PAINT_TARGETS: Record<string, PaintTarget> = {
    * so it fills the frame with nothing stretched and nothing left over.
    */
   wide: { label: 'Large page, 13 × 7 in', inches: 13, width: 1330, pageInches: 7 },
+  /*
+   * One picture, laid out for a 7 inch table column — a meeting's minutes, one row
+   * per team. Laid out at the column's own width, so the type comes out the size it
+   * does on a portrait page instead of half that, however tall the report runs.
+   */
+  column: { label: 'Table column, 7 in wide — one tall picture', inches: 7, width: 750 },
   screen: { label: 'One tall picture, 13 in wide', inches: 13, width: 1330 },
 };
 

@@ -63,6 +63,15 @@ function achievedTone(a: number | null): 'good' | 'warn' | 'bad' | 'muted' {
   return a >= 1 ? 'good' : a >= 0.8 ? 'warn' : 'bad';
 }
 
+/** The text area of a Letter page with 1 inch margins: the tallest picture Word keeps full size there. */
+const WORD_TEXT_HEIGHT = 9;
+
+/** A PNG's pixel size, from its header. */
+function pngSize(png: Uint8Array): { w: number; h: number } {
+  const v = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  return { w: v.getUint32(16), h: v.getUint32(20) };
+}
+
 /** Where the chosen picture size is remembered. */
 const PNG_TARGET_KEY = 'tc-report-png-target';
 
@@ -287,7 +296,26 @@ export function StatusReport() {
         if (state.adapterKind === 'filesystem') written.push(await actions.writeExport(name, pages[i]));
         else downloadBytes(name, pages[i], 'image/png');
       }
-      if (written.length) actions.notify('ok', `Written to ${written[0]}${written.length > 1 ? ` and ${written.length - 1} more` : ''}`);
+      const where = written.length ? `Written to ${written[0]}${written.length > 1 ? ` and ${written.length - 1} more` : ''}. ` : '';
+      if (pages.length === 1 && !target.pageInches) {
+        /*
+         * One tall picture: say how big it came out, and whether Word will keep it
+         * that big. Word shrinks a picture to fit the page's text area, which on a
+         * Letter page with 1 inch margins is 9 inches tall — the surprise is finding
+         * that out after pasting it in.
+         */
+        const tall = (pngSize(pages[0]).h / pngSize(pages[0]).w) * target.inches;
+        const fits = tall <= WORD_TEXT_HEIGHT + 0.01;
+        actions.notify(
+          fits ? 'ok' : 'info',
+          `${where}One picture, ${target.inches} × ${tall.toFixed(1)} in.` +
+            (fits
+              ? ''
+              : ` Word shrinks a picture to fit the page, and a Letter page with 1 in margins has ${WORD_TEXT_HEIGHT} in — so it would come out ` +
+                `${((target.inches * WORD_TEXT_HEIGHT) / tall).toFixed(1)} × ${WORD_TEXT_HEIGHT} in. Take something off the page (the activity table is usually the ` +
+                `long part, or hide its columns), or put it on a longer page: Legal or Tabloid, with narrower margins.`),
+        );
+      } else if (written.length) actions.notify('ok', where.trim());
       else if (pages.length > 1) actions.notify('ok', `${pages.length} pages saved, each sized to fit the page you chose.`);
     } catch (err) {
       actions.notify('error', (err as Error).message);

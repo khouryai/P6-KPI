@@ -139,7 +139,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const notify = useCallback(
     (kind: 'ok' | 'error' | 'info', text: string) => {
       patch({ toast: { kind, text } });
-      window.setTimeout(() => patch((s) => (s.toast?.text === text ? { toast: null } : {})), kind === 'error' ? 12000 : 5000);
+      window.setTimeout(() => patch((s) => (s.toast?.text === text ? { toast: null } : {})), kind === 'error' ? 12000 : Math.min(20000, Math.max(5000, text.length * 55)));
     },
     [patch],
   );
