@@ -7,6 +7,7 @@ import { FileSystemAdapter } from '../storage/fileSystemAdapter';
 import { FsaDirectory } from '../storage/fsaDirectory';
 import { IndexedDbAdapter } from '../storage/indexedDbAdapter';
 import { MemoryAdapter } from '../storage/memoryAdapter';
+import { outgoingDataDate } from './updateDates';
 import { Store, emptyStoreData, importStamp, FILES, type StoreData, type StoreFileKey, type ConflictCopy, type LockStatus } from '../storage/store';
 import { fsaSupported, loadFolderHandle, saveFolderHandle, forgetFolderHandle, pickFolder, queryPermission, requestPermission, ownerIdentity } from './folder';
 
@@ -138,7 +139,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const notify = useCallback(
     (kind: 'ok' | 'error' | 'info', text: string) => {
       patch({ toast: { kind, text } });
-      window.setTimeout(() => patch((s) => (s.toast?.text === text ? { toast: null } : {})), kind === 'error' ? 12000 : 5000);
+      window.setTimeout(() => patch((s) => (s.toast?.text === text ? { toast: null } : {})), kind === 'error' ? 12000 : Math.min(20000, Math.max(5000, text.length * 55)));
     },
     [patch],
   );
@@ -408,8 +409,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     async (kind: ImportKind, activities: P6Activity[], sourceFilename: string) => {
       const store = storeRef.current;
       if (!store) throw new Error('No storage open');
+      /*
+       * The stamp is to the second, and two imports inside one second — a quick
+       * re-import, or a script — used to share an ID. Everything that asks which
+       * import is in use, or which one a data date belongs to, asks by ID.
+       */
+      const taken = new Set(stateRef.current.data.importsIndex.map((e) => e.id));
+      const stamp = importStamp();
+      let id = stamp;
+      for (let n = 1; taken.has(id); n++) id = `${stamp}-${n}`;
       const imp: ScheduleImport = {
-        id: importStamp(),
+        id,
         kind,
         importedAt: new Date().toISOString(),
         sourceFilename,
@@ -417,7 +427,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         activities,
       };
       const cur = stateRef.current.data;
-      const { index } = await store.appendImport(imp, cur.importsIndex);
+      /*
+       * The current schedule this one replaces becomes history, and the Two-Week Log
+       * measures past fortnights against history — so it is stamped with its data
+       * date now, the last moment that is known. One already stamped keeps its stamp.
+       */
+      let prior = cur.importsIndex;
+      if (kind === 'current' && cur.current) {
+        const outgoing = cur.current;
+        const stamp = outgoingDataDate(outgoing.activities, activities, cur.settings.dataDate);
+        if (stamp) {
+          prior = prior.map((e) =>
+            e.kind === 'current' && e.id === outgoing.id && !e.dataDate ? { ...e, dataDate: stamp.dataDate, ...(stamp.estimated ? { dataDateEstimated: true } : {}) } : e,
+          );
+        }
+      }
+      const { index } = await store.appendImport(imp, prior);
       await mirror(FILES.importsIndex, JSON.stringify(index, null, 2));
       let locations = cur.locations;
       let library = cur.library;

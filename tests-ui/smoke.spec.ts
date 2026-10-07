@@ -214,7 +214,7 @@ test('the status report puts the reason an activity was missed on its own row', 
   await page.locator('.no-print input[type=date]').fill('2026-01-16');
   await expect(page.locator(String.raw`.report .tbl`).last()).toBeVisible();
   // The answer sits on the activity, not in a tally somewhere above it.
-  await expect(page.locator('.report th', { hasText: 'Why missed' })).toHaveCount(1);
+  await expect(page.locator('.report th', { hasText: 'Why behind' })).toHaveCount(1);
   await expect(page.locator('.report th', { hasText: 'Outcome' })).toHaveCount(1);
 });
 
@@ -229,12 +229,10 @@ test('the dashboard orders phases numerically, whole project first', async ({ pa
 });
 
 /**
- * A P6 export can carry the same Activity ID twice. That used to make every table
- * on every screen stop obeying: React reconciles rows by key, so duplicate keys
- * left stale <tr> elements behind — filter the table and the row count went UP,
- * sort it and ascending and descending drew the same thing.
+ * A P6 export can carry the same Activity ID on several rows. Each ID is imported
+ * once, from its first row, and the table built from it still filters and sorts.
  */
-test('a schedule with duplicate Activity IDs still filters and sorts', async ({ page }) => {
+test('a schedule with duplicate Activity IDs imports each once, and still filters and sorts', async ({ page }) => {
   await open(page);
   const rows: unknown[][] = [['Activity ID', 'Activity Name', 'Original Duration', 'Remaining Duration', 'Start', 'Finish']];
   for (let i = 0; i < 4; i++) rows.push(['0-P2-TC-A10-FA-0010', `[T&C] A10 - Core Network Test ${i}`, 10 + i, 0, '05-Jan-26 A', '16-Jan-26 A']);
@@ -245,13 +243,13 @@ test('a schedule with duplicate Activity IDs still filters and sorts', async ({ 
 
   await page.goto('/#/progress');
   const body = page.locator('.tbl tbody tr');
-  await expect(body).toHaveCount(8);
+  await expect(body).toHaveCount(2);
   // Filtering to one phase must SHOW one phase, not leave the other phase's rows
   // stranded in the DOM.
   await page.locator('.page-toolbar select').first().selectOption('P2');
-  await expect(body).toHaveCount(4);
+  await expect(body).toHaveCount(1);
   await page.locator('.page-toolbar select').first().selectOption('');
-  await expect(body).toHaveCount(8);
+  await expect(body).toHaveCount(2);
 
   const th = page.locator('.tbl thead th').filter({ hasText: /budget h/i }).first();
   const col = async () => (await page.locator('.tbl tbody tr td:nth-child(4)').allInnerTexts()).map((t) => t.trim());

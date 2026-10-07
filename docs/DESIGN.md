@@ -654,6 +654,63 @@ because the percent had not caught up would be unusable. The outcome keeps its o
 `finishedOn`, which is that date once the activity reads 100%, falling back to the
 end of the earn window for the activity at 100% that nothing has dated.
 
+### Planned is never trimmed; the gap is explained
+
+A fortnight's planned figure is the baseline's, and it routinely holds hours the team
+could never have worked: a 20-day activity whose baseline started ten days ago and is
+still waiting on another team's predecessor puts half its budget into this window's
+plan. Taking those activities out of the plan would hide the problem from the project;
+leaving them unexplained makes the team carry it. The log does neither.
+
+- **Reasons go on NOT STARTED as well as MISSED**, and on nothing else. They are the
+  same per-activity, per-period entries as before. Once an activity starts it is no
+  longer waiting on anything, so the row stops offering a reason and the bridge stops
+  reading one; a reason given while it waited stays on file for that period, and
+  whatever the running activity is still short of its baseline spread is pace.
+- **Each reason is a constraint or the team's own.** `MissedReasonLog.outsideControl`
+  holds what a person set; otherwise `DEFAULT_OUTSIDE_CONTROL` decides; a reason
+  somebody typed is the team's own until they say otherwise, so nothing shrinks the
+  plan the team is measured against without a person deciding it should.
+- **`periodBridge`** files every row's planned-minus-earned under one cause —
+  constraint, team, no reason yet, running behind pace, or done in an earlier window —
+  and the hours earned beyond plan under *ahead*. Because every term is a share of a
+  row's own gap, `planned − Σ shortfall + ahead = earned` holds exactly; a test pins it
+  across three years of fortnights. The **workable plan** is planned less the
+  constraint hours, and achieved over it sits *beside* achieved over plan, never in
+  place of it. The waterfall draws only four steps — planned, held by constraints,
+  workable plan, achieved; the rest of the gap is in the reasons list beside it.
+- **The plan is the schedule update in force when the window began**, not the
+  baseline and not today's current schedule. The baseline still expects work a late
+  predecessor pushed out months ago; today's current schedule has been statused to the
+  data date, so for weeks already gone it holds what actually happened and always reads
+  near 100%. `periodLog(rows, from, to, plan)` takes a `PeriodPlan` built by
+  `planFromUpdate` from the latest current-schedule import whose data date is on or
+  before the window's first day (`updateFor` in `src/app/updateDates.ts`). An activity
+  in progress at the update plans only its remaining work, from the update's data date
+  to its forecast finish. Outcomes, due-to-finish and days late are judged against the
+  update's dates; the baseline's hours are carried beside them (`baselinePlannedHours`),
+  and baseline minus planned is the slip already in the schedule before the window.
+  The baseline is one switch away (`against` in `periodWindow.ts`, shared with the
+  Status Report).
+- **Each update knows its data date.** An import only ever recorded when it arrived,
+  so the current schedule in use takes Settings' data date, and the one it replaces
+  is stamped as it is replaced (`outgoingDataDate` reads the files' own actual dates
+  to tell whether Settings still describes the outgoing schedule). Stamps are editable
+  on Import; an unstamped import falls back to its import day, flagged.
+
+### One row per Activity ID
+
+`oneRowPerId` (in `compute.ts`) keeps the first row of each Activity ID, in both the
+current schedule and the baseline, and leaves the rest out: the ID is the activity, and
+pricing each row counted its hours once per row and matched every repeat to the
+baseline's first row — which drew the planned curve off the forecast even with the same
+file imported as both. Rows of one ID that disagree on the dates are flagged
+(`summary.duplicateDateConflicts`, listed on Import and counted on the Dashboard) for
+checking in P6; the first row's dates are used.
+
+The Status Report reads the same figures through the same helpers
+(`bridgeFor`, `components/PlanBridge.tsx`) and paints the same bridge into the PNG.
+
 ### Editing an actual date
 
 `ActualDateCell` (in `components/ui.tsx`, shared by the Two-Week Log and Test

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, ActualDateCell, Panel, Notice, Badge, type Column, type HeroStat } from '../components/ui';
-import { periodLog, addDays, OUTCOMES, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
+import { periodLog, addDays, OUTCOMES, needsReason, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
 import { fmtHours, fmtPct, fmtDate, todayISO, num } from '../format';
 import { isValidISO } from '../../engine/dates';
 import { normKey } from '../../engine/keys';
@@ -11,7 +11,20 @@ import { useUnit } from '../units';
 import { usePeriodWindow } from '../periodWindow';
 import { TERMS } from '../../engine/vocab';
 import { setTestProgress, asFraction } from '../testProgress';
-import { reasonCatalogue, effectiveReasonFor, setMissedReason, addReasonToCatalogue, removeReasonFromCatalogue, reasonUsage, tallyReasons } from '../missedReasons';
+import {
+  reasonCatalogue,
+  effectiveReasonFor,
+  setMissedReason,
+  addReasonToCatalogue,
+  removeReasonFromCatalogue,
+  reasonUsage,
+  tallyReasons,
+  bridgeFor,
+  isOutsideControl,
+  setOutsideControl,
+} from '../missedReasons';
+import { PlanBridge, bridgeText, bridgePlan, BRIDGE_COLOURS } from '../components/PlanBridge';
+import { usePeriodPlan, type PlanState } from '../planSource';
 
 /*
  * Planned against achieved, in the two colours the S-curve already uses for the
@@ -20,8 +33,53 @@ import { reasonCatalogue, effectiveReasonFor, setMissedReason, addReasonToCatalo
  * picked by eye — blue and green, the obvious choice, are almost identical under
  * tritanopia.
  */
-const PLANNED = '#6d28d9';
-const ACHIEVED = '#00875a';
+const PLANNED = BRIDGE_COLOURS.planned;
+const ACHIEVED = BRIDGE_COLOURS.achieved;
+/** A schedule update, in the amber the S-curve draws P6's own dates in. */
+const UPDATE = BRIDGE_COLOURS.update;
+
+/**
+ * What the screen says about the plan it is measuring against, when there is
+ * anything to say: none found, still reading, unreadable, or a data date the app
+ * only guessed.
+ */
+function planNotice(p: PlanState, from: string): { tone: 'info' | 'warn'; text: React.ReactNode } | null {
+  if (p.kind === 'none') {
+    return {
+      tone: 'info',
+      text: (
+        <>
+          No schedule update is dated on or before {fmtDate(from)}, so this window is measured against the <b>baseline</b>. Import the update that was in force
+          then, or correct an update&rsquo;s data date on <a href={href('import')}>Import</a>.
+        </>
+      ),
+    };
+  }
+  if (p.kind === 'missing') {
+    return {
+      tone: 'warn',
+      text: (
+        <>
+          The update in force for this window ({p.entry.file}) could not be read, so it is measured against the <b>baseline</b>. Restore the file, or remove that
+          import on <a href={href('import')}>Import</a>.
+        </>
+      ),
+    };
+  }
+  if (p.kind === 'ready' && (p.date.source === 'estimated' || p.date.source === 'imported')) {
+    return {
+      tone: 'info',
+      text: (
+        <>
+          Measured against the update imported {fmtDate(p.entry.importedAt.slice(0, 10))}. Its data date, <b>{fmtDate(p.date.date)}</b>, is{' '}
+          {p.date.source === 'estimated' ? 'worked out from the file’s own actual dates' : 'the day it was imported, because nothing recorded it'} — check it on{' '}
+          <a href={href('import')}>Import</a>, since it decides which fortnights this update is the plan for.
+        </>
+      ),
+    };
+  }
+  return null;
+}
 const GRID = '#e4e7ec';
 const AXIS = '#6e7179';
 
@@ -30,21 +88,26 @@ const OUTCOME_META: Record<PeriodOutcome, { tone: 'good' | 'info' | 'warn' | 'ba
   COMPLETED: { tone: 'good', blurb: 'Reached 100% inside the period. This is what the fortnight actually finished.' },
   'COMPLETED EARLY': {
     tone: 'good',
-    blurb: 'Finished before the period began, and listed here because the baseline still had it running. It beat its dates — it is not work this fortnight did.',
+    blurb: 'Finished before the period began, and listed here because the plan still had it running. It beat its dates — it is not work this fortnight did.',
   },
   STARTED: { tone: 'info', blurb: 'Began inside the period and is still running.' },
   CONTINUED: { tone: 'info', blurb: 'Began earlier, still running, and earned hours in the period.' },
-  MISSED: { tone: 'bad', blurb: 'The baseline had these finishing inside the period. They did not finish.' },
-  'NOT STARTED': { tone: 'muted', blurb: 'The baseline had these starting inside the period. They never started.' },
+  MISSED: { tone: 'bad', blurb: 'The plan had these finishing inside the period. They did not finish.' },
+  'NOT STARTED': { tone: 'muted', blurb: 'The plan had these running inside the period. They have not started. Say why on the row — a predecessor or readiness reason takes their hours out of the workable plan.' },
 };
 
 /** The chart's legend, in the same order as the key beside it. */
-function ChartKey() {
+function ChartKey({ update }: { update: boolean }) {
   return (
     <div className="flex justify-center gap-4 pt-1 text-[11px] text-[var(--text-muted)]">
       <span className="flex items-center gap-1.5">
-        <i className="inline-block h-2.5 w-2.5 rounded-[3px]" style={{ background: PLANNED }} /> Planned
+        <i className="inline-block h-2.5 w-2.5 rounded-[3px]" style={{ background: PLANNED }} /> Baseline
       </span>
+      {update && (
+        <span className="flex items-center gap-1.5">
+          <i className="inline-block h-2.5 w-2.5 rounded-[3px]" style={{ background: UPDATE }} /> Update
+        </span>
+      )}
       <span className="flex items-center gap-1.5">
         <i className="inline-block h-2.5 w-2.5 rounded-[3px]" style={{ background: ACHIEVED }} /> Achieved
       </span>
@@ -76,24 +139,29 @@ function MissedReasonCell({
   value,
   options,
   carriedFrom,
+  outside,
   onChange,
   onAdd,
 }: {
   value: string;
   options: string[];
+  /** The chosen reason is outside the team's control, so its hours leave the workable plan. */
+  outside?: boolean;
   /** The period this answer was written against, when it was not this one. */
   carriedFrom?: string;
   onChange: (reason: string) => void;
   onAdd: (reason: string) => void;
 }) {
+  const control = value ? (outside ? '\n\nOutside the team’s control: these hours are held by a constraint, not counted against the workable plan.' : '\n\nThe team’s own: these hours count against the workable plan.') : '';
   return (
+    <span className="flex items-center gap-1">
     <select
       className={`cell-input${carriedFrom ? ' is-carried' : ''}`}
       value={value}
       title={
-        carriedFrom
+        (carriedFrom
           ? `${value}\n\nCarried from the period ending ${fmtDate(carriedFrom)}. It stays with the activity until somebody gives this period its own answer; picking one here records it against this period.`
-          : value || 'Say why this activity did not finish. Pick a reason, or add one of your own.'
+          : value || 'Say why this activity is behind. Pick a reason, or add one of your own.') + control
       }
       onChange={(e) => {
         if (e.target.value !== ADD_REASON) return onChange(e.target.value);
@@ -110,6 +178,12 @@ function MissedReasonCell({
       ))}
       <option value={ADD_REASON}>＋ Add a reason…</option>
     </select>
+    {value && (
+      <b className={`reason-ctl${outside ? ' is-outside' : ''}`} title={outside ? 'Outside the team’s control' : 'The team’s own'}>
+        {outside ? 'constraint' : 'ours'}
+      </b>
+    )}
+    </span>
   );
 }
 
@@ -134,12 +208,27 @@ export function PeriodLog() {
    * `chosenEnd` is null until somebody picks one, which keeps an untouched log
    * following the data date as imports move it.
    */
-  const { end: chosenEnd, span, setEnd, setSpan } = usePeriodWindow();
+  const { end: chosenEnd, span, setEnd, setSpan, against, setAgainst } = usePeriodWindow();
   const end = chosenEnd ?? defaultEnd(state.data.settings.dataDate);
   const [outcome, setOutcome] = useState<PeriodOutcome | ''>('');
 
   const from = addDays(end, -(span - 1));
-  const log = useMemo(() => periodLog(model.rows, from, end), [model.rows, from, end]);
+  /*
+   * The plan: the schedule update in force when the window began, unless the
+   * baseline was asked for. While the update's file is being read the log is drawn
+   * against the baseline, which is also what it falls back to when there is none.
+   */
+  const planState = usePeriodPlan(from, against);
+  const plan = planState.kind === 'ready' ? planState.plan : null;
+  const log = useMemo(() => periodLog(model.rows, from, end, plan), [model.rows, from, end, plan]);
+  /** Whether the log is on an update; the baseline is then the comparison, not the plan. */
+  const onUpdate = !!log.plan;
+  const planWord = log.plan ? log.plan.label : 'baseline';
+  const planColour = onUpdate ? UPDATE : PLANNED;
+  const bPlan = bridgePlan(log.plan?.label);
+  const notice = planNotice(planState, from);
+  /** Hours that had already left this window in the schedule before it began. */
+  const inherited = log.baselinePlannedHours - log.plannedHours;
 
   const shown = useMemo(
     () => (outcome ? log.activities.filter((a) => a.outcome === outcome) : log.activities),
@@ -159,8 +248,20 @@ export function PeriodLog() {
   /** How many activities each reason has been given for, across every period. */
   const usage = useMemo(() => reasonUsage(missedReasons), [missedReasons]);
   const [editingReasons, setEditingReasons] = useState(false);
-  /** Every activity the period counts as missed, whatever the table is filtered to. */
-  const missed = useMemo(() => log.activities.filter((a) => a.outcome === 'MISSED'), [log.activities]);
+  /**
+   * Every activity the review owes a reason for, whatever the table is filtered to:
+   * the missed ones and the ones that have not started. Not starting is where most
+   * of a fortnight's shortfall usually sits, and it is the half most often down to
+   * somebody else's predecessor.
+   */
+  const behind = useMemo(() => log.activities.filter(needsReason), [log.activities]);
+  /** The fortnight's shortfall split by why, and the same per phase. */
+  const bridge = useMemo(() => bridgeFor(missedReasons, log.activities, log.to), [missedReasons, log.activities, log.to]);
+  const phaseBridge = useMemo(
+    () => new Map(log.phases.map((p) => [p.key, bridgeFor(missedReasons, log.activities.filter((a) => a.phase === p.key), log.to)])),
+    [missedReasons, log.activities, log.phases, log.to],
+  );
+  const outsideOf = (reason: string) => isOutsideControl(missedReasons, reason);
   /*
    * Rows whose achieved hours in this window are a share of an open-ended spread
    * rather than work anybody did in these two weeks. Worth naming at the top of the
@@ -169,7 +270,9 @@ export function PeriodLog() {
    */
   const spread = useMemo(() => log.activities.filter((a) => a.spreadToDataDate), [log.activities]);
   const spreadHours = spread.reduce((s2, a) => s2 + a.earnedHours, 0);
-  const reasonTally = useMemo(() => tallyReasons(missedReasons, missed.map((a) => a.activityId), log.to), [missedReasons, missed, log.to]);
+  const reasonTally = useMemo(() => tallyReasons(missedReasons, behind.map((a) => a.activityId), log.to), [missedReasons, behind, log.to]);
+  /** Every activity the reasons panel lists: the ones with a reason, and the ones still owed one. */
+  const reasonedCount = bridge.byReason.reduce((n, t) => n + t.activities, 0) + reasonTally.unexplained;
 
   /** What is keyed against each activity right now, for the editable columns. */
   const testEntries = useMemo(() => {
@@ -192,6 +295,7 @@ export function PeriodLog() {
     label: s.label,
     range: `${fmtDate(s.from)} – ${fmtDate(s.to)}`,
     planned: percent ? Math.round(scale(s.planned) * 100) / 100 : Math.round(s.planned),
+    baseline: percent ? Math.round(scale(s.baselinePlanned) * 100) / 100 : Math.round(s.baselinePlanned),
     achieved: percent ? Math.round(scale(s.earned) * 100) / 100 : Math.round(s.earned),
   }));
 
@@ -206,16 +310,28 @@ export function PeriodLog() {
     },
     { label: 'Project', value: fmtPct(log.pctAtEnd, 1), tone: 'blue' },
   ];
+  // The plan the team could actually work, beside the plan it was given — only once
+  // a constraint has been named, since until then the two are the same number.
+  if (bridge.shortfall.CONSTRAINT > 1e-9) {
+    heroStats.splice(3, 0, {
+      label: 'Of workable plan',
+      value: bridge.workableAchievement === null ? '—' : fmtPct(bridge.workableAchievement, 0),
+      tone: bridge.workableAchievement === null ? 'muted' : bridge.workableAchievement >= 1 ? 'good' : bridge.workableAchievement >= 0.8 ? 'amber' : 'red',
+    });
+  }
   // Only worth a chip when there is something to explain, and it reports the half
   // that is missing rather than the half that is done: an unexplained miss is the
   // one thing on this screen that a person can still fix before the report goes out.
-  if (missed.length > 0) {
+  if (behind.length > 0) {
     heroStats.push({
-      label: 'Missed explained',
-      value: `${missed.length - reasonTally.unexplained}/${missed.length}`,
+      label: 'Behind explained',
+      value: `${behind.length - reasonTally.unexplained}/${behind.length}`,
       tone: reasonTally.unexplained === 0 ? 'good' : 'amber',
     });
   }
+  /** The baseline, the update and achieved share one scale, so each reads against the others. */
+  const barMax = Math.max(log.plannedHours, log.baselinePlannedHours, log.earnedHours, 1e-9);
+  const barWidth = (h: number) => `${Math.min(100, Math.max(0, (h / barMax) * 100))}%`;
 
   /**
    * The log as text, for the person who has to paste this into an email on Friday.
@@ -223,13 +339,19 @@ export function PeriodLog() {
    */
   const asText = () => {
     const lines = [
-      `T&C two-week log: ${fmtDate(log.from)} to ${fmtDate(log.to)} (${log.days} days)`,
+      `T&C two-week log: ${fmtDate(log.from)} to ${fmtDate(log.to)} (${log.days} days), measured against the ${planWord}`,
       '',
-      `Planned    ${val(log.plannedHours)}`,
-      `Achieved   ${val(log.earnedHours)}  (${log.achievement === null ? 'nothing was planned' : `${fmtPct(log.achievement, 0)} of plan`})`,
+      `Planned    ${val(log.plannedHours)}  (${planWord})`,
+      ...(onUpdate ? [`Baseline   ${val(log.baselinePlannedHours)}  (${val(Math.abs(inherited))} ${inherited >= 0 ? 'had already slipped out of this window' : 'more in the update than the baseline'})`] : []),
+      `Achieved   ${val(log.earnedHours)}  (${log.achievement === null ? 'nothing was planned' : `${fmtPct(log.achievement, 0)} of plan`}` +
+        `${onUpdate && log.baselineAchievement !== null ? `, ${fmtPct(log.baselineAchievement, 0)} of the baseline` : ''}` +
+        `${bridge.shortfall.CONSTRAINT > 1e-9 && bridge.workableAchievement !== null ? `, ${fmtPct(bridge.workableAchievement, 0)} of the workable plan` : ''})`,
       `Variance   ${variance >= 0 ? '+' : ''}${val(variance)}`,
       `Project    ${fmtPct(log.pctAtStart, 1)} -> ${fmtPct(log.pctAtEnd, 1)} complete`,
       `Due to finish in the period: ${log.dueToFinish}; actually finished: ${log.finishedOnTime}`,
+      '',
+      'From planned to achieved',
+      ...bridgeText(bridge, val, bPlan),
       '',
     ];
     if (activePhases.length) {
@@ -237,14 +359,17 @@ export function PeriodLog() {
       for (const p of activePhases) {
         lines.push(
           `  ${p.label.padEnd(10)} ${p.achievement === null ? 'nothing planned'.padEnd(16) : `${fmtPct(p.achievement, 0)} of plan`.padEnd(16)}` +
-            ` ${fmtPct(p.pctAtStart, 1)} -> ${fmtPct(p.pctAtEnd, 1)} complete`,
+            ` ${fmtPct(p.pctAtStart, 1)} -> ${fmtPct(p.pctAtEnd, 1)} complete` +
+            (phaseBridge.get(p.key)?.shortfall.CONSTRAINT && phaseBridge.get(p.key)?.workableAchievement != null
+              ? `  (${fmtPct(phaseBridge.get(p.key)!.workableAchievement as number, 0)} of workable plan)`
+              : ''),
         );
       }
       lines.push('');
     }
-    if (missed.length) {
-      lines.push(`Why ${missed.length} missed`);
-      for (const t of reasonTally.given) lines.push(`  ${String(t.count).padStart(3)}  ${t.reason}`);
+    if (behind.length) {
+      lines.push(`Why ${behind.length} missed or not started`);
+      for (const t of reasonTally.given) lines.push(`  ${String(t.count).padStart(3)}  ${t.reason}${outsideOf(t.reason) ? '  (outside our control)' : ''}`);
       if (reasonTally.unexplained) lines.push(`  ${String(reasonTally.unexplained).padStart(3)}  no reason given yet`);
       if (reasonTally.carried) lines.push(`  (${reasonTally.carried} of these answers carried over from an earlier review)`);
       lines.push('');
@@ -254,7 +379,7 @@ export function PeriodLog() {
       if (!list.length) continue;
       lines.push(`${o} (${list.length})`);
       for (const a of list) {
-        const why = o === 'MISSED' ? effectiveReasonFor(missedReasons, a.activityId, log.to)?.entry.reason : undefined;
+        const why = needsReason(a) ? effectiveReasonFor(missedReasons, a.activityId, log.to)?.entry.reason : undefined;
         const note = keyed(a.activityId)?.note;
         lines.push(
           `  ${a.activityId}  ${a.activityName}  ${fmtPct(a.pctComplete, 0)} complete${percent ? '' : `  ${fmtHours(a.earnedHours, 1)} h earned`}${why ? `  [${why}]` : ''}${note ? `  — ${note}` : ''}`,
@@ -271,7 +396,7 @@ export function PeriodLog() {
 
   /** Put a reason on the list from the manage panel, without attaching it to a row. */
   const addReason = () => {
-    const typed = prompt('A reason activities get missed for. It joins the list and is offered on every missed activity.', '');
+    const typed = prompt('A reason activities fall behind for. It joins the list and is offered on every activity that is behind.', '');
     if (typed?.trim()) addReasonToCatalogue(actions.update, typed);
   };
 
@@ -299,21 +424,22 @@ export function PeriodLog() {
       key: 'outcome',
       label: 'Outcome',
       value: (a) => OUTCOMES.indexOf(a.outcome),
-      hint: 'What became of this activity inside the period, judged against the baseline dates.',
+      hint: 'What became of this activity inside the period, judged against the plan’s dates — the schedule update in force when the period began, or the baseline.',
       render: (a) => <Badge tone={OUTCOME_META[a.outcome].tone}>{a.outcome}</Badge>,
     },
     {
       key: 'reason',
-      label: 'Why missed',
-      value: (a) => effectiveReasonFor(missedReasons, a.activityId, log.to)?.entry.reason ?? '',
-      hint: 'Why this activity did not finish when the baseline said it would. It sticks with the Activity ID, so nudging the end date by a day does not lose it; each answer is still stamped with the period it was given for, and a shown answer from another period is marked as carried.',
+      label: 'Why behind',
+      value: (a) => (needsReason(a) ? effectiveReasonFor(missedReasons, a.activityId, log.to)?.entry.reason ?? '' : ''),
+      hint: 'Why this activity is behind its plan: missed, or not started. Once it starts the question goes away and the column clears. A reason outside the team’s control (a predecessor, access, readiness) takes its hours out of the workable plan. It sticks with the Activity ID, so nudging the end date by a day does not lose it; each answer is still stamped with the period it was given for, and a shown answer from another period is marked as carried.',
       render: (a) => {
-        if (a.outcome !== 'MISSED') return <span className="text-[var(--text-subtle)]">—</span>;
+        if (!needsReason(a)) return <span className="text-[var(--text-subtle)]">—</span>;
         const eff = effectiveReasonFor(missedReasons, a.activityId, log.to);
         return (
           <MissedReasonCell
             value={eff?.entry.reason ?? ''}
             options={catalogue}
+            outside={eff ? outsideOf(eff.entry.reason) : false}
             carriedFrom={eff?.carried ? eff.entry.periodEnd : undefined}
             onChange={(reason) => setMissedReason(actions.update, a.activityId, log.to, reason)}
             onAdd={(reason) => addReasonToCatalogue(actions.update, reason)}
@@ -420,9 +546,22 @@ export function PeriodLog() {
       label: percent ? 'Planned' : 'Planned h',
       value: (a) => a.plannedHours,
       num: true,
-      hint: 'What the baseline expected this activity to get through inside the period.',
+      hint: 'What the plan expected this activity to get through inside the period: the schedule update in force when the period began, or the baseline.',
       render: (a) => <span className="text-[var(--text-muted)]">{val(a.plannedHours, 1)}</span>,
     },
+    ...(onUpdate
+      ? ([
+          {
+            key: 'blplanned',
+            label: percent ? 'Baseline' : 'Baseline h',
+            value: (a: PeriodActivity) => a.baselinePlannedHours,
+            num: true,
+            optional: true,
+            hint: 'What the baseline put in this window for this activity. Baseline minus planned is slip that was already in the schedule before the period began.',
+            render: (a: PeriodActivity) => <span className="text-[var(--text-muted)]">{val(a.baselinePlannedHours, 1)}</span>,
+          },
+        ] as Column<PeriodActivity>[])
+      : []),
     {
       key: 'earned',
       label: percent ? 'Project achieved' : 'Project achieved h',
@@ -452,7 +591,47 @@ export function PeriodLog() {
     },
     { key: 'budget', label: 'Budget h', value: (a) => a.budgetHours, num: true, optional: true, render: (a) => (percent ? '' : fmtHours(a.budgetHours)) },
     { key: 'bls', label: 'BL start', value: (a) => a.baselineStart, optional: true, render: (a) => fmtDate(a.baselineStart) },
-    { key: 'blf', label: 'BL finish', value: (a) => a.baselineFinish, render: (a) => fmtDate(a.baselineFinish) },
+    ...(onUpdate
+      ? ([
+          {
+            key: 'pls',
+            label: 'Plan start',
+            value: (a: PeriodActivity) => a.planStart,
+            optional: true,
+            hint: 'The start the schedule update in force had. Blank when that update did not have this activity.',
+            render: (a: PeriodActivity) => fmtDate(a.planStart),
+          },
+          {
+            key: 'plf',
+            label: 'Plan finish',
+            value: (a: PeriodActivity) => a.planFinish,
+            hint: 'The finish the schedule update in force had. MISSED and Days late are judged against this.',
+            render: (a: PeriodActivity) => fmtDate(a.planFinish),
+          },
+        ] as Column<PeriodActivity>[])
+      : []),
+    { key: 'blf', label: 'BL finish', value: (a) => a.baselineFinish, optional: onUpdate, render: (a) => fmtDate(a.baselineFinish) },
+    /*
+     * Where the current schedule has the start now. For an activity waiting on
+     * another team, this is the evidence: the schedule's own logic has already moved
+     * it, and by how much.
+     */
+    {
+      key: 'cs',
+      label: 'Sched. start',
+      value: (a) => a.currentStart,
+      hint: 'The start in the current schedule, and how many days its logic has moved it past the baseline start. Once the activity has started this is its actual start.',
+      render: (a) => (
+        <span className="whitespace-nowrap">
+          {fmtDate(a.currentStart)}
+          {a.startSlipDays !== null && a.startSlipDays !== 0 && (
+            <span className={`ml-1 text-[11px] font-semibold tone-${a.startSlipDays > 0 ? 'bad' : 'good'}`} title={`${Math.abs(a.startSlipDays)} days ${a.startSlipDays > 0 ? 'later' : 'earlier'} than the baseline start`}>
+              {a.startSlipDays > 0 ? '+' : ''}{a.startSlipDays}d
+            </span>
+          )}
+        </span>
+      ),
+    },
     /*
      * The actual dates, editable here.
      *
@@ -535,7 +714,7 @@ export function PeriodLog() {
       label: 'Days late',
       value: (a) => a.finishVarianceDays,
       num: true,
-      hint: 'Actual finish minus baseline finish, in calendar days. Negative is early. Blank until something has dated the finish.',
+      hint: 'Actual finish minus the plan finish, in calendar days. Negative is early. Blank until something has dated the finish.',
       render: (a) =>
         a.finishVarianceDays === null ? (
           <span className="text-[var(--text-subtle)]">—</span>
@@ -573,7 +752,6 @@ export function PeriodLog() {
   ];
 
   const step = (n: number) => setEnd(addDays(end, n * span));
-  const achievedPctWidth = log.achievement === null ? 0 : Math.min(100, Math.round(log.achievement * 100));
 
   return (
     <Page
@@ -581,13 +759,13 @@ export function PeriodLog() {
       title="Two-Week Log"
       subtitle={
         percent
-          ? `${fmtDate(log.from)} to ${fmtDate(log.to)}. What the baseline said would happen in this window and what actually happened, as a share of the whole job. No hours anywhere on this screen.`
-          : `${fmtDate(log.from)} to ${fmtDate(log.to)}. What the baseline said would happen in this window, what actually happened, and which activities are behind it. Hours are measured exactly as the S-curve measures them, so every window adds back to the same total.`
+          ? `${fmtDate(log.from)} to ${fmtDate(log.to)}, against the ${planWord}. What the plan said would happen in this window and what actually happened, as a share of the whole job. No hours anywhere on this screen.`
+          : `${fmtDate(log.from)} to ${fmtDate(log.to)}, against the ${planWord}. What the plan said would happen in this window, what actually happened, and which activities are behind it. Hours are measured exactly as the S-curve measures them.`
       }
       stats={heroStats}
       actions={
         <>
-          <button className={`btn btn-mini${editingReasons ? ' btn-primary' : ''}`} onClick={() => setEditingReasons((v) => !v)} title="Add reasons to the Why missed list, or take off ones you never use">
+          <button className={`btn btn-mini${editingReasons ? ' btn-primary' : ''}`} onClick={() => setEditingReasons((v) => !v)} title="Add reasons to the Why behind list, take off ones you never use, and say which are outside the team’s control">
             Reasons ({catalogue.length})
           </button>
           <button className="btn btn-mini" onClick={asText}>Copy as text</button>
@@ -601,6 +779,10 @@ export function PeriodLog() {
             <button className={`seg-btn${percent ? ' is-on' : ''}`} onClick={() => setUnit('percent')} title="Report progress only, with no hours anywhere. For sharing with the client.">
               % complete
             </button>
+          </span>
+          <span className="seg" title="What this window is measured against. The schedule update is the one in force when the window began — the plan the team was working to. The baseline is the contract.">
+            <button className={`seg-btn${against === 'update' ? ' is-on' : ''}`} onClick={() => setAgainst('update')}>Schedule update</button>
+            <button className={`seg-btn${against === 'baseline' ? ' is-on' : ''}`} onClick={() => setAgainst('baseline')}>Baseline</button>
           </span>
           <button className="btn btn-mini" onClick={() => step(-1)} title="The period before this one">← Previous</button>
           <label className="flex items-center gap-1.5 text-[12px]">
@@ -650,6 +832,12 @@ export function PeriodLog() {
         </div>
       )}
 
+      {notice && (
+        <div className="mb-3">
+          <Notice tone={notice.tone}>{notice.text}</Notice>
+        </div>
+      )}
+
       {spread.length > 0 && (
         <div className="mb-3">
           <Notice tone="warn">
@@ -666,7 +854,7 @@ export function PeriodLog() {
       {editingReasons && (
         <Panel
           className="mb-3"
-          title="The Why missed list"
+          title="The Why behind list"
           meta={
             <span className="flex items-center gap-3">
               <button className="btn-link" onClick={addReason}>add a reason</button>
@@ -675,15 +863,27 @@ export function PeriodLog() {
           }
         >
           <p className="mb-2 text-[12px] text-[var(--text-muted)]">
-            What the dropdown offers on every missed activity. A reason nobody has used yet can be taken off — including the ones this app starts with, so a list you
+            What the dropdown offers on every activity that is behind. A reason nobody has used yet can be taken off — including the ones this app starts with, so a list you
             never picked can be cut down to the handful this job actually argues about. A reason somebody has already given stays, because deleting it would leave
             their answer with nothing to say it; the count beside it is how many activities carry it, across every period.
+          </p>
+          <p className="mb-2 text-[12px] text-[var(--text-muted)]">
+            <b>Constraint</b> or <b>ours</b> says whether a reason is outside the team&rsquo;s control. An activity behind for a constraint — a predecessor not done, no
+            access, documentation not issued — keeps its hours in the plan, but they come out of the <b>workable plan</b> the team is measured against. Click to switch.
+            A reason you add starts as <b>ours</b>: nothing shrinks the workable plan until somebody says it should.
           </p>
           <div className="flex flex-wrap gap-1.5">
             {catalogue.map((r) => {
               const used = usage.get(normKey(r)) ?? 0;
               return (
                 <span key={r} className={`reason-chip${used ? ' is-used' : ''}`}>
+                  <button
+                    className={`reason-ctl${outsideOf(r) ? ' is-outside' : ''}`}
+                    title={outsideOf(r) ? 'Outside the team’s control. Click to make it the team’s own.' : 'The team’s own. Click to mark it outside the team’s control.'}
+                    onClick={() => setOutsideControl(actions.update, r, !outsideOf(r))}
+                  >
+                    {outsideOf(r) ? 'constraint' : 'ours'}
+                  </button>
                   <span>{r}</span>
                   {used > 0 ? (
                     <b className="reason-chip-n" title={`Given for ${used} ${used === 1 ? 'activity' : 'activities'}. In use, so it cannot be taken off the list.`}>{used}</b>
@@ -709,17 +909,29 @@ export function PeriodLog() {
         <div className="grid gap-4 lg:grid-cols-[1fr_340px] lg:gap-8">
           <div>
             <div className="plan-bar">
-              <div className="plan-bar-row">
-                <span className="plan-bar-key"><i style={{ background: PLANNED }} /> Planned</span>
+              <div className="plan-bar-row" title="What the baseline expected to get done in this window.">
+                <span className="plan-bar-key"><i style={{ background: PLANNED }} /> {onUpdate ? 'Baseline' : 'Planned'}</span>
                 <div className="plan-bar-track">
-                  <span style={{ width: '100%', background: PLANNED }} />
+                  <span style={{ width: barWidth(log.baselinePlannedHours), background: PLANNED }} />
                 </div>
-                <span className="plan-bar-val">{val(log.plannedHours)}</span>
+                <span className="plan-bar-val">{val(log.baselinePlannedHours)}</span>
               </div>
-              <div className="plan-bar-row">
+              {onUpdate && (
+                <div
+                  className="plan-bar-row"
+                  title={`The plan for this window: the ${planWord}, the schedule update in force when the window began. What the team was working to, after every slip the schedule had already taken.`}
+                >
+                  <span className="plan-bar-key"><i style={{ background: UPDATE }} /> Planned</span>
+                  <div className="plan-bar-track">
+                    <span style={{ width: barWidth(log.plannedHours), background: UPDATE }} />
+                  </div>
+                  <span className="plan-bar-val">{val(log.plannedHours)}</span>
+                </div>
+              )}
+              <div className="plan-bar-row" title="What was actually earned in this window.">
                 <span className="plan-bar-key"><i style={{ background: ACHIEVED }} /> Achieved</span>
                 <div className="plan-bar-track">
-                  <span style={{ width: `${achievedPctWidth}%`, background: ACHIEVED }} />
+                  <span style={{ width: barWidth(log.earnedHours), background: ACHIEVED }} />
                 </div>
                 <span className="plan-bar-val">{val(log.earnedHours)}</span>
               </div>
@@ -731,6 +943,25 @@ export function PeriodLog() {
                 </b>
                 <span className="ml-1.5 text-[var(--text-muted)]">against plan</span>
               </span>
+              {onUpdate && (
+                <span
+                  className="text-[var(--text-muted)]"
+                  title="Achieved against the baseline for the same window. The difference between the baseline and the update is slip that was already in the schedule before this window began — usually predecessors."
+                >
+                  <b className={achievedTone(log.baselineAchievement)}>{log.baselineAchievement === null ? '—' : fmtPct(log.baselineAchievement, 0)}</b> of the baseline
+                  {Math.abs(inherited) > 1e-6 && (
+                    <>
+                      {' '}(<b className="text-[var(--text)]">{val(Math.abs(inherited))}</b>{' '}
+                      {inherited > 0 ? 'had already slipped out of this window before it began' : 'more in the update than in the baseline'})
+                    </>
+                  )}
+                </span>
+              )}
+              {bridge.shortfall.CONSTRAINT > 1e-9 && (
+                <span className="text-[var(--text-muted)]" title="Achieved against the plan the team could actually work: planned, less what constraints outside its control held back.">
+                  <b className={achievedTone(bridge.workableAchievement)}>{bridge.workableAchievement === null ? '—' : fmtPct(bridge.workableAchievement, 0)}</b> of the workable plan
+                </span>
+              )}
               <span className="text-[var(--text-muted)]">
                 Project moved <b className="text-[var(--text)]">{fmtPct(log.pctAtStart, 1)}</b> → <b className="text-[var(--text)]">{fmtPct(log.pctAtEnd, 1)}</b>
                 {' '}(<b className="text-[var(--text)]">{fmtPct(log.pctAtEnd - log.pctAtStart, 2)}</b> of the whole job in this window)
@@ -757,6 +988,14 @@ export function PeriodLog() {
                       <span className={`font-semibold ${achievedTone(p.achievement)}`} title={`${val(p.earnedHours, 1)} achieved against ${val(p.plannedHours, 1)} planned in this window`}>
                         {p.achievement === null ? 'nothing planned' : `${fmtPct(p.achievement, 0)} of plan`}
                       </span>
+                      {(() => {
+                        const pb = phaseBridge.get(p.key);
+                        return pb && pb.shortfall.CONSTRAINT > 1e-9 ? (
+                          <span className={`font-semibold ${achievedTone(pb.workableAchievement)}`} title={`${val(pb.shortfall.CONSTRAINT, 1)} of this phase's plan held by constraints outside the team's control`}>
+                            {pb.workableAchievement === null ? '—' : fmtPct(pb.workableAchievement, 0)} of workable
+                          </span>
+                        ) : null;
+                      })()}
                       <span className="text-[var(--text-muted)]">
                         moved <b className="text-[var(--text)]">{fmtPct(p.pctAtStart, 1)}</b> → <b className="text-[var(--text)]">{fmtPct(p.pctAtEnd, 1)}</b>
                         {' '}(<b className="text-[var(--text)]">{fmtPct(p.pctAtEnd - p.pctAtStart, 2)}</b> of the phase)
@@ -767,37 +1006,6 @@ export function PeriodLog() {
               </div>
             )}
 
-            {/* Why the missed ones were missed. The count nobody has answered for is
-                the one that says whether the review actually happened, so it is
-                stated rather than left as the gap between two other numbers. */}
-            {missed.length > 0 && (
-              <div className="mt-3 border-t border-[var(--line-soft)] pt-3">
-                <div className="eyebrow mb-1.5">Why {missed.length} {missed.length === 1 ? 'activity was' : 'activities were'} missed</div>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
-                  {reasonTally.given.map((t) => (
-                    <span key={t.reason}>
-                      <b className="text-[var(--text)]">{t.count}</b>
-                      <span className="ml-1.5 text-[var(--text-muted)]">{t.reason}</span>
-                    </span>
-                  ))}
-                  {reasonTally.unexplained > 0 && (
-                    <span title="Set the Why missed column on each of these. It is remembered against this period.">
-                      <b className="tone-bad">{reasonTally.unexplained}</b>
-                      <span className="ml-1.5 text-[var(--text-muted)]">no reason given yet</span>
-                      {outcome !== 'MISSED' && (
-                        <button className="btn-link ml-2" onClick={() => setOutcome('MISSED')}>show them</button>
-                      )}
-                    </span>
-                  )}
-                  {reasonTally.carried > 0 && (
-                    <span className="text-[var(--text-muted)]" title="These answers were given for another period and stay with the activity until this one gets its own. Pick a reason on the row to record it against this period.">
-                      {reasonTally.carried} carried from an earlier review
-                    </span>
-                  )}
-                  {reasonTally.given.length === 0 && reasonTally.unexplained === 0 && <span className="text-[var(--text-muted)]">—</span>}
-                </div>
-              </div>
-            )}
           </div>
 
           <div style={{ height: 150 }}>
@@ -822,7 +1030,8 @@ export function PeriodLog() {
                       <div style={{ background: '#fff', border: `1px solid ${GRID}`, borderRadius: 8, padding: '8px 11px', fontSize: 12, boxShadow: '0 6px 16px -8px rgba(15,17,21,0.2)' }}>
                         <div style={{ fontWeight: 600 }}>{d.label}</div>
                         <div style={{ color: AXIS }}>{d.range}</div>
-                        <div style={{ marginTop: 3 }}>Planned {percent ? `${d.planned}%` : `${fmtHours(d.planned)} h`}</div>
+                        {onUpdate && <div style={{ marginTop: 3 }}>Baseline {percent ? `${d.baseline}%` : `${fmtHours(d.baseline)} h`}</div>}
+                        <div style={onUpdate ? undefined : { marginTop: 3 }}>Planned {percent ? `${d.planned}%` : `${fmtHours(d.planned)} h`}</div>
                         <div>Achieved {percent ? `${d.achieved}%` : `${fmtHours(d.achieved)} h`}</div>
                         <div style={{ fontWeight: 600, color: v >= 0 ? ACHIEVED : '#c01017' }}>
                           {v >= 0 ? '+' : ''}{percent ? `${Math.round(v * 100) / 100}%` : `${fmtHours(v)} h`}
@@ -835,14 +1044,76 @@ export function PeriodLog() {
                     order matches the bars, and reading Achieved-then-Planned here
                     while the key to the left reads the other way is a needless
                     stumble over the same two series. */}
-                <Legend content={() => <ChartKey />} />
-                <Bar dataKey="planned" name="Planned" fill={PLANNED} radius={[4, 4, 0, 0]} legendType="square" />
+                <Legend content={() => <ChartKey update={onUpdate} />} />
+                {onUpdate && <Bar dataKey="baseline" name="Baseline" fill={PLANNED} radius={[4, 4, 0, 0]} legendType="square" />}
+                <Bar dataKey="planned" name={onUpdate ? 'Update' : 'Baseline'} fill={planColour} radius={[4, 4, 0, 0]} legendType="square" />
                 <Bar dataKey="achieved" name="Achieved" fill={ACHIEVED} radius={[4, 4, 0, 0]} legendType="square" />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
       </Panel>
+
+      {/*
+        * Where the planned hours went. The whole plan stays on the page — nothing is
+        * dropped to flatter the figure — and the gap to achieved is split by why, so
+        * the hours held up by somebody else's predecessor are visibly not the
+        * team's, and the ones nobody has explained yet are visibly still owed.
+        */}
+      {(log.plannedHours > 1e-9 || log.earnedHours > 1e-9) && (
+        <Panel
+          className="mb-3"
+          title="From planned to achieved"
+          meta={
+            bridge.shortfall.CONSTRAINT > 1e-9 && bridge.workableAchievement !== null
+              ? `${fmtPct(bridge.workableAchievement, 0)} of the workable plan`
+              : 'every planned hour, accounted for'
+          }
+        >
+          <div className="grid gap-4 lg:grid-cols-[1fr_340px] lg:gap-8">
+            <PlanBridge bridge={bridge} val={val} plan={bPlan} />
+            <div className="text-[12px]">
+              <div className="eyebrow mb-1.5">{reasonedCount === 0 ? 'Missed or not started' : `Why ${reasonedCount} ${reasonedCount === 1 ? 'activity is' : 'activities are'} behind`}</div>
+              {bridge.byReason.length === 0 && reasonTally.unexplained === 0 && <div className="text-[var(--text-muted)]">Nothing behind in this window.</div>}
+              <table className="w-full">
+                <tbody>
+                  {bridge.byReason.map((t) => (
+                    <tr key={t.reason} title={t.outsideControl ? 'Outside the team’s control: these hours come out of the workable plan.' : 'The team’s own reason.'}>
+                      <td className="py-0.5 pr-2 tabular-nums font-semibold text-[var(--text)]">{t.activities}</td>
+                      <td className="py-0.5 pr-2">
+                        <b className={`reason-ctl${t.outsideControl ? ' is-outside' : ''}`}>{t.outsideControl ? 'constraint' : 'ours'}</b>{' '}
+                        <span className="text-[var(--text-muted)]">{t.reason}</span>
+                      </td>
+                      <td className="py-0.5 text-right tabular-nums text-[var(--text-muted)]">{t.hours > 1e-9 ? `−${val(t.hours)}` : '—'}</td>
+                    </tr>
+                  ))}
+                  {reasonTally.unexplained > 0 && (
+                    <tr title="Set Why behind on each of these. It is remembered against this period.">
+                      <td className="py-0.5 pr-2 tabular-nums font-semibold tone-bad">{reasonTally.unexplained}</td>
+                      <td className="py-0.5 pr-2 text-[var(--text-muted)]">
+                        no reason given yet
+                        {outcome !== 'MISSED' && outcome !== 'NOT STARTED' && (
+                          <button className="btn-link ml-2" onClick={() => setOutcome(log.counts.MISSED ? 'MISSED' : 'NOT STARTED')}>show them</button>
+                        )}
+                      </td>
+                      <td className="py-0.5 text-right tabular-nums text-[var(--text-muted)]">{bridge.shortfall.UNEXPLAINED > 1e-9 ? `−${val(bridge.shortfall.UNEXPLAINED)}` : '—'}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              {reasonTally.carried > 0 && (
+                <div className="mt-1 text-[var(--text-muted)]" title="These answers were given for another period and stay with the activity until this one gets its own. Pick a reason on the row to record it against this period.">
+                  {reasonTally.carried} carried from an earlier review
+                </div>
+              )}
+              <div className="mt-2 text-[11.5px] text-[var(--text-subtle)]">
+                Reasons marked <b>constraint</b> are outside the team&rsquo;s control; switch any of them in{' '}
+                <button className="btn-link" onClick={() => setEditingReasons(true)}>Reasons</button>.
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
 
       {/* --- outcome tiles: clickable filters, never colour alone --- */}
       <div className="mb-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
@@ -878,7 +1149,7 @@ export function PeriodLog() {
 
       <Panel title="How this log is worked out" className="mt-3">
         <p className="text-[12px] text-[var(--text-muted)]">
-          <b>Planned</b> is what the baseline said would get done between these dates; <b>achieved</b> is what actually did.{' '}
+          <b>Planned</b> is what the plan said would get done between these dates; <b>achieved</b> is what actually did.{' '}
           {percent ? 'Both are shown as a share of the whole job.' : 'Both are in budget hours.'} Both spread an activity's hours
           evenly across its window by calendar day, exactly as the S-curve does, so every two-week window adds back to the same totals the curve draws — this screen can
           never disagree with the Dashboard.
@@ -891,7 +1162,7 @@ export function PeriodLog() {
         </p>
         <p className="mt-1 text-[12px] text-[var(--text-muted)]">
           Outcomes are read off the <b>actual dates</b> — your keyed date where there is one, otherwise P6's actual date — and never off a planned date. An activity that
-          beat its baseline reads <b>COMPLETED</b> in the fortnight it finished and <b>COMPLETED EARLY</b> in any later one its baseline ran on into: it is finished and it
+          beat its plan reads <b>COMPLETED</b> in the fortnight it finished and <b>COMPLETED EARLY</b> in any later one its plan ran on into: it is finished and it
           stays finished, without inflating what this fortnight actually got done. <b>Actual start</b> and <b>Actual finish</b> are editable here — typing one writes the
           test window date on <a href={href('progress')}>Progress</a>, which is the same field, so the earn window, the month those hours land in and this row's own
           outcome all move with it; clearing the box hands the date back to P6. A green <b>✎</b> means you keyed the date, a grey <b>A</b> means it is P6's.
@@ -903,8 +1174,23 @@ export function PeriodLog() {
           every later period then correctly reports nothing for it. The total earned never changes — only which weeks it belongs to.
         </p>
         <p className="mt-1 text-[12px] text-[var(--text-muted)]">
+          <b>From planned to achieved</b> never takes anything out of the plan. A MISSED or NOT STARTED row whose reason is marked <b>constraint</b> — a
+          predecessor not done, no access, not ready — puts what it fell short of its plan under <b>Held by constraints</b>, and the <b>workable plan</b> is planned
+          less exactly those hours. Achieved is then read against both. The rest of the gap — the team&rsquo;s own reasons, and rows nobody has answered yet — is in
+          the list beside it, with the hours each one accounts for. Only MISSED and NOT STARTED rows take a reason: once an activity starts it is no longer
+          waiting on anything, so its reason stops applying. The steps always add back to achieved.
+        </p>
+        <p className="mt-1 text-[12px] text-[var(--text-muted)]">
+          <b>The plan</b> is the <b>schedule update</b> in force when the window began: the latest current-schedule import whose data date is on or before the
+          window&rsquo;s first day. That is what the team was working to, with every slip the schedule had already taken. Today&rsquo;s current schedule would
+          not do: it has been statused to the data date, so for weeks already gone it holds what actually happened and always reads near 100%. The baseline is
+          still shown beside it, and baseline minus planned is the slip that was in the schedule before the window began. An update in progress when it was run
+          plans only its remaining work after its data date. Switch to <b>Baseline</b> for the contract view. Each update&rsquo;s data date is on{' '}
+          <a href={href('import')}>Import</a>: the schedule in use takes the one in Settings, and an older one keeps the date it had when it was replaced.
+        </p>
+        <p className="mt-1 text-[12px] text-[var(--text-muted)]">
           <b>Phase achieved</b> is this row's own contribution to its phase, the same way <b>{percent ? 'Project achieved' : 'Project achieved h'}</b> is its contribution to
-          the job, so the rows of a phase add up to how far that phase moved. <b>Why missed</b> and <b>Progress note</b> stay with the Activity ID: the note is the same
+          the job, so the rows of a phase add up to how far that phase moved. <b>Why behind</b> and <b>Progress note</b> stay with the Activity ID: the note is the same
           field Progress shows, and a reason keyed for a neighbouring period is carried rather than lost when the end date moves.
         </p>
       </Panel>

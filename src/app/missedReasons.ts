@@ -22,8 +22,9 @@
  *   period. Writing one always stamps the period on screen.
  */
 import type { MissedReason, MissedReasonLog } from '../engine/types';
-import { DEFAULT_MISSED_REASONS } from '../engine/types';
+import { DEFAULT_MISSED_REASONS, DEFAULT_OUTSIDE_CONTROL } from '../engine/types';
 import { normKey } from '../engine/keys';
+import { periodBridge, type PeriodActivity, type PeriodBridge } from '../engine/period';
 import type { DataUpdater } from './state';
 
 /**
@@ -197,4 +198,37 @@ export function tallyReasons(log: MissedReasonLog, activityIds: string[], period
   }
   const given = [...counts].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
   return { given, unexplained, carried };
+}
+
+/**
+ * Whether a reason is outside the team's control: a predecessor, access, readiness.
+ *
+ * What a person set wins; otherwise the built-in answer; otherwise it is the team's
+ * own. That last default is deliberate. A reason typed in a hurry should never quietly
+ * shrink the plan the team is judged against — somebody has to say it does.
+ */
+export function isOutsideControl(log: MissedReasonLog, reason: string): boolean {
+  const k = normKey(reason);
+  const set = log.outsideControl?.[k];
+  if (typeof set === 'boolean') return set;
+  return DEFAULT_OUTSIDE_CONTROL.some((d) => normKey(d) === k);
+}
+
+/** Say whether a reason is outside the team's control. Kept against the reason, for every period. */
+export function setOutsideControl(update: DataUpdater, reason: string, outside: boolean): void {
+  const text = reason.trim();
+  if (!text) return;
+  update('missedReasons', (log) => ({ ...log, outsideControl: { ...(log.outsideControl ?? {}), [normKey(text)]: outside } }));
+}
+
+/**
+ * The fortnight's bridge from planned to achieved, with each row's reason read from
+ * the log the way the screens show it — the nearest answer the activity has, carried
+ * or not — and classed by whether it is outside the team's control.
+ */
+export function bridgeFor(log: MissedReasonLog, activities: PeriodActivity[], periodEnd: string): PeriodBridge {
+  return periodBridge(activities, (a) => {
+    const eff = effectiveReasonFor(log, a.activityId, periodEnd);
+    return eff ? { reason: eff.entry.reason, outsideControl: isOutsideControl(log, eff.entry.reason) } : null;
+  });
 }

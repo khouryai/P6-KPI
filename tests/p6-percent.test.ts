@@ -97,14 +97,11 @@ describe('what the cards say and what the curve draws', () => {
 /**
  * An Activity ID that is not unique.
  *
- * P6 exports carry these — a WBS row repeated, two projects merged, a copy-paste
- * in the schedule. The arithmetic survives it, because everything keyed by hand
- * matches by ID and takes the first occurrence. What did not survive it was every
- * table on every screen: React reconciles rows by key, so two rows claiming the
- * same key left stale <tr> elements behind, and filters and sorting both stopped
- * working. The DOM fix is in SortableTable; this is the count that tells somebody
- * their schedule has the problem at all, rather than leaving it to the import
- * screen to say once and then be navigated away from.
+ * P6 exports carry these — a WBS row repeated, two projects merged, one row per
+ * resource assignment. The ID is the activity, so each is imported once, from its
+ * first row, and the rest are left out rather than priced again. This is the count
+ * that tells somebody their schedule had them at all, rather than leaving it to the
+ * import screen to say once and then be navigated away from.
  */
 describe('a schedule with a repeated Activity ID', () => {
   const twice = [
@@ -113,9 +110,13 @@ describe('a schedule with a repeated Activity ID', () => {
     makeActivity({ activityId: '0-P2-TC-A10-FA-0020', originalDuration: 10, remainingDuration: 10 }),
   ];
 
-  it('counts every row whose Activity ID is not its own', () => {
+  it('counts the IDs carried twice, and imports each once', () => {
     const m = computeModel({ ...base, current: twice });
-    expect(m.summary.duplicateActivityIds).toBe(2);
+    expect(m.summary.duplicateActivityIds).toBe(1);
+    expect(m.summary.repeatedRows).toBe(1);
+    expect(m.rows).toHaveLength(2);
+    // The first row is the one kept.
+    expect(m.rows.find((r) => r.activityId === '0-P2-TC-A10-FA-0010')!.activity.remainingDuration).toBe(0);
   });
 
   it('says nothing when every ID is unique', () => {
@@ -124,10 +125,10 @@ describe('a schedule with a repeated Activity ID', () => {
       makeActivity({ activityId: '0-P2-TC-A10-FA-0020', originalDuration: 10, remainingDuration: 10 }),
     ] });
     expect(m.summary.duplicateActivityIds).toBe(0);
-    expect(m.notes.join(' ')).not.toMatch(/share an Activity ID/);
+    expect(m.notes.join(' ')).not.toMatch(/left out of the import/);
   });
 
-  it('tells the person what it costs them, rather than only counting it', () => {
-    expect(computeModel({ ...base, current: twice }).notes.join(' ')).toMatch(/share an Activity ID/);
+  it('tells the person what was left out, rather than only counting it', () => {
+    expect(computeModel({ ...base, current: twice }).notes.join(' ')).toMatch(/1 row was left out of the import/);
   });
 });

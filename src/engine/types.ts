@@ -143,6 +143,15 @@ export type ScheduleImport = {
   sourceFilename: string;
   rowCount: number;
   activities: P6Activity[];
+  /**
+   * The schedule's data date, once it is known. Stamped when a newer current
+   * schedule replaces this one, and correctable on the Import screen; the current
+   * schedule in use takes Settings' data date instead. Absent on every import
+   * written before the Two-Week Log measured fortnights against schedule updates.
+   */
+  dataDate?: string;
+  /** True when the stamp was worked out from the file's own actual dates rather than known. */
+  dataDateEstimated?: boolean;
 };
 
 export type ImportIndexEntry = Omit<ScheduleImport, 'activities'> & { file: string };
@@ -248,6 +257,15 @@ export type MissedReasonLog = {
    * orphan an answer somebody gave; typing it again puts it straight back.
    */
   removed?: string[];
+  /**
+   * Which reasons are outside the team's control, keyed by the reason's normalised
+   * text. A reason held here as true takes its activity's shortfall out of the
+   * workable plan; false keeps it as the team's own. Absent means the built-in
+   * answer (`DEFAULT_OUTSIDE_CONTROL`), and a reason somebody typed defaults to the
+   * team's own — nothing shrinks the plan the team is judged against unless a
+   * person has said it should.
+   */
+  outsideControl?: Record<string, boolean>;
 };
 
 /** The reasons offered before anybody has typed one of their own. */
@@ -258,6 +276,22 @@ export const DEFAULT_MISSED_REASONS: string[] = [
   'Materials or equipment not delivered',
   'Resource not available',
   'Testing failed, retest required',
+  'Client or third party hold',
+  'Weather',
+  'Re-sequenced by the plan',
+];
+
+/**
+ * The built-in reasons that are, by default, outside the team's control: the work
+ * was planned but not workable, because something it depends on was not ready.
+ * "Resource not available" and "Testing failed, retest required" are not here —
+ * those are the team's own, until somebody on the job says otherwise.
+ */
+export const DEFAULT_OUTSIDE_CONTROL: string[] = [
+  'Access not available',
+  'Predecessor work not complete',
+  'Design or documentation not issued',
+  'Materials or equipment not delivered',
   'Client or third party hold',
   'Weather',
   'Re-sequenced by the plan',
@@ -747,14 +781,17 @@ export type Summary = {
    */
   noRemainingDuration: number;
   /**
-   * Activities sharing an Activity ID with another activity in the same schedule.
-   * Everything keyed by hand — a percent, an override, a missed reason — matches
-   * by ID and so reaches only the first of them, and the ID stops being a name for
-   * one row. Counted because the import screen says so once and is then gone.
+   * Activity IDs the export carried on more than one row. Each is imported once,
+   * from its first row; counted because the import screen says so once and is then gone.
    */
   duplicateActivityIds: number;
-  /** Rows identical to another row in every field, dropped so the activity counts once. */
+  /** Rows left out of the import because their Activity ID was already in it. */
   repeatedRows: number;
+  /**
+   * The IDs among those whose rows disagreed on the start or finish, with every set
+   * of dates they carried. The first row's dates are used; these are for checking in P6.
+   */
+  duplicateDateConflicts: { activityId: string; dates: { start: string | null; finish: string | null }[] }[];
   /** Activities whose start or finish was keyed in place of P6's. */
   datesEdited: number;
   pctFromP6: number; // in budget only

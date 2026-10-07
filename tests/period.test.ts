@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { computeModel } from '../src/engine/compute';
 import { periodLog, addDays, daysBetween, dayBefore } from '../src/engine/period';
+import { buildCurve } from '../src/engine/curve';
 import { fixtureModelInput, makeActivity } from './helpers';
 import { DEFAULT_SETTINGS } from '../src/engine/types';
 import type { LibraryEntry, ModelInput, P6Activity } from '../src/engine/types';
@@ -439,17 +440,45 @@ describe('an Activity ID the export repeats', () => {
     expect(twice.summary.repeatedRows).toBe(1);
   });
 
-  it('lists an ID carried on two different rows once in the log, with their hours added', () => {
+  it('imports an ID carried on two different rows once, from its first row, and flags the different dates', () => {
     const base = scenario();
     const other = makeActivity({ activityId: 'A-P2-TC-X10-FA-0002', activityName: '[T&C] X10 (Ph2) - Test Type', startDate: '2026-08-23', finishDate: '2026-08-27', actualStart: true, sortOrder: 50 });
+    const once = computeModel(base);
     const m = computeModel({ ...base, current: [...base.current, other] });
+    expect(m.rows).toHaveLength(once.rows.length);
+    expect(m.summary.totalBudgetHours).toBe(once.summary.totalBudgetHours);
+    const kept = m.rows.filter((r) => r.activityId === 'A-P2-TC-X10-FA-0002');
+    expect(kept).toHaveLength(1);
+    expect(kept[0].currentStart).toBe('2026-08-22');
+    expect(m.summary.repeatedRows).toBe(1);
+    expect(m.summary.duplicateDateConflicts).toEqual([
+      { activityId: 'A-P2-TC-X10-FA-0002', dates: [{ start: '2026-08-22', finish: '2026-08-28' }, { start: '2026-08-23', finish: '2026-08-27' }] },
+    ]);
+    expect(m.notes.join(' ')).toMatch(/different dates/);
     const log = periodLog(m.rows, '2026-08-18', '2026-08-31');
-    const rows = log.activities.filter((a) => a.activityId === 'A-P2-TC-X10-FA-0002');
-    expect(rows).toHaveLength(1);
-    expect(rows[0].rows).toBe(2);
-    const both = m.rows.filter((r) => r.activityId === 'A-P2-TC-X10-FA-0002').reduce((s, r) => s + r.budgetHours, 0);
-    expect(rows[0].budgetHours).toBeCloseTo(both, 9);
-    expect(new Set(log.activities.map((a) => a.activityId)).size).toBe(log.activities.length);
-    expect(log.earnedHours).toBeCloseTo(log.activities.reduce((s, a) => s + a.earnedHours, 0), 9);
+    expect(log.activities.filter((a) => a.activityId === 'A-P2-TC-X10-FA-0002')).toHaveLength(1);
+  });
+
+  it('flags nothing when the repeated rows agree on the dates', () => {
+    const base = scenario();
+    const copy = { ...base.current[1], activityName: `${base.current[1].activityName} (resource 2)`, sortOrder: 99 };
+    const m = computeModel({ ...base, current: [...base.current, copy] });
+    expect(m.summary.repeatedRows).toBe(1);
+    expect(m.summary.duplicateDateConflicts).toEqual([]);
+  });
+
+  /*
+   * The complaint this came from: the same file imported as both baseline and
+   * current drew two curves, because every repeated row was priced and each matched
+   * the baseline's first row of its ID.
+   */
+  it('the same file as baseline and current draws one curve, even with repeated IDs', () => {
+    const base = scenario();
+    const moved = makeActivity({ activityId: 'A-P2-TC-X10-FA-0003', activityName: '[T&C] X10 (Ph2) - Test Type', startDate: '2027-01-01', finishDate: '2027-03-01', sortOrder: 60 });
+    const file = [...base.current, moved];
+    const m = computeModel({ ...base, current: file, baseline: file });
+    const { curve } = buildCurve(m.rows, base.settings.dataDate, 'month');
+    expect(curve.length).toBeGreaterThan(0);
+    for (const p of curve) expect(p.forecast).toBeCloseTo(p.planned, 9);
   });
 });

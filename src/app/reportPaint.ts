@@ -22,7 +22,11 @@ export type PaintBlock =
   | { kind: 'title'; text: string; sub?: string; right?: string[] }
   | { kind: 'section'; text: string; meta?: string }
   | { kind: 'stats'; items: { label: string; value: string; sub?: string; tone?: PaintTone }[] }
-  | { kind: 'bars'; rows: { label: string; value: string; pct: number; color: string }[] }
+  /**
+   * Horizontal bars on one shared track. `start` floats a bar off zero (a waterfall
+   * step), `hatch` stripes it, and `labelWidth` makes room for longer labels.
+   */
+  | { kind: 'bars'; labelWidth?: number; rows: { label: string; value: string; pct: number; start?: number; color: string; hatch?: boolean }[] }
   | { kind: 'lines'; items: string[] }
   | { kind: 'table'; head: string[]; num: boolean[]; rows: string[][]; tone?: (PaintTone | null)[] }
   | { kind: 'chart'; el: HTMLElement }
@@ -302,16 +306,37 @@ function draw(ctx: CanvasRenderingContext2D, b: PaintBlock, x: number, y: number
         ctx.fillStyle = C.muted;
         ctx.font = `11.5px ${SANS}`;
         ctx.fillText(r.label, x + 18, top + 15);
-        const trackX = x + 92;
-        const trackW = width - 92 - 92;
+        const keyW = b.labelWidth ?? 92;
+        const trackX = x + keyW;
+        const trackW = width - keyW - 92;
         ctx.fillStyle = '#eef0f3';
         ctx.beginPath();
         ctx.roundRect(trackX, top + 3, trackW, 16, 5);
         ctx.fill();
-        ctx.fillStyle = r.color;
-        ctx.beginPath();
-        ctx.roundRect(trackX, top + 3, Math.max(0, Math.min(1, r.pct)) * trackW, 16, 5);
-        ctx.fill();
+        const start = Math.max(0, Math.min(1, r.start ?? 0));
+        const barX = trackX + start * trackW;
+        const barW = r.pct <= 1e-9 ? 0 : Math.max(r.start === undefined ? 0 : 2, Math.min(1 - start, r.pct) * trackW);
+        if (barW > 0) {
+          ctx.fillStyle = r.color;
+          ctx.beginPath();
+          ctx.roundRect(barX, top + 3, barW, 16, 5);
+          ctx.fill();
+        }
+        if (r.hatch && barW > 0) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.roundRect(barX, top + 3, barW, 16, 5);
+          ctx.clip();
+          ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+          ctx.lineWidth = 3;
+          for (let hx = barX - 16; hx < barX + barW + 16; hx += 7) {
+            ctx.beginPath();
+            ctx.moveTo(hx, top + 19);
+            ctx.lineTo(hx + 16, top + 3);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
         ctx.fillStyle = C.ink;
         ctx.font = `600 12.5px ${SANS}`;
         ctx.textAlign = 'right';
@@ -475,8 +500,40 @@ export const paintChartWidth = (t: PaintTarget) => t.width - PAD * 2;
 export const PAINT_TARGETS: Record<string, PaintTarget> = {
   portrait: { label: 'Word page, portrait', inches: 6.5, width: 700, pageInches: 9 },
   landscape: { label: 'Word page, landscape', inches: 9.5, width: 1010, pageInches: 6.5 },
-  screen: { label: 'One tall picture', inches: 12.5, width: 1330 },
+  /*
+   * A 13 by 7 inch frame, page by page: every picture comes out exactly that shape,
+   * so it fills the frame with nothing stretched and nothing left over.
+   */
+  wide: { label: 'Large page, 13 × 7 in', inches: 13, width: 1330, pageInches: 7 },
+  /*
+   * One picture, laid out for a 7 inch table column — a meeting's minutes, one row
+   * per team. Laid out at the column's own width, so the type comes out the size it
+   * does on a portrait page instead of half that, however tall the report runs.
+   */
+  column: { label: 'Table column, 7 in wide — one tall picture', inches: 7, width: 750 },
+  screen: { label: 'One tall picture, 13 in wide', inches: 13, width: 1330 },
 };
+
+/**
+ * How many pixels to the inch the picture is drawn at, on the page size it is
+ * meant for. Well above print density on purpose: a picture gets enlarged in a
+ * document more often than it gets shrunk, and Word's own compression takes
+ * anything over its setting down to it on save — starting high is what leaves
+ * it sharp after both.
+ */
+const TARGET_DPI = 400;
+/*
+ * What one picture may cost. Browsers refuse a canvas past about 16,000 pixels
+ * on a side, and a very tall one past a few hundred million pixels in all, so a
+ * long report is drawn a little less dense rather than not at all.
+ */
+const MAX_SIDE = 16000;
+const MAX_PIXELS = 120_000_000;
+
+/** The density a page of `w` by `h` layout units can be drawn at, as a canvas scale. */
+export function pageScale(desired: number, w: number, h: number): number {
+  return Math.max(1, Math.min(desired, MAX_SIDE / w, MAX_SIDE / h, Math.sqrt(MAX_PIXELS / (w * h))));
+}
 
 /** A section heading sits against the block under it, not floating between two. */
 const gapBefore = (b: PaintBlock, prev: PaintBlock | undefined, gap: number) =>
@@ -494,9 +551,9 @@ export async function paintReport(
 ): Promise<Uint8Array[]> {
   const target = opts.target ?? PAINT_TARGETS.landscape;
   const width = opts.width ?? target.width;
-  // Enough device pixels that the picture survives being scaled up a little,
-  // without making a file nobody can mail.
-  const scale = opts.scale ?? Math.max(2, Math.min(4, Math.round((260 * target.inches) / width)));
+  // Drawn at TARGET_DPI on the page size it is meant for; each page may come down
+  // from this to fit the canvas limits (see `pageScale`).
+  const scale = opts.scale ?? (TARGET_DPI * target.inches) / width;
   const gap = opts.gap ?? GAP;
   const inner = width - PAD * 2;
   if (blocks.length === 0) throw new Error('There is nothing on the page to save yet.');
@@ -614,13 +671,17 @@ async function drawPage(
   // Every page the same height, so a run of them sits evenly in a document.
   if (target.pageInches) total = Math.max(total, (target.pageInches * width) / target.inches);
 
+  const s = pageScale(scale, width, total);
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(width * scale);
-  canvas.height = Math.round(total * scale);
+  canvas.width = Math.round(width * s);
+  canvas.height = Math.round(total * s);
   const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = C.white;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.scale(scale, scale);
+  ctx.scale(canvas.width / width, canvas.height / total);
+  // The charts are drawn from a bitmap; smoothing it is what keeps a downscaled one clean.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
   let y = PAD;
   blocks.forEach((b, i) => {
@@ -639,5 +700,5 @@ async function drawPage(
   const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'));
   if (!blob) throw new Error('PNG encoding failed');
   // Without this Word has no idea how big the picture is and assumes 96 dpi.
-  return withDpi(new Uint8Array(await blob.arrayBuffer()), (width * scale) / target.inches);
+  return withDpi(new Uint8Array(await blob.arrayBuffer()), canvas.width / target.inches);
 }

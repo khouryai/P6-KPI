@@ -73,34 +73,64 @@ function firstByKey<T>(items: T[], key: (t: T) => string): Map<string, T> {
 }
 
 /**
- * The schedule with exact repeats taken out.
+ * One row per Activity ID.
  *
  * A P6 export can write one activity on several rows — a layout grouped by a code
- * the activity carries twice, or one row per resource assignment. Every field the
- * application reads is identical on those rows, so they are one activity, and
- * pricing each of them would count its hours once per row on every screen. Rows
- * that share an ID but differ in anything else are different activities and stay.
+ * the activity carries twice, one row per resource assignment, two projects merged.
+ * The Activity ID is the activity: every percent, override, note and baseline match
+ * is keyed on it, and pricing each row would count its hours once per row on every
+ * screen. So the first row of each ID is kept and the rest are left out of the
+ * import, whatever else differs between them.
+ *
+ * What differs is still worth knowing when it is the dates. Rows of one activity
+ * that disagree on its start or finish mean the export is not saying one thing
+ * about it — a resource assignment's own dates, usually — so those IDs are flagged
+ * for somebody to check in P6, with every set of dates the rows carried. The kept
+ * row's dates are the ones used.
  */
-export function dropRepeatedRows(acts: P6Activity[]): { kept: P6Activity[]; dropped: number } {
-  const seen = new Set<string>();
+export type DuplicateDates = { activityId: string; dates: { start: string | null; finish: string | null }[] };
+
+export function oneRowPerId(acts: P6Activity[]): { kept: P6Activity[]; dropped: number; duplicateIds: number; dateConflicts: DuplicateDates[] } {
+  const first = new Map<string, P6Activity>();
+  const extra = new Map<string, P6Activity[]>();
   const kept: P6Activity[] = [];
   for (const a of acts) {
-    const { sortOrder: _o, rawActivityId: _r, ...fields } = a;
-    const key = JSON.stringify({ ...fields, activityId: a.activityId.trim().toLowerCase() });
-    if (seen.has(key)) continue;
-    seen.add(key);
-    kept.push(a);
+    const k = normKey(a.activityId);
+    if (a.rowType !== 'ACTIVITY' || !k) {
+      kept.push(a);
+      continue;
+    }
+    const seen = first.get(k);
+    if (!seen) {
+      first.set(k, a);
+      kept.push(a);
+      continue;
+    }
+    const list = extra.get(k);
+    if (list) list.push(a);
+    else extra.set(k, [a]);
   }
-  return { kept, dropped: acts.length - kept.length };
+  const dateConflicts: DuplicateDates[] = [];
+  let dropped = 0;
+  for (const [k, more] of extra) {
+    dropped += more.length;
+    const head = first.get(k) as P6Activity;
+    const all = [head, ...more];
+    const sets = new Map<string, { start: string | null; finish: string | null }>();
+    for (const r of all) sets.set(`${r.startDate ?? ''}|${r.finishDate ?? ''}`, { start: r.startDate, finish: r.finishDate });
+    if (sets.size > 1) dateConflicts.push({ activityId: head.activityId, dates: [...sets.values()] });
+  }
+  return { kept, dropped, duplicateIds: extra.size, dateConflicts };
 }
 
 export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
   const { settings, overrides, testProgress } = input;
-  const { kept: current, dropped: repeatedRows } = dropRepeatedRows(input.current);
+  const { kept: current, dropped: repeatedRows, duplicateIds: duplicateIdCount, dateConflicts: duplicateDateConflicts } = oneRowPerId(input.current);
   const notes: string[] = [];
   const libIdx = indexLibrary(input.library);
   const locIdx = firstByKey<Location>(input.locations, (l) => l.code);
-  const baseIdx = firstByKey<P6Activity>((input.baseline ?? []).filter((a) => a.rowType === 'ACTIVITY'), (a) => a.activityId);
+  // The baseline is read one row per Activity ID too, the same row the current schedule keeps.
+  const baseIdx = firstByKey<P6Activity>(oneRowPerId((input.baseline ?? []).filter((a) => a.rowType === 'ACTIVITY')).kept, (a) => a.activityId);
   const ovIdx = firstByKey<ActivityOverride>(overrides, (o) => o.activityId);
   const tpIdx = firstByKey<TestProgress>(testProgress, (t) => t.activityId);
   const hasBaseline = input.baseline !== null && input.baseline.length > 0;
@@ -463,12 +493,6 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
    * screen stop obeying its filters. Worth stating on the dashboard rather than
    * once on the import screen that is then navigated away from.
    */
-  const idCounts = new Map<string, number>();
-  for (const r of rows) {
-    const k = normKey(r.activityId);
-    idCounts.set(k, (idCounts.get(k) ?? 0) + 1);
-  }
-  const duplicateIdRows = rows.filter((r) => (idCounts.get(normKey(r.activityId)) ?? 0) > 1).length;
 
   const summary: Summary = {
     extractRows: current.length - hiddenRows.length,
@@ -492,8 +516,9 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
     noRemainingDuration: count(
       (r) => r.status === 'IN BUDGET' && r.activity.originalDuration !== null && r.activity.remainingDuration === null,
     ),
-    duplicateActivityIds: duplicateIdRows,
+    duplicateActivityIds: duplicateIdCount,
     repeatedRows,
+    duplicateDateConflicts,
     pctFromP6: count((r) => r.pctSource === 'P6' && r.status === 'IN BUDGET'),
     pctFromOverride: count((r) => r.pctSource === 'OVERRIDE'),
     inProgress: count((r) => r.earnWindowSource === 'IN PROGRESS'),
@@ -533,12 +558,14 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
   }
   if (repeatedRows > 0) {
     notes.push(
-      `${repeatedRows} ${repeatedRows === 1 ? 'row of the schedule repeats' : 'rows of the schedule repeat'} another row exactly — same Activity ID, name, dates and durations. Each activity is counted once.`,
+      `${repeatedRows} ${repeatedRows === 1 ? 'row was' : 'rows were'} left out of the import because ${repeatedRows === 1 ? 'it repeats' : 'they repeat'} an Activity ID already in the schedule (${duplicateIdCount} ${duplicateIdCount === 1 ? 'ID' : 'IDs'}). Each Activity ID is imported once, from its first row.`,
     );
   }
-  if (summary.duplicateActivityIds > 0) {
+  if (duplicateDateConflicts.length > 0) {
+    const ids = duplicateDateConflicts.map((c) => c.activityId);
     notes.push(
-      `${summary.duplicateActivityIds} activities share an Activity ID with another activity. The ID is what every percent, override and note is keyed on, so each of those reaches only the first of them.`,
+      `${ids.length} of those Activity ${ids.length === 1 ? 'ID has' : 'IDs have'} rows with different dates, so the export is not saying one thing about ${ids.length === 1 ? 'it' : 'them'}: ` +
+        `${ids.slice(0, 8).join(', ')}${ids.length > 8 ? ` and ${ids.length - 8} more` : ''}. The first row's dates are used — check ${ids.length === 1 ? 'it' : 'them'} in P6. The Import screen lists every set of dates.`,
     );
   }
   if (summary.datesEdited > 0) {

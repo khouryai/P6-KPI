@@ -3,9 +3,12 @@ import { useApp } from '../state';
 import { Page, Panel, Notice, Badge, SortableTable, type Column, type HeroStat } from '../components/ui';
 import { CurveChart } from '../components/CurveChart';
 import { buildCurve, rowTotals } from '../../engine/compute';
-import { periodLog, addDays, OUTCOMES, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
+import { periodLog, addDays, OUTCOMES, needsReason, type PeriodActivity, type PeriodOutcome } from '../../engine/period';
 import { trendFrom } from '../../engine/trend';
-import { effectiveReasonFor, tallyReasons } from '../missedReasons';
+import { effectiveReasonFor, tallyReasons, bridgeFor, isOutsideControl } from '../missedReasons';
+import { PlanBridge, bridgePaint, bridgePlan, BRIDGE_COLOURS } from '../components/PlanBridge';
+import { usePeriodPlan } from '../planSource';
+import { usePeriodWindow } from '../periodWindow';
 import { downloadBytes, stamp } from '../export';
 import { paintReport, paintTableFromDom, PAINT_TARGETS, paintChartWidth, type PaintBlock, type PaintTone } from '../reportPaint';
 import { fmtHours, fmtPct, fmtDate, todayISO } from '../format';
@@ -60,8 +63,21 @@ function achievedTone(a: number | null): 'good' | 'warn' | 'bad' | 'muted' {
   return a >= 1 ? 'good' : a >= 0.8 ? 'warn' : 'bad';
 }
 
-const PLANNED = '#6d28d9';
-const ACHIEVED = '#00875a';
+/** The text area of a Letter page with 1 inch margins: the tallest picture Word keeps full size there. */
+const WORD_TEXT_HEIGHT = 9;
+
+/** A PNG's pixel size, from its header. */
+function pngSize(png: Uint8Array): { w: number; h: number } {
+  const v = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  return { w: v.getUint32(16), h: v.getUint32(20) };
+}
+
+/** Where the chosen picture size is remembered. */
+const PNG_TARGET_KEY = 'tc-report-png-target';
+
+const PLANNED = BRIDGE_COLOURS.planned;
+const ACHIEVED = BRIDGE_COLOURS.achieved;
+const UPDATE = BRIDGE_COLOURS.update;
 
 /**
  * The status report.
@@ -106,10 +122,28 @@ export function StatusReport() {
   const [showPhaseTable, setShowPhaseTable] = useState(true);
   const [showLog, setShowLog] = useState(true);
   const [showLogActivities, setShowLogActivities] = useState(true);
-  const [logOutcomes, setLogOutcomes] = useState<PeriodOutcome[]>(['MISSED', 'COMPLETED']);
+  /** The planned-to-achieved bridge: where the plan went, and how much of it was workable. */
+  const [showBridge, setShowBridge] = useState(true);
+  const [logOutcomes, setLogOutcomes] = useState<PeriodOutcome[]>(['MISSED', 'NOT STARTED', 'COMPLETED']);
   const [showTrend, setShowTrend] = useState(false);
   /** What the picture is meant to be dropped into, which sets how big its type comes out. */
-  const [pngTarget, setPngTarget] = useState<keyof typeof PAINT_TARGETS>('landscape');
+  const [pngTarget, setPngTargetState] = useState<keyof typeof PAINT_TARGETS>(() => {
+    try {
+      const k = localStorage.getItem(PNG_TARGET_KEY);
+      return k && k in PAINT_TARGETS ? k : 'landscape';
+    } catch {
+      return 'landscape';
+    }
+  });
+  /** Remembered on this machine: whoever pastes these into the same document every month picks the size once. */
+  const setPngTarget = (k: keyof typeof PAINT_TARGETS) => {
+    setPngTargetState(k);
+    try {
+      localStorage.setItem(PNG_TARGET_KEY, String(k));
+    } catch {
+      /* private window: the choice holds for this visit */
+    }
+  };
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
 
@@ -126,7 +160,19 @@ export function StatusReport() {
   const trend = useMemo(() => trendFrom(model.burn.months, model.burn.project.budgetHours), [model.burn]);
 
   const from = addDays(end, -(span - 1));
-  const log = useMemo(() => periodLog(model.rows, from, end), [model.rows, from, end]);
+  /*
+   * Measured against the same plan the Two-Week Log is — the schedule update in
+   * force when the window began, or the baseline — and switched in the same place,
+   * so the report never reads a fortnight differently from the review it came from.
+   */
+  const { against, setAgainst } = usePeriodWindow();
+  const planState = usePeriodPlan(from, against);
+  const plan = planState.kind === 'ready' ? planState.plan : null;
+  const log = useMemo(() => periodLog(model.rows, from, end, plan), [model.rows, from, end, plan]);
+  const onUpdate = !!log.plan;
+  const planWord = log.plan ? log.plan.label : 'baseline';
+  const bPlan = bridgePlan(log.plan?.label);
+  const inherited = log.baselinePlannedHours - log.plannedHours;
 
   /** One curve per chosen selection, in the order they were chosen. */
   const curves = useMemo(
@@ -150,12 +196,22 @@ export function StatusReport() {
     [log.phases],
   );
 
-  const missed = useMemo(() => log.activities.filter((a) => a.outcome === 'MISSED'), [log.activities]);
+  /** Missed and not started: the rows a reason is owed for, read exactly as the Two-Week Log reads them. */
+  const behind = useMemo(() => log.activities.filter(needsReason), [log.activities]);
   const reasonTally = useMemo(
-    () => tallyReasons(state.data.missedReasons, missed.map((a) => a.activityId), end),
-    [state.data.missedReasons, missed, end],
+    () => tallyReasons(state.data.missedReasons, behind.map((a) => a.activityId), end),
+    [state.data.missedReasons, behind, end],
   );
   const reasonFor = (id: string) => effectiveReasonFor(state.data.missedReasons, id, end);
+  const outsideOf = (reason: string) => isOutsideControl(state.data.missedReasons, reason);
+  const bridge = useMemo(() => bridgeFor(state.data.missedReasons, log.activities, end), [state.data.missedReasons, log.activities, end]);
+  const phaseBridge = useMemo(
+    () => new Map(log.phases.map((p) => [p.key, bridgeFor(state.data.missedReasons, log.activities.filter((a) => a.phase === p.key), end)])),
+    [state.data.missedReasons, log.activities, log.phases, end],
+  );
+  const constrained = bridge.shortfall.CONSTRAINT > 1e-9;
+  /** Every activity the reasons panel lists: the ones with a reason, and the ones still owed one. */
+  const reasonedCount = bridge.byReason.reduce((n, t) => n + t.activities, 0) + reasonTally.unexplained;
 
   /**
    * Hours, or the same hours as a share of the whole job. Every figure on the page
@@ -166,7 +222,14 @@ export function StatusReport() {
   const budget = log.projectBudgetHours;
   const val = (hours: number, digits = 0) => (percent ? fmtPct(budget ? hours / budget : 0, 2) : `${fmtHours(hours, digits)} h`);
   const variance = log.earnedHours - log.plannedHours;
-  const achievedWidth = log.achievement === null ? 0 : Math.min(100, Math.round(log.achievement * 100));
+  /** The baseline, the update and achieved on one scale, as the Two-Week Log draws them. */
+  const barMax = Math.max(log.plannedHours, log.baselinePlannedHours, log.earnedHours, 1e-9);
+  const barPct = (h: number) => Math.min(1, Math.max(0, h / barMax));
+  const planBars = [
+    { key: 'baseline', label: 'Baseline', short: onUpdate ? 'Baseline' : 'Planned', hours: log.baselinePlannedHours, color: PLANNED },
+    ...(onUpdate ? [{ key: 'planned', label: `Planned (${planWord})`, short: 'Planned', hours: log.plannedHours, color: UPDATE }] : []),
+    { key: 'achieved', label: 'Achieved', short: 'Achieved', hours: log.earnedHours, color: ACHIEVED },
+  ];
 
   const heading = title.trim() || 'Testing and Commissioning — Status Report';
 
@@ -182,10 +245,17 @@ export function StatusReport() {
         { label: 'Curves', value: String(curves.length), tone: 'blue' },
       ]
     : [{ label: 'Curves', value: String(curves.length), tone: 'blue' }];
-  if (showLog && missed.length > 0) {
+  if (showLog && constrained) {
     heroStats.splice(3, 0, {
-      label: 'Missed explained',
-      value: `${missed.length - reasonTally.unexplained}/${missed.length}`,
+      label: 'Of workable plan',
+      value: bridge.workableAchievement === null ? '—' : fmtPct(bridge.workableAchievement, 0),
+      tone: bridge.workableAchievement === null ? 'muted' : bridge.workableAchievement >= 1 ? 'good' : bridge.workableAchievement >= 0.8 ? 'amber' : 'red',
+    });
+  }
+  if (showLog && behind.length > 0) {
+    heroStats.splice(heroStats.length - 1, 0, {
+      label: 'Behind explained',
+      value: `${behind.length - reasonTally.unexplained}/${behind.length}`,
       tone: reasonTally.unexplained === 0 ? 'good' : 'amber',
     });
   }
@@ -226,7 +296,26 @@ export function StatusReport() {
         if (state.adapterKind === 'filesystem') written.push(await actions.writeExport(name, pages[i]));
         else downloadBytes(name, pages[i], 'image/png');
       }
-      if (written.length) actions.notify('ok', `Written to ${written[0]}${written.length > 1 ? ` and ${written.length - 1} more` : ''}`);
+      const where = written.length ? `Written to ${written[0]}${written.length > 1 ? ` and ${written.length - 1} more` : ''}. ` : '';
+      if (pages.length === 1 && !target.pageInches) {
+        /*
+         * One tall picture: say how big it came out, and whether Word will keep it
+         * that big. Word shrinks a picture to fit the page's text area, which on a
+         * Letter page with 1 inch margins is 9 inches tall — the surprise is finding
+         * that out after pasting it in.
+         */
+        const tall = (pngSize(pages[0]).h / pngSize(pages[0]).w) * target.inches;
+        const fits = tall <= WORD_TEXT_HEIGHT + 0.01;
+        actions.notify(
+          fits ? 'ok' : 'info',
+          `${where}One picture, ${target.inches} × ${tall.toFixed(1)} in.` +
+            (fits
+              ? ''
+              : ` Word shrinks a picture to fit the page, and a Letter page with 1 in margins has ${WORD_TEXT_HEIGHT} in — so it would come out ` +
+                `${((target.inches * WORD_TEXT_HEIGHT) / tall).toFixed(1)} × ${WORD_TEXT_HEIGHT} in. Take something off the page (the activity table is usually the ` +
+                `long part, or hide its columns), or put it on a longer page: Legal or Tabloid, with narrower margins.`),
+        );
+      } else if (written.length) actions.notify('ok', where.trim());
       else if (pages.length > 1) actions.notify('ok', `${pages.length} pages saved, each sized to fit the page you chose.`);
     } catch (err) {
       actions.notify('error', (err as Error).message);
@@ -267,18 +356,27 @@ export function StatusReport() {
      */
     {
       key: 'reason',
-      label: 'Why missed',
-      value: (a) => reasonFor(a.activityId)?.entry.reason ?? '',
+      label: 'Why behind',
+      value: (a) => (needsReason(a) ? reasonFor(a.activityId)?.entry.reason ?? '' : ''),
+      exportValue: (a) => {
+        const eff = needsReason(a) ? reasonFor(a.activityId) : undefined;
+        return eff ? `${eff.entry.reason}${outsideOf(eff.entry.reason) ? ' (constraint)' : ''}` : '';
+      },
       render: (a) => {
-        if (a.outcome !== 'MISSED') return <span className="text-[var(--text-subtle)]">—</span>;
+        if (!needsReason(a)) return <span className="text-[var(--text-subtle)]">—</span>;
         const eff = reasonFor(a.activityId);
         if (!eff) return <span className="tone-bad text-[12px]">no reason given yet</span>;
+        const outside = outsideOf(eff.entry.reason);
         return (
           <span
             className="cell-text"
-            title={eff.carried ? `Carried from the period ending ${fmtDate(eff.entry.periodEnd)}.` : eff.entry.reason}
+            title={
+              (eff.carried ? `Carried from the period ending ${fmtDate(eff.entry.periodEnd)}. ` : '') +
+              (outside ? 'Outside the team’s control: its hours are held by a constraint, not counted against the workable plan.' : 'The team’s own reason.')
+            }
           >
             {eff.entry.reason}
+            {outside && <span className="ml-1 tone-info">(constraint)</span>}
             {eff.carried && <span className="ml-1 text-[var(--text-subtle)]">(carried)</span>}
           </span>
         );
@@ -293,6 +391,18 @@ export function StatusReport() {
       optional: true,
       render: (a) => <span className="text-[var(--text-muted)]">{val(a.plannedHours, 1)}</span>,
     },
+    ...(onUpdate
+      ? ([
+          {
+            key: 'blplanned',
+            label: percent ? 'Baseline' : 'Baseline h',
+            value: (a: PeriodActivity) => a.baselinePlannedHours,
+            num: true,
+            optional: true,
+            render: (a: PeriodActivity) => <span className="text-[var(--text-muted)]">{val(a.baselinePlannedHours, 1)}</span>,
+          },
+        ] as Column<PeriodActivity>[])
+      : []),
     {
       key: 'earned',
       label: percent ? 'Project achieved' : 'Project achieved h',
@@ -319,7 +429,10 @@ export function StatusReport() {
         </div>
       ),
     },
-    { key: 'blf', label: 'BL finish', value: (a) => a.baselineFinish, render: (a) => fmtDate(a.baselineFinish) },
+    ...(onUpdate
+      ? ([{ key: 'plf', label: 'Plan finish', value: (a: PeriodActivity) => a.planFinish, render: (a: PeriodActivity) => fmtDate(a.planFinish) }] as Column<PeriodActivity>[])
+      : []),
+    { key: 'blf', label: 'BL finish', value: (a) => a.baselineFinish, optional: onUpdate, render: (a) => fmtDate(a.baselineFinish) },
 
     { key: 'af', label: 'Actual finish', value: (a) => a.actualFinish, render: (a) => fmtDate(a.actualFinish) },
     {
@@ -340,6 +453,23 @@ export function StatusReport() {
     { key: 'loc', label: 'Loc', value: (a) => a.location, optional: true },
     { key: 'bls', label: 'BL start', value: (a) => a.baselineStart, optional: true, render: (a) => fmtDate(a.baselineStart) },
     { key: 'as', label: 'Actual start', value: (a) => a.actualStart, optional: true, render: (a) => fmtDate(a.actualStart) },
+    {
+      key: 'cs',
+      label: 'Sched. start',
+      value: (a) => a.currentStart,
+      optional: true,
+      exportValue: (a) => `${fmtDate(a.currentStart)}${a.startSlipDays ? ` (${a.startSlipDays > 0 ? '+' : ''}${a.startSlipDays}d)` : ''}`,
+      render: (a) => (
+        <span className="whitespace-nowrap">
+          {fmtDate(a.currentStart)}
+          {a.startSlipDays !== null && a.startSlipDays !== 0 && (
+            <span className={`ml-1 text-[11px] font-semibold tone-${a.startSlipDays > 0 ? 'bad' : 'good'}`}>
+              {a.startSlipDays > 0 ? '+' : ''}{a.startSlipDays}d
+            </span>
+          )}
+        </span>
+      ),
+    },
   ];
 
   const phaseColumns: Column<GroupStat>[] = [
@@ -375,6 +505,26 @@ export function StatusReport() {
     { label: 'Planned', value: val(log.plannedHours), tone: 'muted' },
     { label: 'Achieved', value: val(log.earnedHours), tone: 'good' },
     { label: 'Of plan', value: log.achievement === null ? '—' : fmtPct(log.achievement, 0), tone: achievedTone(log.achievement) },
+    ...(onUpdate
+      ? ([
+          {
+            label: 'Of baseline',
+            value: log.baselineAchievement === null ? '—' : fmtPct(log.baselineAchievement, 0),
+            sub: inherited > 1e-6 ? `${val(inherited)} slipped before the period` : `${val(log.baselinePlannedHours)} in the baseline`,
+            tone: achievedTone(log.baselineAchievement),
+          },
+        ] as Tile[])
+      : []),
+    ...(constrained
+      ? ([
+          {
+            label: 'Of workable plan',
+            value: bridge.workableAchievement === null ? '—' : fmtPct(bridge.workableAchievement, 0),
+            sub: `${val(bridge.shortfall.CONSTRAINT)} held by constraints`,
+            tone: achievedTone(bridge.workableAchievement),
+          },
+        ] as Tile[])
+      : []),
     { label: 'Against plan', value: `${variance >= 0 ? '+' : ''}${val(variance)}`, tone: variance >= 0 ? 'good' : 'bad' },
     { label: 'Project complete', value: fmtPct(log.pctAtEnd, 1), sub: `from ${fmtPct(log.pctAtStart, 1)}`, tone: 'info' },
     {
@@ -420,6 +570,25 @@ export function StatusReport() {
     },
   ];
 
+  /** One phase's fortnight in a sentence, for the page and the picture alike. */
+  const phaseLine = (p: (typeof activePhases)[number]) => {
+    const pb = phaseBridge.get(p.key);
+    return (
+      `${p.label} — ${p.achievement === null ? 'nothing planned' : `${fmtPct(p.achievement, 0)} of plan`}` +
+      (pb && pb.shortfall.CONSTRAINT > 1e-9 && pb.workableAchievement !== null ? `, ${fmtPct(pb.workableAchievement, 0)} of workable` : '') +
+      `, moved ${fmtPct(p.pctAtStart, 1)} → ${fmtPct(p.pctAtEnd, 1)}`
+    );
+  };
+  const bridgeMeta = constrained && bridge.workableAchievement !== null ? `${fmtPct(bridge.workableAchievement, 0)} of the workable plan` : 'every planned hour, accounted for';
+  /** Why the missed and not-started activities are behind, reason by reason, with the hours each held back. */
+  const reasonLines = (): string[] => {
+    const out = bridge.byReason.map(
+      (t) => `${t.activities} × ${t.reason}${t.outsideControl ? ' (constraint)' : ''}${t.hours > 1e-9 ? ` — ${val(t.hours)}` : ''}`,
+    );
+    if (reasonTally.unexplained > 0) out.push(`${reasonTally.unexplained} × no reason given yet${bridge.shortfall.UNEXPLAINED > 1e-9 ? ` — ${val(bridge.shortfall.UNEXPLAINED)}` : ''}`);
+    return out;
+  };
+
   /**
    * The page, as the painter wants it: the same figures, the same order, and the
    * tables taken from the same `Column` definitions the screen renders.
@@ -434,24 +603,20 @@ export function StatusReport() {
       },
     ];
     if (showLog) {
-      out.push({ kind: 'section', text: `Period ${fmtDate(from)} to ${fmtDate(end)}`, meta: `${log.days} days` });
+      out.push({ kind: 'section', text: `Period ${fmtDate(from)} to ${fmtDate(end)}`, meta: `${log.days} days · against the ${planWord}` });
       out.push({ kind: 'stats', items: periodStats });
       out.push({
         kind: 'bars',
-        rows: [
-          { label: 'Planned', value: val(log.plannedHours), pct: 1, color: PLANNED },
-          { label: 'Achieved', value: val(log.earnedHours), pct: achievedWidth / 100, color: ACHIEVED },
-        ],
+        rows: planBars.map((b) => ({ label: b.short, value: val(b.hours), pct: barPct(b.hours), color: b.color })),
       });
       if (activePhases.length > 0) {
-        out.push({
-          kind: 'lines',
-          items: activePhases.map(
-            (p) =>
-              `${p.label} — ${p.achievement === null ? 'nothing planned' : `${fmtPct(p.achievement, 0)} of plan`}, ` +
-              `moved ${fmtPct(p.pctAtStart, 1)} → ${fmtPct(p.pctAtEnd, 1)}`,
-          ),
-        });
+        out.push({ kind: 'lines', items: activePhases.map(phaseLine) });
+      }
+      if (showBridge && (log.plannedHours > 1e-9 || log.earnedHours > 1e-9)) {
+        out.push({ kind: 'section', text: 'From planned to achieved', meta: bridgeMeta });
+        out.push(bridgePaint(bridge, val, bPlan));
+        const reasons = reasonLines();
+        if (reasons.length) out.push({ kind: 'lines', items: reasons });
       }
       if (showLogActivities) {
         out.push({ kind: 'stats', items: OUTCOMES.map((o) => ({ label: o, value: String(log.counts[o]), tone: OUTCOME_TONE[o] })) });
@@ -552,8 +717,26 @@ export function StatusReport() {
                 <option value={14}>2 weeks</option>
                 <option value={28}>4 weeks</option>
               </select>
+              <span className="seg" title="What the period is measured against — the same choice as on the Two-Week Log.">
+                <button className={`seg-btn${against === 'update' ? ' is-on' : ''}`} disabled={!showLog} onClick={() => setAgainst('update')}>Schedule update</button>
+                <button className={`seg-btn${against === 'baseline' ? ' is-on' : ''}`} disabled={!showLog} onClick={() => setAgainst('baseline')}>Baseline</button>
+              </span>
             </div>
+            {showLog && against === 'update' && planState.kind === 'none' && (
+              <div className="mt-1.5 text-[11.5px] tone-warn">No schedule update is dated on or before {fmtDate(from)}, so this period is measured against the baseline.</div>
+            )}
+            {showLog && planState.kind === 'ready' && planState.date.source !== 'settings' && planState.date.source !== 'stamped' && (
+              <div className="mt-1.5 text-[11.5px] tone-warn">
+                The update&rsquo;s data date ({fmtDate(planState.date.date)}) was {planState.date.source === 'estimated' ? 'estimated' : 'taken from its import day'} — check it on Import.
+              </div>
+            )}
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px]">
+              <label
+                className="flex cursor-pointer items-center gap-1.5"
+                title="Planned to achieved, step by step: what constraints outside the team's control held back, what is the team's own, and what nobody has explained yet."
+              >
+                <input type="checkbox" checked={showBridge} onChange={(e) => setShowBridge(e.target.checked)} disabled={!showLog} /> Planned to achieved
+              </label>
               <label className="flex cursor-pointer items-center gap-1.5">
                 <input type="checkbox" checked={showLogActivities} onChange={(e) => setShowLogActivities(e.target.checked)} disabled={!showLog} /> Activities
               </label>
@@ -569,7 +752,7 @@ export function StatusReport() {
               ))}
             </div>
             <div className="mt-1.5 text-[11.5px] text-[var(--text-subtle)]">
-              Why each activity was missed sits in its own row, the way the Two-Week Log shows it.
+              Why each activity is behind sits in its own row, the way the Two-Week Log shows it. Reasons and whether they are constraints are set there.
             </div>
           </div>
 
@@ -600,8 +783,10 @@ export function StatusReport() {
               </select>
             </div>
             <div className="mt-1.5 text-[11.5px] text-[var(--text-subtle)]">
-              The picture comes out one image per page, sized and stamped so Word places it at that width without shrinking it. It carries the columns the tables
-              below are showing, in that order — hiding columns with <b>Columns</b> makes what is left bigger on the page.
+              The picture comes out one image per page, exactly the size chosen, drawn at 400 dots to the inch and stamped so Word places it at that size. Pick
+              the size it will sit at in the document — enlarging a picture past it is what makes it soft. In Word, tick <b>Do not compress images in file</b>{' '}
+              (File → Options → Advanced), or Word takes it down to its own resolution when it saves. It carries the columns the tables below are showing, in that
+              order — hiding columns with <b>Columns</b> makes what is left bigger on the page.
             </div>
           </div>
 
@@ -637,21 +822,18 @@ export function StatusReport() {
           <Panel
             className="mt-3"
             title={`Period ${fmtDate(from)} to ${fmtDate(end)}`}
-            meta={`${log.days} days`}
+            meta={`${log.days} days · against the ${planWord}`}
           >
             <Tiles items={periodStats} />
 
             <div className="plan-bar mt-4">
-              <div className="plan-bar-row">
-                <span className="plan-bar-key"><i style={{ background: PLANNED }} /> Planned</span>
-                <div className="plan-bar-track"><span style={{ width: '100%', background: PLANNED }} /></div>
-                <span className="plan-bar-val">{val(log.plannedHours)}</span>
-              </div>
-              <div className="plan-bar-row">
-                <span className="plan-bar-key"><i style={{ background: ACHIEVED }} /> Achieved</span>
-                <div className="plan-bar-track"><span style={{ width: `${achievedWidth}%`, background: ACHIEVED }} /></div>
-                <span className="plan-bar-val">{val(log.earnedHours)}</span>
-              </div>
+              {planBars.map((b) => (
+                <div key={b.key} className="plan-bar-row" title={b.label}>
+                  <span className="plan-bar-key"><i style={{ background: b.color }} /> {b.short}</span>
+                  <div className="plan-bar-track"><span style={{ width: `${barPct(b.hours) * 100}%`, background: b.color }} /></div>
+                  <span className="plan-bar-val">{val(b.hours)}</span>
+                </div>
+              ))}
             </div>
 
             {activePhases.length > 0 && (
@@ -664,12 +846,36 @@ export function StatusReport() {
                       <span className={`font-semibold tone-${achievedTone(p.achievement)}`}>
                         {p.achievement === null ? 'nothing planned' : `${fmtPct(p.achievement, 0)} of plan`}
                       </span>
+                      {(() => {
+                        const pb = phaseBridge.get(p.key);
+                        return pb && pb.shortfall.CONSTRAINT > 1e-9 ? (
+                          <span className={`font-semibold tone-${achievedTone(pb.workableAchievement)}`}>
+                            {pb.workableAchievement === null ? '—' : fmtPct(pb.workableAchievement, 0)} of workable
+                          </span>
+                        ) : null;
+                      })()}
                       <span className="text-[var(--text-muted)]">
                         moved <b className="text-[var(--text)]">{fmtPct(p.pctAtStart, 1)}</b> → <b className="text-[var(--text)]">{fmtPct(p.pctAtEnd, 1)}</b>
                       </span>
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </Panel>
+        )}
+
+        {showLog && showBridge && (log.plannedHours > 1e-9 || log.earnedHours > 1e-9) && (
+          <Panel className="mt-3" title="From planned to achieved" meta={bridgeMeta}>
+            <PlanBridge bridge={bridge} val={val} plan={bPlan} />
+            {reasonLines().length > 0 && (
+              <div className="mt-3 border-t border-[var(--line-soft)] pt-3">
+                <div className="eyebrow mb-1.5">{reasonedCount === 0 ? 'Missed or not started' : `Why ${reasonedCount} ${reasonedCount === 1 ? 'activity is' : 'activities are'} behind`}</div>
+                <ul className="grid gap-x-6 gap-y-0.5 text-[12px] text-[var(--text-muted)] sm:grid-cols-2">
+                  {reasonLines().map((l) => (
+                    <li key={l}>{l}</li>
+                  ))}
+                </ul>
               </div>
             )}
           </Panel>

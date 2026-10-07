@@ -206,7 +206,12 @@ export class Store {
     // was missed. An empty catalogue is the right reading of "nobody has said yet",
     // so a missing file is not a problem to report.
     const missed = parseJson<Partial<MissedReasonLog>>(await a.read(FILES.missedReasons), {}, FILES.missedReasons, problems);
-    data.missedReasons = { reasons: missed.reasons ?? [], entries: missed.entries ?? [], removed: missed.removed ?? [] };
+    data.missedReasons = {
+      reasons: missed.reasons ?? [],
+      entries: missed.entries ?? [],
+      removed: missed.removed ?? [],
+      ...(missed.outsideControl && typeof missed.outsideControl === 'object' ? { outsideControl: missed.outsideControl } : {}),
+    };
     // Absent in every store written before crews could be split by subsystem. An
     // empty list is the correct reading of "this job has not been split yet", so a
     // missing file is not a problem to report.
