@@ -11,6 +11,8 @@ import type { BurnRow } from '../src/engine/types';
 
 const row = (month: string, earned: number, built: number, cumEarned: number, cumBuilt: number): BurnRow => ({
   month,
+  planned: 0,
+  cumPlanned: 0,
   earned,
   built,
   variance: earned - built,
@@ -133,7 +135,7 @@ describe('grouping the monthly rows', () => {
 describe('resources inside one year', () => {
   const withCells = (month: string, cells: { code: string; earned: number; built: number }[]): BurnRow => ({
     ...row(month, 0, 0, 0, 0),
-    bySubsystem: cells.map((c) => ({ code: c.code, label: c.code || 'Unassigned', earned: c.earned, built: c.built, variance: c.earned - c.built, factor: c.built ? c.earned / c.built : null })),
+    bySubsystem: cells.map((c) => ({ code: c.code, label: c.code || 'Unassigned', planned: 0, cumPlanned: 0, cumEarned: 0, earned: c.earned, built: c.built, variance: c.earned - c.built, factor: c.built ? c.earned / c.built : null })),
   });
   const months = [
     withCells('2026-07', [{ code: 'ATS', earned: 30, built: 20 }, { code: 'IXL', earned: 10, built: 25 }]),
@@ -186,6 +188,9 @@ describe('a group, month by month', () => {
   const cell = (code: string, earned: number, built: number) => ({
     code,
     label: code || 'Unassigned',
+    planned: 0,
+    cumPlanned: 0,
+    cumEarned: 0,
     earned,
     built,
     variance: earned - built,
@@ -231,6 +236,9 @@ describe('the fiscal year detail the screen and the workbook share', () => {
   const cell = (code: string, earned: number, built: number) => ({
     code,
     label: code || 'Unassigned',
+    planned: 0,
+    cumPlanned: 0,
+    cumEarned: 0,
     earned,
     built,
     variance: earned - built,

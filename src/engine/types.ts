@@ -543,6 +543,20 @@ export type MonthlyEarned = {
   bySubsystem: Record<string, number>;
 };
 
+/** Budget hours the baseline planned to earn in each month, whole and by subsystem. */
+export type MonthlyPlanned = MonthlyEarned;
+
+/**
+ * Planned value (PV) for one month of the baseline, whole and by subsystem, with
+ * the running total from the baseline's first month.
+ */
+export type PlannedMonth = {
+  month: string;
+  planned: number;
+  cumPlanned: number;
+  bySubsystem: Record<string, { planned: number; cumPlanned: number }>;
+};
+
 /**
  * One month of earned against built. `built` is what the timesheets say the team
  * spent; `earned` is what the budget says that work was worth. Negative variance
@@ -550,6 +564,13 @@ export type MonthlyEarned = {
  */
 export type BurnRow = {
   month: string;
+  /**
+   * Planned value (PV): budget hours the baseline schedule planned to earn in the
+   * month, every activity's budget spread evenly across its baseline dates. The
+   * same figure the planned S-curve climbs by, so the months add up to it exactly.
+   */
+  planned: number;
+  cumPlanned: number;
   earned: number;
   built: number;
   variance: number;
@@ -564,6 +585,11 @@ export type BurnRow = {
 export type BurnCell = {
   code: string;
   label: string;
+  /** This group's planned value for the month: its share of each activity's budget, spread over the baseline dates. */
+  planned: number;
+  cumPlanned: number;
+  /** This group's earned value to the end of the month. */
+  cumEarned: number;
   earned: number;
   built: number;
   variance: number;
@@ -589,6 +615,12 @@ export type BurnSummary = {
   bySubsystem: Reforecast[];
   /** Subsystems that built hours but hold no budget, so nothing can be earned there. */
   builtWithNoBudget: string[];
+  /**
+   * Planned value for every month the baseline plans anything, by subsystem —
+   * past and future alike. The earned-against-built months above look their PV up
+   * here; this runs to the end of the plan.
+   */
+  planned: PlannedMonth[];
   /** The months still to come, on the current schedule's dates. */
   forecastMonths: ForecastRow[];
   /**

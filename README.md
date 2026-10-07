@@ -62,6 +62,18 @@ percent mode every hours figure disappears — cards, curve, axis, tooltips, the
 exported PNG and the copied text — and the screens report progress only. It is one
 setting shared by both screens, remembered per machine.
 
+## Planned value
+
+**Earned vs Actual** carries the planned value (PV) beside what was earned: each
+month's **Planned (PV) h** — the budget hours the baseline planned to earn in it,
+every activity's budget spread evenly over its baseline dates exactly as the planned
+S-curve spreads it — with **Cum PV**, **SV** (cumulative earned minus cumulative
+planned) and **SPI** (cumulative earned over cumulative planned) up to the data date.
+Opening a month's groups gives the same per resource. **Planned value by resource**
+is the grid: every resource down the side, every month of the plan across it —
+including the months still to come — in the month or cumulative, with the Excel
+button to take it away. The exported workbook carries it as `PV_By_Group_Month`.
+
 ## Fiscal years
 
 **Earned vs Actual** rolls the months up by fiscal year, with earned, actual,

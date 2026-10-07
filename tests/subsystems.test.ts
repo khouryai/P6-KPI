@@ -322,6 +322,29 @@ describe('the monthly table stays readable', () => {
     });
     expect(m.burn.months.length).toBeLessThan(6);
     expect(m.burn.months[m.burn.months.length - 1].month).toBe('2026-06');
+    // Planned value is the plan, so it runs on to June 2030 — and no further.
+    expect(m.burn.planned[0].month).toBe('2026-06');
+    expect(m.burn.planned[m.burn.planned.length - 1].month).toBe('2030-06');
+  });
+
+  it('gives each subsystem its planned value every month, adding up to the planned curve', () => {
+    const lib2: LibraryEntry[] = [{ matchKey: 'Test Type', basis: 'RATE', durationShifts: 2, crew: [{ subsystem: 'ATS', count: 1 }, { subsystem: 'IXL', count: 1 }] }];
+    // A baseline across June and July 2026, crewed one ATS and one IXL.
+    const a = makeActivity({ activityId: 'A', startDate: '2026-06-01', finishDate: '2026-07-30' });
+    const m = computeModel({ ...base, library: lib2, current: [a], teamActuals: [{ id: '1', month: '2026-06', subsystem: 'ATS', hours: 10 }] });
+    const budget = m.rows[0].budgetHours;
+    expect(m.burn.planned.map((x) => x.month)).toEqual(['2026-06', '2026-07']);
+    expect(m.burn.planned.reduce((s, x) => s + x.planned, 0)).toBeCloseTo(budget, 6);
+    const last = m.burn.planned[m.burn.planned.length - 1];
+    expect(last.cumPlanned).toBeCloseTo(budget, 6);
+    expect(last.bySubsystem.ATS.cumPlanned + last.bySubsystem.IXL.cumPlanned).toBeCloseTo(budget, 6);
+    expect(last.bySubsystem.ATS.cumPlanned).toBeCloseTo(m.rows[0].subsystemHours.ATS, 6);
+    // The earned-against-built month carries its PV too, whole and by group.
+    const june = m.burn.months.find((x) => x.month === '2026-06')!;
+    expect(june.planned).toBeCloseTo(m.burn.planned[0].planned, 9);
+    expect(june.planned).toBeGreaterThan(0);
+    expect(june.planned).toBeLessThan(budget);
+    expect(june.bySubsystem.find((c) => c.code === 'IXL')!.planned).toBeCloseTo(m.burn.planned[0].bySubsystem.IXL.planned, 9);
   });
 
   it('keeps a quiet month between two busy ones', () => {

@@ -55,7 +55,7 @@ import {
 import { checkReason, marksActuals, p6PctComplete, testPctEffective } from './progress';
 import { buildCurve, curvePeriods } from './curve';
 import { groupRows, subsystemRollup } from './rollup';
-import { burnSummary, monthlyEarned } from './burn';
+import { burnSummary, monthlyEarned, monthlyPlanned } from './burn';
 
 function scaleRecord(rec: Record<string, number>, factor: number): Record<string, number> {
   const out: Record<string, number> = {};
@@ -599,6 +599,7 @@ export function attachBurn(base: ModelBase, teamActuals: TeamActual[]): Model {
     base.subsystemDefs,
     base.periods,
     base.dataDate,
+    monthlyPlanned(base.rows, base.periods),
   );
   const notes = [...base.notes];
   if (burn.builtWithNoBudget.length) {

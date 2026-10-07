@@ -20,6 +20,8 @@ const row = (month: string, earned: number, built: number): BurnRow => {
   cumB += built;
   return {
     month,
+    planned: 0,
+    cumPlanned: 0,
     earned,
     built,
     variance: earned - built,

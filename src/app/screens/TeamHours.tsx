@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { useApp } from '../state';
 import { Page, SortableTable, Panel, Notice, Term, CellInput, type Column, type HeroStat } from '../components/ui';
-import type { BurnRow, Reforecast, TeamActual } from '../../engine/types';
+import type { BurnCell, BurnRow, PlannedMonth, Reforecast, TeamActual } from '../../engine/types';
 import { parseTeamHours, type TeamPaste } from '../../engine/teamHours';
 import { parseDelimitedText } from '../../engine/parse';
 import { UNASSIGNED } from '../../engine/compute';
@@ -75,6 +75,13 @@ function coreColumns<T>(pick: (r: T) => { earned: number; built: number; varianc
     { key: 'variance', label: 'Variance', value: (r) => pick(r).variance, num: true, render: (r) => <Variance v={pick(r).variance} /> },
     { key: 'factor', label: 'Factor', value: (r) => pick(r).factor ?? null, num: true, render: (r) => <Factor f={pick(r).factor} /> },
   ];
+}
+
+/** Earned over planned. Below 1.0 is behind the baseline. Blank where nothing was planned. */
+function Spi({ ev, pv }: { ev: number; pv: number }) {
+  if (pv <= 1e-9) return <span className="text-[var(--text-subtle)]">—</span>;
+  const f = ev / pv;
+  return <span className={`font-semibold tabular-nums ${f >= 1 ? 'tone-good' : 'tone-bad'}`}>{f.toFixed(2)}</span>;
 }
 
 /** A cost that only exists where the group has a rate to project with. */
@@ -362,11 +369,95 @@ export function TeamHours() {
     [openForecast, years],
   );
 
+  // --- planned value by subsystem, every month ---------------------------------
+  const [pvMode, setPvMode] = useState<'month' | 'cum'>('month');
+  const pvMonths: PlannedMonth[] = useMemo(
+    () => (fy ? burn.planned.filter((m) => String(fiscalYearOf(m.month, fyMonth)) === fy) : burn.planned),
+    [burn.planned, fy, fyMonth],
+  );
+  type PvRow = { code: string; label: string; total: number; cells: Record<string, number> };
+  const pvRows: PvRow[] = useMemo(() => {
+    const codes = [...new Set(burn.planned.flatMap((m) => Object.keys(m.bySubsystem)))];
+    const labelOf = (code: string) => burn.bySubsystem.find((x) => x.code === code)?.label ?? (code || 'Unassigned');
+    const rowFor = (code: string | null): PvRow => {
+      const cells: Record<string, number> = {};
+      let total = 0;
+      for (const m of pvMonths) {
+        const v = code === null ? (pvMode === 'cum' ? m.cumPlanned : m.planned) : (pvMode === 'cum' ? m.bySubsystem[code]?.cumPlanned : m.bySubsystem[code]?.planned) ?? 0;
+        cells[m.month] = v ?? 0;
+        total += code === null ? m.planned : (m.bySubsystem[code]?.planned ?? 0);
+      }
+      return { code: code ?? '__all', label: code === null ? `All ${TERMS.subsystemLowerPlural}` : labelOf(code), total, cells };
+    };
+    return [...codes.map((c) => rowFor(c)).filter((r) => Math.abs(r.total) > 1e-9 || pvMode === 'cum'), rowFor(null)];
+  }, [burn.planned, burn.bySubsystem, pvMonths, pvMode]);
+  const pvColumns: Column<PvRow>[] = [
+    {
+      key: 'code',
+      label: TERMS.subsystem,
+      locked: true,
+      value: (r) => (r.code === '__all' ? '~' : r.label),
+      exportValue: (r) => r.label,
+      render: (r) => (r.code === '__all' ? <b>All {TERMS.subsystemLowerPlural}</b> : <span className="mono font-semibold">{r.code || 'Unassigned'}</span>),
+    },
+    {
+      key: 'total',
+      label: fy ? 'PV in year' : 'Total PV',
+      value: (r) => r.total,
+      num: true,
+      hint: 'Planned value across the months shown.',
+      render: (r) => <b>{fmtHours(r.total)}</b>,
+    },
+    ...pvMonths.map(
+      (m): Column<PvRow> => ({
+        key: `m_${m.month}`,
+        label: monthLabel(m.month),
+        value: (r) => Math.round(r.cells[m.month] * 10) / 10,
+        num: true,
+        hint: '',
+        render: (r) =>
+          Math.abs(r.cells[m.month]) < 0.05 ? (
+            <span className="text-[var(--text-subtle)]">·</span>
+          ) : (
+            <span className={`tabular-nums${r.code === '__all' ? ' font-semibold' : ''}${ddMonth && m.month <= ddMonth ? '' : ' text-[var(--text-muted)]'}`}>{fmtHours(r.cells[m.month])}</span>
+          ),
+      }),
+    ),
+  ];
+
   // --- tables ---------------------------------------------------------------
+  // Earned stops at the data date, so SV and SPI after it would compare the plan with nothing.
+  const ddMonth = (state.data.settings.dataDate || '').slice(0, 7);
+  const measured = (month: string) => !ddMonth || month <= ddMonth;
   const monthColumns: Column<BurnRow>[] = [
     { key: 'month', label: 'Month', value: (r) => r.month, render: (r) => <span className="mono">{monthLabel(r.month)}</span> },
+    {
+      key: 'pv',
+      label: 'Planned (PV) h',
+      value: (r) => r.planned,
+      num: true,
+      hint: 'Planned value: the budget hours the baseline planned to earn in this month — each activity’s budget spread evenly across its baseline dates.',
+      render: (r) => fmtHours(r.planned),
+    },
     ...coreColumns<BurnRow>((r) => r),
+    { key: 'cumPV', label: 'Cum PV', value: (r) => r.cumPlanned, num: true, hint: 'Planned value to the end of this month, from the start of the baseline.', render: (r) => fmtHours(r.cumPlanned) },
     { key: 'cumEarned', label: 'Cum earned', value: (r) => r.cumEarned, num: true, render: (r) => fmtHours(r.cumEarned) },
+    {
+      key: 'sv',
+      label: 'SV h',
+      value: (r) => (measured(r.month) ? r.cumEarned - r.cumPlanned : null),
+      num: true,
+      hint: 'Schedule variance: cumulative earned minus cumulative planned. Negative is behind the baseline. Blank after the data date.',
+      render: (r) => (measured(r.month) ? <Variance v={r.cumEarned - r.cumPlanned} /> : <span className="text-[var(--text-subtle)]">—</span>),
+    },
+    {
+      key: 'spi',
+      label: 'SPI',
+      value: (r) => (measured(r.month) && r.cumPlanned > 0 ? r.cumEarned / r.cumPlanned : null),
+      num: true,
+      hint: 'Schedule performance index: cumulative earned over cumulative planned. Below 1.00 is behind the baseline. Blank after the data date.',
+      render: (r) => (measured(r.month) ? <Spi ev={r.cumEarned} pv={r.cumPlanned} /> : <span className="text-[var(--text-subtle)]">—</span>),
+    },
     { key: 'cumBuilt', label: `Cum ${TERMS.builtLower}`, value: (r) => r.cumBuilt, num: true, render: (r) => fmtHours(r.cumBuilt) },
     { key: 'cumVariance', label: 'Cum variance', value: (r) => r.cumVariance, num: true, render: (r) => <Variance v={r.cumVariance} /> },
     {
@@ -872,7 +963,17 @@ export function TeamHours() {
                 rows={openedMonth.bySubsystem}
                 columns={[
                   { key: 'code', label: TERMS.subsystem, value: (c) => c.label, render: (c) => <span className="mono">{c.code || 'Unassigned'}</span> },
-                  ...coreColumns<(typeof openedMonth.bySubsystem)[number]>((c) => c),
+                  { key: 'pv', label: 'Planned (PV) h', value: (c: BurnCell) => c.planned, num: true, render: (c: BurnCell) => fmtHours(c.planned) },
+                  ...coreColumns<BurnCell>((c) => c),
+                  { key: 'cumPV', label: 'Cum PV', value: (c: BurnCell) => c.cumPlanned, num: true, render: (c: BurnCell) => fmtHours(c.cumPlanned) },
+                  { key: 'cumEV', label: 'Cum earned', value: (c: BurnCell) => c.cumEarned, num: true, render: (c: BurnCell) => fmtHours(c.cumEarned) },
+                  {
+                    key: 'spi',
+                    label: 'SPI',
+                    value: (c: BurnCell) => (measured(openedMonth.month) && c.cumPlanned > 0 ? c.cumEarned / c.cumPlanned : null),
+                    num: true,
+                    render: (c: BurnCell) => (measured(openedMonth.month) ? <Spi ev={c.cumEarned} pv={c.cumPlanned} /> : <span className="text-[var(--text-subtle)]">—</span>),
+                  },
                 ]}
                 rowKey={(c) => c.code || '(unassigned)'}
                 defaultSort={{ key: 'built', dir: 'desc' }}
@@ -880,6 +981,33 @@ export function TeamHours() {
               />
             </div>
           )}
+        </Panel>
+      )}
+
+      {burn.planned.length > 0 && (
+        <Panel
+          title={
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="card-title">Planned value (PV) by {TERMS.subsystemLower}{selectedYear ? ` — ${selectedYear.label}` : ', every month'}</h2>
+              <span className="seg">
+                <button className={`seg-btn${pvMode === 'month' ? ' is-on' : ''}`} onClick={() => setPvMode('month')}>In the month</button>
+                <button className={`seg-btn${pvMode === 'cum' ? ' is-on' : ''}`} onClick={() => setPvMode('cum')}>Cumulative</button>
+              </span>
+            </div>
+          }
+          meta={`Budget hours the baseline planned each ${TERMS.subsystemLower} to earn, every month of the plan — past months in black, months after the data date grey. The Excel button saves the grid.`}
+          className="mb-3"
+        >
+          <SortableTable
+            tableId="burn-pv"
+            exportName={`Planned value by ${TERMS.subsystemLower}${pvMode === 'cum' ? ' cumulative' : ''}`}
+            rows={pvRows}
+            columns={pvColumns}
+            rowKey={(r) => r.code || '(unassigned)'}
+            defaultSort={{ key: 'code', dir: 'asc' }}
+            maxHeight="360px"
+            rowClass={(r) => (r.code === '__all' ? 'row-warn' : '')}
+          />
         </Panel>
       )}
 

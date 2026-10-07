@@ -13,6 +13,8 @@ import type {
   ForecastCell,
   ForecastRow,
   MonthlyEarned,
+  MonthlyPlanned,
+  PlannedMonth,
   Reforecast,
   Subsystem,
   TeamActual,
@@ -42,6 +44,39 @@ export function monthlyEarned(rows: BudgetRow[], periods: string[], dataDate: st
       if (f <= 0) continue;
       total += r.earnedHours * f;
       for (const [code, h] of Object.entries(r.subsystemEarned)) by.set(code, (by.get(code) ?? 0) + h * f);
+    }
+    const bySubsystem: Record<string, number> = {};
+    for (const code of new Set([...by.keys(), ...prevBy.keys()])) {
+      bySubsystem[code] = (by.get(code) ?? 0) - (prevBy.get(code) ?? 0);
+    }
+    out.push({ month: p.slice(0, 7), periodEnd: p, earned: total - prevTotal, bySubsystem });
+    prevTotal = total;
+    prevBy = by;
+  }
+  return out;
+}
+
+/**
+ * Planned value, month by month: what the baseline said each month would earn.
+ *
+ * Every month of the schedule, not just the ones up to the data date — PV is a
+ * plan, and the plan runs to the end. Each activity's budget is spread evenly
+ * across its baseline dates exactly as the planned S-curve spreads it, and split
+ * between subsystems by the same shares the budget is.
+ */
+export function monthlyPlanned(rows: BudgetRow[], periods: string[]): MonthlyPlanned[] {
+  const out: MonthlyPlanned[] = [];
+  let prevTotal = 0;
+  let prevBy = new Map<string, number>();
+  for (const p of periods) {
+    let total = 0;
+    const by = new Map<string, number>();
+    for (const r of rows) {
+      if (r.budgetHours === 0) continue;
+      const f = accruedFraction(p, r.baselineStart, r.baselineFinish);
+      if (f <= 0) continue;
+      total += r.budgetHours * f;
+      for (const [code, h] of Object.entries(r.subsystemHours)) by.set(code, (by.get(code) ?? 0) + h * f);
     }
     const bySubsystem: Record<string, number> = {};
     for (const code of new Set([...by.keys(), ...prevBy.keys()])) {
@@ -187,6 +222,8 @@ export function burnSummary(
   /** The month ends the curve spans, so the forecast can be laid across the future ones. */
   periods: string[] = [],
   dataDate: string | null = null,
+  /** Planned value by month. Absent, every planned figure reads zero. */
+  plannedMonths: MonthlyPlanned[] = [],
 ): BurnSummary {
   const clean = actuals.filter((a) => /^\d{4}-\d{2}$/.test((a.month ?? '').trim()) && Number.isFinite(a.hours));
   const builtByMonth = new Map<string, Map<string, number>>();
@@ -199,7 +236,7 @@ export function burnSummary(
   }
 
   const earnedByMonth = new Map(months.map((m) => [m.month, m]));
-  const everyMonth = [...new Set([...earnedByMonth.keys(), ...builtByMonth.keys()])].sort();
+    const everyMonth = [...new Set([...earnedByMonth.keys(), ...builtByMonth.keys()])].sort();
 
   /*
    * Trim the empty months off each end. The curve runs to the last date in the
@@ -216,23 +253,64 @@ export function burnSummary(
   const budgetBy = sumRecord(rows, (r) => r.subsystemHours);
   const earnedBy = sumRecord(rows, (r) => r.subsystemEarned);
 
+  /*
+   * Planned value over every month the baseline plans anything, cumulative from its
+   * first month. Kept apart from the earned-against-built months, which run only
+   * where something was earned or built: PV runs to the end of the plan, and
+   * stretching every other table out to meet it would fill them with empty years.
+   */
+  const pvMonths = plannedMonths.filter((m) => Math.abs(m.earned) > 1e-9 || Object.values(m.bySubsystem).some((h) => Math.abs(h) > 1e-9));
+  const pvFirst = pvMonths[0]?.month;
+  const pvLast = pvMonths[pvMonths.length - 1]?.month;
+  const planned: PlannedMonth[] = [];
+  {
+    let cum = 0;
+    const cumBy = new Map<string, number>();
+    for (const m of plannedMonths) {
+      if (!pvFirst || m.month < pvFirst || m.month > pvLast!) continue;
+      cum += m.earned;
+      const bySubsystem: Record<string, { planned: number; cumPlanned: number }> = {};
+      for (const code of new Set([...cumBy.keys(), ...Object.keys(m.bySubsystem)])) {
+        const h = m.bySubsystem[code] ?? 0;
+        cumBy.set(code, (cumBy.get(code) ?? 0) + h);
+        bySubsystem[code] = { planned: h, cumPlanned: cumBy.get(code)! };
+      }
+      planned.push({ month: m.month, planned: m.earned, cumPlanned: cum, bySubsystem });
+    }
+  }
+  const pvAt = new Map(planned.map((m) => [m.month, m]));
+  /** PV to the end of a month, carried through months the plan does not reach. */
+  const pvAsOf = (month: string) => {
+    if (!pvFirst || month < pvFirst) return null;
+    let best: PlannedMonth | null = null;
+    for (const m of planned) if (m.month <= month) best = m;
+    return best;
+  };
+
   let cumEarned = 0;
   let cumBuilt = 0;
+  const cumEarnedBy = new Map<string, number>();
   const rowsOut: BurnRow[] = allMonths.map((month) => {
     const e = earnedByMonth.get(month);
+    const pl = pvAt.get(month);
+    const pc = pvAsOf(month);
     const built = builtByMonth.get(month) ?? new Map<string, number>();
     const earned = e?.earned ?? 0;
     const builtTotal = [...built.values()].reduce((a, b) => a + b, 0);
     cumEarned += earned;
     cumBuilt += builtTotal;
-    const codes = [...new Set([...Object.keys(e?.bySubsystem ?? {}), ...built.keys()])];
+    const codes = [...new Set([...Object.keys(e?.bySubsystem ?? {}), ...built.keys(), ...Object.keys(pl?.bySubsystem ?? {}).filter((c) => Math.abs(pl!.bySubsystem[c].planned) > 1e-9)])];
     const bySubsystem: BurnCell[] = codes
       .map((code) => {
         const ce = e?.bySubsystem[code] ?? 0;
         const cb = built.get(code) ?? 0;
+        cumEarnedBy.set(code, (cumEarnedBy.get(code) ?? 0) + ce);
         return {
           code,
           label: subsystemLabel(code, subsystems),
+          planned: pl?.bySubsystem[code]?.planned ?? 0,
+          cumPlanned: pc?.bySubsystem[code]?.cumPlanned ?? 0,
+          cumEarned: cumEarnedBy.get(code)!,
           earned: ce,
           built: cb,
           variance: ce - cb,
@@ -242,6 +320,8 @@ export function burnSummary(
       .sort((a, b) => b.built - a.built || a.label.localeCompare(b.label));
     return {
       month,
+      planned: pl?.planned ?? 0,
+      cumPlanned: pc?.cumPlanned ?? 0,
       earned,
       built: builtTotal,
       variance: earned - builtTotal,
@@ -328,6 +408,7 @@ export function burnSummary(
     ),
     bySubsystem,
     builtWithNoBudget: [...builtBy.keys()].filter((c) => (budgetBy.get(c) ?? 0) === 0 && builtBy.get(c)! > 0),
+    planned,
     forecastMonths,
     unphasedRemaining: remaining.unphased,
     overdueRemaining: remaining.overdue,

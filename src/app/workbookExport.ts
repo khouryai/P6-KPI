@@ -9,7 +9,7 @@
 import * as XLSX from 'xlsx';
 import type { BurnRow, Model, Settings, P6Activity, TestProgress, MissedReasonLog } from '../engine/types';
 import { p6PctComplete, marksActuals } from '../engine/compute';
-import { fiscalYearDetail, forecastYears, fyStart } from '../engine/fiscal';
+import { fiscalYearDetail, fiscalYearLabel, fiscalYearOf, forecastYears, fyStart } from '../engine/fiscal';
 
 const d = (iso: string | null | undefined): Date | '' => (iso ? new Date(`${iso}T00:00:00`) : '');
 const wsFrom = (rows: unknown[][]) => XLSX.utils.aoa_to_sheet(rows, { cellDates: true });
@@ -56,9 +56,24 @@ function earnedVsActualSheets(model: Model, settings: Settings): [string, XLSX.W
   const pctOf = (cum: number) => (budget ? cum / budget : '');
 
   const monthSheet = wsFrom([
-    ['Month', 'Fiscal_Year', 'Earned_Hours', 'Built_Hours', 'Variance_Hours', 'Factor', 'Cum_Earned', 'Cum_Built', 'Cum_Variance', 'Pct_Complete_At_Month_End'],
+    ['Month', 'Fiscal_Year', 'Earned_Hours', 'Built_Hours', 'Variance_Hours', 'Factor', 'Cum_Earned', 'Cum_Built', 'Cum_Variance', 'Pct_Complete_At_Month_End', 'Planned_PV_Hours', 'Cum_PV', 'SV_Hours', 'SPI'],
     ...years.flatMap((y) =>
-      y.months.map((m) => [m.month, y.label, m.earned, m.built, m.variance, orBlank(m.factor), m.cumEarned, m.cumBuilt, m.cumVariance, pctOf(m.cumEarned)]),
+      y.months.map((m) => [
+        m.month,
+        y.label,
+        m.earned,
+        m.built,
+        m.variance,
+        orBlank(m.factor),
+        m.cumEarned,
+        m.cumBuilt,
+        m.cumVariance,
+        pctOf(m.cumEarned),
+        m.planned,
+        m.cumPlanned,
+        m.cumEarned - m.cumPlanned,
+        m.cumPlanned > 0 ? m.cumEarned / m.cumPlanned : '',
+      ]),
     ),
   ]);
 
@@ -133,8 +148,24 @@ function earnedVsActualSheets(model: Model, settings: Settings): [string, XLSX.W
     ),
   ]);
 
+  /*
+   * Planned value by group by month, over every month of the plan rather than only
+   * the months anything was earned or built: the PV a project-controls sheet needs
+   * runs to the end of the baseline.
+   */
+  const pvSheet = wsFrom([
+    ['Month', 'Month_Label', 'Fiscal_Year', 'Group', 'Planned_PV_Hours', 'Cum_PV'],
+    ...model.burn.planned.flatMap((m) =>
+      Object.entries(m.bySubsystem)
+        .filter(([, v]) => Math.abs(v.planned) > 1e-9 || Math.abs(v.cumPlanned) > 1e-9)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([code, v]) => [m.month, monthLabel(m.month), fiscalYearLabel(fiscalYearOf(m.month, start), start), code || 'Unassigned', v.planned, v.cumPlanned]),
+    ),
+  ]);
+
   return [
     ['Earned_vs_Actual', monthSheet],
+    ['PV_By_Group_Month', pvSheet],
     ['Fiscal_Year', yearSheet],
     ['FY_By_Group', yearGroupSheet],
     ['FY_By_Group_Month', yearGroupMonthSheet],
