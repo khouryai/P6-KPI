@@ -1,5 +1,6 @@
 import React from 'react';
 import { useApp } from '../state';
+import { AutoExportStrip } from '../autoExport';
 import { href } from '../router';
 import { fmtDateTime } from '../format';
 import { BUILD_COMMIT, BUILD_TIME, buildLabel } from '../build';
@@ -110,6 +111,8 @@ export function Layout({ screen, children }: { screen: string; children: React.R
             {state.saving ? 'Saving…' : 'Save now'}
           </button>
         </div>
+
+        <AutoExportStrip />
 
         {updateReady && (
           <div className="strip strip-new flex items-center justify-between gap-3">

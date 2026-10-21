@@ -7,6 +7,7 @@ import type { Bundle } from '../state';
 import { num, fmtDate, fmtDateTime } from '../format';
 import { BUILD_COMMIT, BUILD_TIME, IS_STANDALONE, runningFrom } from '../build';
 import { applyUpdate, canSelfUpdate, useUpdateReady } from '../update';
+import { ScheduledExportCard } from '../autoExport';
 
 export function Settings() {
   const { state, model, actions } = useApp();
@@ -21,15 +22,22 @@ export function Settings() {
   const pinnedMissing = !!s.baselineImportId && !baselines.some((b) => b.id === s.baselineImportId);
   const updateReady = useUpdateReady();
 
-  const exportXlsx = async () => {
+  const exportXlsx = async (what: 'everything' | 'source') => {
     setBusy(true);
     try {
       // Loaded here rather than imported: the spreadsheet library is a third of
       // the bundle and nothing before this click needs it.
-      const { buildWorkbook, workbookBytes } = await import('../workbookExport');
-      const wb = buildWorkbook(model, s, state.data.current?.activities ?? [], state.data.baseline?.activities ?? [], state.data.testProgress, state.data.missedReasons);
-      const bytes = workbookBytes(wb);
-      const name = `TC_Budget_${stamp()}.xlsx`;
+      let bytes: Uint8Array;
+      let name: string;
+      if (what === 'everything') {
+        const { dataExtractBytes } = await import('../dataExtract');
+        bytes = dataExtractBytes(model, state.data, { generatedAt: new Date(), trigger: 'manual' });
+        name = `TC_Budget_Data_${stamp()}.xlsx`;
+      } else {
+        const { buildWorkbook, workbookBytes } = await import('../workbookExport');
+        bytes = workbookBytes(buildWorkbook(model, s, state.data.current?.activities ?? [], state.data.baseline?.activities ?? [], state.data.testProgress, state.data.missedReasons));
+        name = `TC_Budget_${stamp()}.xlsx`;
+      }
       if (state.adapterKind === 'filesystem') actions.notify('ok', `Workbook written to ${await actions.writeExport(name, bytes)}`);
       else downloadBytes(name, bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     } catch (err) {
@@ -188,9 +196,18 @@ export function Settings() {
         </div>
         <div className="card space-y-3">
           <h2 className="card-title">Export</h2>
-          <p className="text-[12px] text-[var(--text-muted)]">Writes an .xlsx with the same sheet names and column layouts as the original workbook (values, no formulas) into the folder's <code>exports</code> sub-folder, so project controls can still be handed a spreadsheet. Curve CSV and chart PNG are on the Dashboard.</p>
-          <button className="btn btn-primary" disabled={busy} onClick={() => void exportXlsx()}>{busy ? 'Building…' : 'Export workbook (.xlsx)'}</button>
+          <p className="text-[12px] text-[var(--text-muted)]">
+            <b>Export everything</b> writes the full data extract: every activity with every field and every edit, hidden ones included, every rollup, review, headcount and
+            rule, plus a Contents sheet, a Data_Dictionary defining every column and a Status_Codes sheet explaining every status. It also carries every sheet of the
+            original workbook. <b>Original workbook layout</b> writes only those, with the same sheet names and columns. Both are values, no formulas, and go into the
+            data folder's <code>exports</code> sub-folder (or download, when the data is in this browser). Curve CSV and chart PNG are on the Dashboard.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn btn-primary" disabled={busy} onClick={() => void exportXlsx('everything')}>{busy ? 'Building…' : 'Export everything (.xlsx)'}</button>
+            <button className="btn" disabled={busy} onClick={() => void exportXlsx('source')}>Original workbook layout (.xlsx)</button>
+          </div>
         </div>
+        <ScheduledExportCard />
         <div className="card space-y-3">
           <h2 className="card-title">Version</h2>
           <div className="flex flex-wrap gap-2">

@@ -288,3 +288,59 @@ test('a named location reports by its name, and a split activity puts its share 
   await expect(groups.filter({ hasText: /^A10/ })).toHaveCount(0);
   expect(errors, 'a screen threw while rendering').toEqual([]);
 });
+
+/**
+ * The scheduled Excel export. The folder picker is a native dialog no test can
+ * click through, so it is stood in for by the browser's private file system, which
+ * hands back a real directory handle the export writes into exactly as it would a
+ * folder on disk. The clock is the browser's, moved on by the test.
+ */
+async function exportedFiles(page: Page): Promise<{ name: string; bytes: number[] }[]> {
+  return page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('picked', { create: true });
+    const out: { name: string; bytes: number[] }[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for await (const [name, h] of (dir as any).entries()) {
+      if (h.kind === 'file') out.push({ name, bytes: [...new Uint8Array(await (await h.getFile()).arrayBuffer())] });
+    }
+    return out;
+  });
+}
+
+test('exports everything to a chosen folder by hand, and on the schedule set', async ({ page }) => {
+  await page.clock.install({ time: new Date(2026, 9, 21, 6, 57) });
+  await page.addInitScript(() => {
+    (window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker = async () =>
+      (await navigator.storage.getDirectory()).getDirectoryHandle('picked', { create: true });
+  });
+  const errors = await open(page);
+  await importSchedule(page, 'current', schedule({ finished: 2, ahead: 2 }));
+
+  await page.goto('/#/settings');
+  await page.getByRole('button', { name: 'Choose folder…' }).click();
+  await expect(page.getByText('Exports will be saved in picked.')).toBeVisible();
+  await page.getByRole('button', { name: 'Export now to this folder' }).click();
+  await expect(page.getByText(/Excel export written to picked\\TC_Budget_Data_2026-10-21_/)).toBeVisible();
+
+  const first = await exportedFiles(page);
+  expect(first).toHaveLength(1);
+  const wb = XLSX.read(new Uint8Array(first[0].bytes), { type: 'array' });
+  expect(wb.SheetNames.slice(0, 3)).toEqual(['Contents', 'Data_Dictionary', 'Status_Codes']);
+  expect(wb.SheetNames).toContain('All_Activities');
+
+  // Every day at 07:00, one file replaced each time.
+  await page.getByRole('combobox').filter({ hasText: 'A new dated file each time' }).selectOption('latest');
+  await page.getByRole('combobox').filter({ hasText: 'Every weekday' }).selectOption('daily');
+  await page.getByLabel('Time of day').fill('07:00');
+  await page.getByLabel('Export automatically').check();
+  await expect(page.getByText(/Exports every day at 07:00/)).toBeVisible();
+  // Setting it at 06:57 owes nothing yet: yesterday's 07:00 came before the schedule did.
+  await page.clock.fastForward('01:00');
+  expect((await exportedFiles(page)).map((f) => f.name)).not.toContain('TC_Budget_Data_latest.xlsx');
+
+  await page.clock.fastForward('03:00');
+  await expect.poll(async () => (await exportedFiles(page)).map((f) => f.name).sort()).toContain('TC_Budget_Data_latest.xlsx');
+  await expect(page.getByText(/Last export .*TC_Budget_Data_latest\.xlsx/)).toBeVisible();
+  expect(errors, 'a screen threw while rendering').toEqual([]);
+});

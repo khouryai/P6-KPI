@@ -53,7 +53,40 @@ The workbook never has to be opened again, and neither does Excel:
 | What-if on people | **Staffing Scenarios**: pick a resource group (IXL by default) and up to four scenarios side by side — eight people, four people, four with two more from a date you choose. Each one says when the group's work finishes against the planned finish, when the **backlog** (work the current schedule says should already be done) is cleared, and which activities run late, with a week-by-week chart of the work left against what the schedule expects. Effort is the remaining budget divided by an **efficiency factor** you key (1.0 is to budget; the factor the group has achieved is one click away). The backlog is worked first, then each activity no earlier than its planned start and no faster than its own crew. Added support can carry an **until** date for a temporary assignment, or be left open-ended for a permanent one. Each scenario also says where its hours went to the finish: **supplied**, **idle** (paid for with nothing available to work on — what over-staffing costs), **lost to efficiency** (worked but earning nothing at an efficiency below 1.0), and the two together as **burned, not earned**. It also says the fewest people that hold the planned finish. **What is analysed** is yours to set: the group's own activities only (the ones whose Activity Library **Subsystem** names it), or also the hours it puts into other groups' activities as crew support; one or several phases, a work type (TC for the test activities) and a location; and a **Planned to finish by** date, so the analysis covers the work due by then rather than the whole schedule — backlog is always in, and slip and people needed are judged against that date. **By phase** stacks the group's hours each week by phase against the team's hours — as P6 plans them, or as a scenario actually works them — so phases that run side by side show where they overlap, with each phase's planned and forecast finish beneath. The activities analysed are listed **by type**, once per type however many locations it repeats at, with a tick to take a type out and a click to list its activities. Inside a type, each activity's planned start and finish, budget hours left and crew can be changed, or the activity unticked, **for the simulation only** — Budget Master and every other screen keep the schedule's figures; changed rows are marked and can be reset one at a time or all at once. Scenarios are kept in this browser only and never change the headcount on Capacity. |
 | A page to hand over | **Status Report**: the fortnight first — its cards, its activities and why each was missed — then the phase curves you pick, then progress by phase. It reads as the Two-Week Log reads, because that is where the review happens. The whole job's position is off unless you ask for it. Print it, save it as a PDF, or save it as PNGs sized for a Word page — portrait or landscape, one image per page, stamped with their real size so Word places them without shrinking them. |
 | Defaults, dates, storage, backups | **Settings** |
-| Hand a spreadsheet to project controls | **Settings → Export workbook**, plus curve CSV and chart PNG on the Dashboard. |
+| Hand a spreadsheet to project controls | **Settings → Export everything**: the full data extract (below). **Original workbook layout** writes only the source workbook's sheets. Curve CSV and chart PNG are on the Dashboard. |
+| An Excel extract on a schedule | **Settings → Scheduled Excel export**: every day, every weekday, a day of the week, every two weeks or a day of the month, at a time you set, into a folder you choose (or the data folder's `exports`). A new dated file each time, one `TC_Budget_Data_latest.xlsx` replaced each time, or both. |
+
+## The full data extract
+
+**Export everything** — and every scheduled export — writes one workbook nobody needs the
+application to read:
+
+- **Contents** lists every sheet and what it holds, with when and from which schedule it was made.
+- **Data_Dictionary** defines every column on every sheet, and says how its values are written.
+- **Status_Codes** says what every status value means: Status, Rate_Status, Basis,
+  Baseline_Source, Pct_Source, Earn_Window, Show, the Two-Week Log outcomes, and where a phase
+  or location came from.
+- **All_Activities** is every activity with every field the screens show and every edit you
+  made — names, statuses, location codes and names, splits, dates and P6's dates beside yours,
+  progress, notes — hidden activities included and marked.
+- **Activity_Locations** and **Activity_Resources** give one row per location share and per
+  crew line, ready to pivot.
+- **Rollups**, **Resources** and **Resource_Cuts** are the By Phase & Location and Resources
+  screens; **Two_Week_Log** and **Two_Week_Phases** are the fortnight to the data date against
+  the baseline, with the reason recorded for every miss; **Capacity_By_Month**, **Headcount**,
+  **Team_Hours**, **Library_Crew**, **ID_Rules**, **Import_History**, **Stale_Edits** and
+  **Data_Notes** hold the rest.
+- Then every sheet of the original workbook layout.
+
+Hours, percentages and dates carry Excel number formats and every table has a filter on its
+headings. A test holds every heading on every sheet to having a definition.
+
+The **schedule** and the export folder are kept in this browser on this machine, so a
+colleague opening the same data folder does not start exporting too. The app has to be open to
+export; if it is closed at the scheduled time the export runs as soon as it is next opened,
+once. If the browser asks for the folder again, a strip at the top says so and one click allows
+it and exports. A file open in Excel cannot be replaced; the run says so and the next one tries
+again.
 
 ## Sharing with the client
 
