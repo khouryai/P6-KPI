@@ -100,6 +100,10 @@ export type StaffingTask = {
   phaseName: string;
   workType: string;
   location: string;
+  /** The location as it is reported: its name, or every share of a split. */
+  locationName: string;
+  /** Every location the activity is at, split or not: code to join on, name to show. */
+  locations: { code: string; name: string }[];
   /** The Subsystem the Activity Library gives the type: whose activity it is. */
   owner: string;
   /** OWN: this group's activity. SUPPORT: another group's, with this group on its crew. */
@@ -243,6 +247,8 @@ export function staffingTasks(rows: BudgetRow[], opts: StaffingOptions): Staffin
       phaseName: r.phaseName,
       workType: r.workType,
       location: r.location,
+      locationName: r.locationName,
+      locations: r.locationShares.map((x) => ({ code: x.code, name: x.name })),
       owner: r.disciplines.join(', '),
       role: own ? 'own' : 'support',
       remainingBudget,
@@ -426,7 +432,8 @@ export function outOfScope(t: StaffingTask, scope: StaffingScope): string | null
   if (t.role === 'support' && !scope.includeSupport) return 'support';
   if (scope.phases.length && !scope.phases.includes(t.phase)) return 'phase';
   if (scope.workType && t.workType !== scope.workType) return 'work type';
-  if (scope.location && t.location !== scope.location) return 'location';
+  // A split activity is at each of its locations, so any one of them keeps it in.
+  if (scope.location && !t.locations.some((x) => x.code === scope.location)) return 'location';
   if (scope.excludedTypes.some((x) => normKey(x) === normKey(t.activityType))) return 'type';
   if (scope.finishBy && isValidISO(scope.finishBy) && !t.backlog && (!t.plannedFinish || t.plannedFinish > scope.finishBy)) return 'after end date';
   return null;
@@ -439,6 +446,7 @@ export type TypeGroup = {
   role: 'own' | 'support' | 'mixed';
   owner: string;
   tasks: StaffingTask[];
+  /** By name, as reported. */
   locations: string[];
   effortHours: number;
   backlog: number;
@@ -464,7 +472,7 @@ export function groupByType(tasks: StaffingTask[]): TypeGroup[] {
         role: roles.size > 1 ? 'mixed' : list[0].role,
         owner: [...new Set(list.map((t) => t.owner).filter(Boolean))].join(' / '),
         tasks: list,
-        locations: [...new Set(list.map((t) => t.location).filter(Boolean))].sort(),
+        locations: [...new Set(list.flatMap((t) => t.locations.filter((x) => x.code).map((x) => x.name)))].sort(),
         effortHours: list.reduce((s, t) => s + t.effortHours, 0),
         backlog: list.filter((t) => t.backlog).length,
         firstStart: starts[0] ?? null,

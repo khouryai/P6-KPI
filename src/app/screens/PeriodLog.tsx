@@ -540,7 +540,7 @@ export function PeriodLog() {
         return p ? <span title={`${p.label} moved ${fmtPct(p.pctAtStart, 1)} → ${fmtPct(p.pctAtEnd, 1)} in this window`}>{fmtPct(p.pctAtEnd, 1)}</span> : <span className="text-[var(--text-subtle)]">—</span>;
       },
     },
-    { key: 'loc', label: 'Loc', value: (a) => a.location },
+    { key: 'loc', label: 'Location', value: (a) => a.locationName, render: (a) => <span title={a.location}>{a.locationName}</span> },
     {
       key: 'planned',
       label: percent ? 'Planned' : 'Planned h',

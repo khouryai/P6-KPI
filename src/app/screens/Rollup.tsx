@@ -10,7 +10,7 @@ import { TERMS } from '../../engine/vocab';
 
 const DIMS: { id: GroupDim; label: string; note: string }[] = [
   { id: 'phase', label: 'Phase', note: 'From the 2nd segment of the Activity ID, so P2 is Phase 2.' },
-  { id: 'location', label: 'Location', note: 'From the 4th segment of the Activity ID.' },
+  { id: 'location', label: 'Location', note: 'From the 4th segment of the Activity ID, shown by the name given on the Locations screen. An activity split across locations puts each share of its hours under each.' },
   {
     id: 'discipline',
     label: TERMS.discipline,
@@ -45,16 +45,19 @@ export function Rollup() {
 
   const phases = model.groups.phase;
   const scope = withinPhase ? phases.find((p) => p.key === withinPhase) : null;
+  const inScope = useMemo(() => (withinPhase ? model.rows.filter((r) => r.phase === withinPhase) : model.rows), [model.rows, withinPhase]);
   /**
-   * Activities in view whose Subsystem names more than one group. Counted over the
-   * rows rather than summed off the groups, which would count each such activity
-   * once per group it is in and overstate it.
+   * Activities in view whose Subsystem names more than one group, or that are split
+   * across locations. Counted over the rows rather than summed off the groups, which
+   * would count each such activity once per group it is in and overstate it.
    */
   const shared = useMemo(() => {
-    if (dim !== 'discipline') return 0;
-    const inScope = withinPhase ? model.rows.filter((r) => r.phase === withinPhase) : model.rows;
-    return inScope.filter((r) => r.disciplines.length > 1).length;
-  }, [model.rows, dim, withinPhase]);
+    if (dim === 'discipline') return inScope.filter((r) => r.disciplines.length > 1).length;
+    if (dim === 'location') return inScope.filter((r) => r.locationShares.length > 1).length;
+    return 0;
+  }, [inScope, dim]);
+  /** Each activity once, however many groups it shares its hours between. */
+  const inBudgetInScope = useMemo(() => inScope.filter((r) => r.status === 'IN BUDGET').length, [inScope]);
   const totalBudget = groups.reduce((s, g) => s + g.budgetHours, 0);
   const totalEarned = groups.reduce((s, g) => s + g.earnedHours, 0);
 
@@ -93,7 +96,11 @@ export function Rollup() {
           {g.shared > 0 && (
             <span
               className="text-[10.5px] text-[var(--text-subtle)]"
-              title={`${g.shared} of these activities are worked by more than one ${TERMS.disciplineLower}. Each one's hours are split evenly between them, so the hours here add up; the activity count is of activities this ${TERMS.disciplineLower} touches.`}
+              title={
+                dim === 'location'
+                  ? `${g.shared} of these activities are split across locations in Budget Master. Only their share of the hours is counted here, so the hours add up; the activity count is of activities with any share here.`
+                  : `${g.shared} of these activities are worked by more than one ${TERMS.disciplineLower}. Each one's hours are split evenly between them, so the hours here add up; the activity count is of activities this ${TERMS.disciplineLower} touches.`
+              }
             >
               {g.shared} shared
             </span>
@@ -201,7 +208,16 @@ export function Rollup() {
         </Notice>
       ) : (
         <>
-          {shared > 0 && (
+          {shared > 0 && dim === 'location' && (
+            <div className="mb-4">
+              <Notice tone="info">
+                <b>{shared} {shared === 1 ? 'activity is' : 'activities are'} split across locations.</b> Each location carries the share of the hours it was given in
+                Budget Master's <b>Split</b> column, so the budget above still adds up exactly. The activity counts do overlap: a split activity counts once at each of its
+                locations, and the <i>shared</i> note on a row says how many of its activities are only partly there.
+              </Notice>
+            </div>
+          )}
+          {shared > 0 && dim === 'discipline' && (
             <div className="mb-4">
               <Notice tone="info">
                 <b>{shared} {shared === 1 ? 'activity is' : 'activities are'} worked by more than one {TERMS.disciplineLower}.</b> Their Activity Library key names
@@ -213,7 +229,7 @@ export function Rollup() {
           )}
 
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Stat label="Budget in scope" value={`${fmtHours(totalBudget)} h`} sub={`${groups.reduce((n, g) => n + g.inBudget, 0)} activities`} primary />
+            <Stat label="Budget in scope" value={`${fmtHours(totalBudget)} h`} sub={`${inBudgetInScope} activities`} primary />
             <Stat
               label="Furthest ahead"
               value={best ? fmtPct(best.pctComplete, 0) : '—'}

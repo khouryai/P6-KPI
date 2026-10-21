@@ -3,6 +3,7 @@ import { Page, SortableTable, CellInput, type Column } from '../components/ui';
 import type { LocationStat } from '../../engine/types';
 import { fmtHours, fmtPct, num } from '../format';
 import { normKey } from '../../engine/keys';
+import { href } from '../router';
 
 export function Locations() {
   const { state, model, actions } = useApp();
@@ -19,8 +20,22 @@ export function Locations() {
     );
   const columns: Column<LocationStat>[] = [
     { key: 'code', label: 'Location', value: (r) => r.code, render: (r) => <span className="font-semibold">{r.code}</span> },
-    { key: 'name', label: 'Name', value: (r) => r.location.name ?? '', render: (r) => <CellInput value={r.location.name ?? ''} placeholder="optional" onCommit={(v) => edit(r.code, { name: v.trim() })} /> },
+    {
+      key: 'name',
+      label: 'Reported as',
+      value: (r) => r.location.name ?? '',
+      hint: 'What the code means — Millbury Station for W40, Phase 2 for 2W. Every screen, report and export then shows this instead of the code. Blank reports the code.',
+      render: (r) => <CellInput className="cell-input cell-long" value={r.location.name ?? ''} placeholder="type a name" onCommit={(v) => edit(r.code, { name: v.trim() })} />,
+    },
     { key: 'count', label: 'Activities', value: (r) => r.count, num: true },
+    {
+      key: 'shared',
+      label: 'Split',
+      value: (r) => r.shared,
+      num: true,
+      hint: 'Activities carrying only part of their hours here, because they are split across locations in Budget Master. Their hours, earned hours and complexity are counted here by their share.',
+      render: (r) => (r.shared ? <a href={href('budget', { loc: r.code, flag: 'split' })}>{r.shared}</a> : <span className="text-[var(--text-subtle)]">—</span>),
+    },
     { key: 'factor', label: 'Complexity factor', value: (r) => r.location.complexityFactor ?? null, num: true, render: (r) => <CellInput type="number" value={r.location.complexityFactor?.toString() ?? ''} placeholder={def.toFixed(2)} onCommit={(v) => edit(r.code, { complexityFactor: num(v) })} /> },
     { key: 'eff', label: 'Effective', value: (r) => r.effectiveFactor, num: true, render: (r) => r.effectiveFactor.toFixed(2) },
     { key: 'budget', label: 'Budget h', value: (r) => r.budgetHours, num: true, render: (r) => fmtHours(r.budgetHours) },
@@ -47,7 +62,7 @@ export function Locations() {
     <Page
       eyebrow="Budget"
       title="Locations"
-      subtitle={`Discovered from the 4th segment of every Activity ID. ${model.locations.length} locations carrying activities. Leave the factor blank to use the default of ${def.toFixed(2)}. The factor multiplies RATE and DUR hours; an activity override bypasses it.`}
+      subtitle={`Discovered from the 4th segment of every Activity ID. ${model.locations.length} locations carrying activities. Give a code a name under Reported as and every screen and report shows the name instead. Leave the factor blank to use the default of ${def.toFixed(2)}. The factor multiplies RATE and DUR hours; an activity override bypasses it. An activity split across locations in Budget Master is counted at each by its share.`}
     >
       <SortableTable tableId="locations" rows={model.locations} columns={columns} rowKey={(r) => r.code} />
       {unused.length > 0 && (

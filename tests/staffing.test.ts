@@ -14,7 +14,10 @@ const opts: StaffingOptions = { group: 'IXL', dataDate: '2026-10-01', efficiency
 
 function row(id: string, hours: number, start: string, finish: string, extra: Partial<BudgetRow> = {}): BudgetRow {
   const pct = extra.pctComplete ?? 0;
+  const location = extra.location ?? 'X';
   return {
+    locationShares: [{ code: location, name: location, share: 1 }],
+    locationName: location,
     activityId: id,
     activityName: id,
     matchKey: 'Test',

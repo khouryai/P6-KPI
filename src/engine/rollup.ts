@@ -41,20 +41,21 @@ export function subsystemRollup(rows: BudgetRow[], subsystems: Subsystem[]): Sub
   const totalBudget = [...budget.values()].reduce((a, b) => a + b, 0);
 
   const cut = (code: string, dim: 'phase' | 'location'): SubsystemCell[] => {
-    const by = new Map<string, { b: number; e: number }>();
+    const by = new Map<string, { b: number; e: number; label: string }>();
     for (const r of rows) {
       const h = r.subsystemHours[code];
       if (h === undefined) continue;
-      const k = dim === 'phase' ? r.phase : r.location;
-      const cell = by.get(k) ?? { b: 0, e: 0 };
-      cell.b += h;
-      cell.e += r.subsystemEarned[code] ?? 0;
-      by.set(k, cell);
+      for (const p of DIM_PARTS[dim](r)) {
+        const cell = by.get(p.key) ?? { b: 0, e: 0, label: p.label ?? DIM_LABEL[dim](p.key) };
+        cell.b += h * p.weight;
+        cell.e += (r.subsystemEarned[code] ?? 0) * p.weight;
+        by.set(p.key, cell);
+      }
     }
     return [...by]
       .map(([key, v]) => ({
         key,
-        label: DIM_LABEL[dim](key),
+        label: v.label,
         budgetHours: v.b,
         earnedHours: v.e,
         pctComplete: v.b ? v.e / v.b : 0,
@@ -85,17 +86,20 @@ export function subsystemRollup(rows: BudgetRow[], subsystems: Subsystem[]): Sub
 /**
  * Which group(s) a row belongs to on one dimension, and with how much of itself.
  *
- * Three of the four dimensions come off the Activity ID and an activity is in
- * exactly one of each. Subsystem is the exception: it is free text on the Activity
- * Library key and can name several groups at once, and an activity two groups both
- * work belongs to both. Its hours are shared evenly between them — the box says who
- * is on it, not how much each does, and an even split is the only reading of that
- * which does not invent a number nobody gave. The weights always sum to 1, so every
- * rollup still adds back to the budget exactly.
+ * Phase and work type come off the Activity ID and an activity is in exactly one
+ * of each. Subsystem is free text on the Activity Library key and can name several
+ * groups at once, and an activity two groups both work belongs to both. Its hours
+ * are shared evenly between them — the box says who is on it, not how much each
+ * does, and an even split is the only reading of that which does not invent a
+ * number nobody gave. Location is usually one, but an activity can be split across
+ * several by hand, and then each carries the share it was given. The weights always
+ * sum to 1, so every rollup still adds back to the budget exactly.
+ *
+ * A part can carry its own label, for the location named on the Locations screen.
  */
-const DIM_PARTS: Record<GroupDim, (r: BudgetRow) => { key: string; weight: number }[]> = {
+const DIM_PARTS: Record<GroupDim, (r: BudgetRow) => { key: string; weight: number; label?: string }[]> = {
   phase: (r) => [{ key: r.phase, weight: 1 }],
-  location: (r) => [{ key: r.location, weight: 1 }],
+  location: (r) => r.locationShares.map((x) => ({ key: x.code, weight: x.share, label: x.name })),
   discipline: (r) =>
     r.disciplines.length > 1
       ? r.disciplines.map((d) => ({ key: d, weight: 1 / r.disciplines.length }))
@@ -119,8 +123,10 @@ export function groupRows(rows: BudgetRow[], dim: GroupDim): GroupStat[] {
   const parts = DIM_PARTS[dim];
   /** Each row in this group, with the share of itself that belongs here. */
   const buckets = new Map<string, { row: BudgetRow; weight: number }[]>();
+  const labels = new Map<string, string>();
   for (const r of rows) {
     for (const p of parts(r)) {
+      if (p.label !== undefined && !labels.has(p.key)) labels.set(p.key, p.label);
       const list = buckets.get(p.key);
       if (list) list.push({ row: r, weight: p.weight });
       else buckets.set(p.key, [{ row: r, weight: p.weight }]);
@@ -147,7 +153,7 @@ export function groupRows(rows: BudgetRow[], dim: GroupDim): GroupStat[] {
     const finishes = dates((r) => r.currentFinish ?? r.baselineFinish);
     out.push({
       key,
-      label: DIM_LABEL[dim](key),
+      label: labels.get(key) ?? DIM_LABEL[dim](key),
       activities: list.length,
       shared: members.filter((m) => m.weight < 1).length,
       inBudget: inBudgetRows.length,

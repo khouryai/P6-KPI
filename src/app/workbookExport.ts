@@ -8,7 +8,7 @@
  */
 import * as XLSX from 'xlsx';
 import type { BurnRow, Model, Settings, P6Activity, TestProgress, MissedReasonLog } from '../engine/types';
-import { p6PctComplete, marksActuals } from '../engine/compute';
+import { p6PctComplete, marksActuals, formatLocationSplit } from '../engine/compute';
 import { fiscalYearDetail, fiscalYearLabel, fiscalYearOf, forecastYears, fyStart } from '../engine/fiscal';
 
 const d = (iso: string | null | undefined): Date | '' => (iso ? new Date(`${iso}T00:00:00`) : '');
@@ -203,8 +203,8 @@ export function buildWorkbook(
   ]), 'Settings');
   XLSX.utils.book_append_sheet(wb, extractSheet(current, true), 'P6_Extract');
   XLSX.utils.book_append_sheet(wb, wsFrom([
-    ['Location_Code', 'Activities', 'Complexity_Factor', 'Effective_Factor', 'Location_Name'],
-    ...model.locations.map((l) => [l.code, l.count, l.location.complexityFactor ?? '', l.effectiveFactor, l.location.name ?? '']),
+    ['Location_Code', 'Activities', 'Complexity_Factor', 'Effective_Factor', 'Location_Name', 'Split_Activities', 'Budget_Hours'],
+    ...model.locations.map((l) => [l.code, l.count, l.location.complexityFactor ?? '', l.effectiveFactor, l.location.name ?? '', l.shared, l.budgetHours]),
   ]), 'Locations');
   XLSX.utils.book_append_sheet(wb, wsFrom([
     ['Match_Key', 'Count', 'Total_P6_Days', 'Subsystem', 'Include_Override', 'Include', 'Basis', 'Crew_Size', 'Shift_Hours', 'Duration_Shifts', 'Basis_Eff', 'Crew_Eff', 'Shift_Eff', 'Rate_Status', 'Std_Hours_If_RATE', 'Notes'],
@@ -220,8 +220,8 @@ export function buildWorkbook(
   ]), 'Progress');
   XLSX.utils.book_append_sheet(wb, extractSheet(baseline, false), 'Baseline_Extract');
   XLSX.utils.book_append_sheet(wb, wsFrom([
-    ['Row', 'P6_Activity_ID', 'Location', 'Seq_Code', 'Match_Key', 'Rate_Status', 'Status', 'Basis', 'Complexity', 'Std_Hours', 'Override_Hours', 'Budget_Hours', 'Baseline_Start', 'Baseline_Finish', 'Baseline_Source', 'Current_Start', 'Current_Finish', 'Actual_Start', 'Actual_Finish', 'Progress_As_At', 'Pct_Complete', 'Pct_Source', 'Earned_Hours', 'Remaining_Hours', 'Phase', 'Work_Type', 'Activity_Name', 'Activity_Type', 'Subsystem', 'Earn_Start', 'Earn_End', 'Earn_Window_Source', 'P6_Activity_Name', 'Renamed_By_User', 'Visibility_Override', 'Crew_Size', 'Resources'],
-    ...model.rows.map((r, i) => [i + 2, r.activity.rawActivityId, r.location, r.seqCode, r.matchKey, r.rateStatus, r.status, r.basis ?? '', r.complexity ?? '', r.stdHours ?? '', r.overrideHours ?? '', r.budgetHours, d(r.baselineStart), d(r.baselineFinish), r.baselineSource, d(r.currentStart), d(r.currentFinish), d(r.actualStart), d(r.actualFinish), d(r.progressAsOf), r.pctComplete, r.pctSource, r.earnedHours, r.remainingHours, r.phaseName, r.workType, r.activityName, r.activityType, r.discipline, d(r.earnStart), d(r.earnEnd), r.earnWindowSource, r.activity.activityName, r.renamed ? 'Y' : '', r.visibility ?? '', r.crewSize, r.resources.map((x) => `${x.label} x${x.count}`).join(', ')]),
+    ['Row', 'P6_Activity_ID', 'Location', 'Seq_Code', 'Match_Key', 'Rate_Status', 'Status', 'Basis', 'Complexity', 'Std_Hours', 'Override_Hours', 'Budget_Hours', 'Baseline_Start', 'Baseline_Finish', 'Baseline_Source', 'Current_Start', 'Current_Finish', 'Actual_Start', 'Actual_Finish', 'Progress_As_At', 'Pct_Complete', 'Pct_Source', 'Earned_Hours', 'Remaining_Hours', 'Phase', 'Work_Type', 'Activity_Name', 'Activity_Type', 'Subsystem', 'Earn_Start', 'Earn_End', 'Earn_Window_Source', 'P6_Activity_Name', 'Renamed_By_User', 'Visibility_Override', 'Crew_Size', 'Resources', 'Location_Name', 'Location_Split'],
+    ...model.rows.map((r, i) => [i + 2, r.activity.rawActivityId, r.location, r.seqCode, r.matchKey, r.rateStatus, r.status, r.basis ?? '', r.complexity ?? '', r.stdHours ?? '', r.overrideHours ?? '', r.budgetHours, d(r.baselineStart), d(r.baselineFinish), r.baselineSource, d(r.currentStart), d(r.currentFinish), d(r.actualStart), d(r.actualFinish), d(r.progressAsOf), r.pctComplete, r.pctSource, r.earnedHours, r.remainingHours, r.phaseName, r.workType, r.activityName, r.activityType, r.discipline, d(r.earnStart), d(r.earnEnd), r.earnWindowSource, r.activity.activityName, r.renamed ? 'Y' : '', r.visibility ?? '', r.crewSize, r.resources.map((x) => `${x.label} x${x.count}`).join(', '), r.locationName, r.locationSplit ? formatLocationSplit(r.locationShares) : '']),
   ]), 'Budget_Master');
   /*
    * Why activities were missed, one row per activity per review period, with the
@@ -237,7 +237,7 @@ export function buildWorkbook(
       .sort((a, b) => b.periodEnd.localeCompare(a.periodEnd) || a.activityId.localeCompare(b.activityId))
       .map((e) => {
         const r = byId.get(e.activityId);
-        return [d(e.periodEnd), e.activityId, r?.activityName ?? '', r?.phaseName ?? '', r?.location ?? '', e.reason, e.note ?? '', e.updatedAt];
+        return [d(e.periodEnd), e.activityId, r?.activityName ?? '', r?.phaseName ?? '', r?.locationName ?? '', e.reason, e.note ?? '', e.updatedAt];
       }),
   ]), 'Missed_Reasons');
   XLSX.utils.book_append_sheet(wb, wsFrom([

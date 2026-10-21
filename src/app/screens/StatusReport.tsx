@@ -450,7 +450,7 @@ export function StatusReport() {
           </span>
         ),
     },
-    { key: 'loc', label: 'Loc', value: (a) => a.location, optional: true },
+    { key: 'loc', label: 'Location', value: (a) => a.locationName, optional: true },
     { key: 'bls', label: 'BL start', value: (a) => a.baselineStart, optional: true, render: (a) => fmtDate(a.baselineStart) },
     { key: 'as', label: 'Actual start', value: (a) => a.actualStart, optional: true, render: (a) => fmtDate(a.actualStart) },
     {

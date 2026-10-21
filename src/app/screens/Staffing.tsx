@@ -248,7 +248,7 @@ export function Staffing() {
   const options = useMemo(() => {
     const uniq = (f: (t: StaffingTask) => string) => [...new Set(allTasks.map(f).filter(Boolean))].sort();
     const phaseNames = new Map(allTasks.map((t) => [t.phase, t.phaseName]));
-    return { phases: uniq((t) => t.phase).map((p) => [p, phaseNames.get(p) ?? p] as const), workTypes: uniq((t) => t.workType), locations: uniq((t) => t.location) };
+    return { phases: uniq((t) => t.phase).map((p) => [p, phaseNames.get(p) ?? p] as const), workTypes: uniq((t) => t.workType), locations: [...new Map(allTasks.flatMap((t) => t.locations).filter((x) => x.code).map((x) => [x.code, x.name])).entries()].sort((a, b) => a[1].localeCompare(b[1])) };
   }, [allTasks]);
   const results: ScenarioResult[] = useMemo(
     () => (opts ? saved.scenarios.map((s) => simulate(tasks, s, opts)) : []),
@@ -365,7 +365,7 @@ export function Staffing() {
       render: (t) => <Badge tone={t.role === 'own' ? 'info' : 'purple'}>{t.role === 'own' ? 'OWN' : `SUPPORT ${t.owner}`}</Badge>,
     },
     { key: 'phase', label: 'Phase', value: (t) => t.phaseName, optional: true },
-    { key: 'loc', label: 'Location', value: (t) => t.location, optional: true },
+    { key: 'loc', label: 'Location', value: (t) => t.locationName, optional: true },
     {
       key: 'state',
       label: 'State',
@@ -637,8 +637,8 @@ export function Staffing() {
               <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Location</div>
               <select className="input" value={scope.location} onChange={(e) => setScope({ location: e.target.value })}>
                 <option value="">All</option>
-                {options.locations.map((l) => (
-                  <option key={l} value={l}>{l}</option>
+                {options.locations.map(([code, name]) => (
+                  <option key={code} value={code}>{name !== code ? `${name} (${code})` : code}</option>
                 ))}
               </select>
             </label>

@@ -259,3 +259,32 @@ test('a schedule with duplicate Activity IDs imports each once, and still filter
   expect(await col()).toEqual([...asc].reverse());
 });
 
+
+/**
+ * A location reported by its name, and an activity shared between two locations.
+ * The name typed on the Locations screen replaces the code on the rollup, and a
+ * split typed in Budget Master moves that share of the hours with it.
+ */
+test('a named location reports by its name, and a split activity puts its share there', async ({ page }) => {
+  const errors = await open(page);
+  await importSchedule(page, 'current', schedule({ finished: 2, ahead: 2 }));
+
+  await page.goto('/#/locations');
+  const a10 = page.locator('.tbl tbody tr').filter({ hasText: 'A10' });
+  await a10.locator('input').first().fill('Millbury Station');
+  await a10.locator('input').first().press('Enter');
+
+  await page.goto('/#/budget');
+  const first = page.locator('.tbl tbody tr').filter({ hasText: '0-P2-TC-A10-FA-0000' });
+  const split = first.locator('input[placeholder="—"]').first();
+  await split.fill('B20 50');
+  await split.press('Enter');
+  await expect(first.getByText('Millbury Station 50%, B20 50%').or(first.getByText('B20 50%, Millbury Station 50%'))).toBeVisible();
+
+  await page.goto('/#/rollup');
+  await page.getByRole('button', { name: 'Location', exact: true }).click();
+  const groups = page.locator('.tbl tbody tr');
+  await expect(groups.filter({ hasText: 'Millbury Station' })).toHaveCount(1);
+  await expect(groups.filter({ hasText: /^A10/ })).toHaveCount(0);
+  expect(errors, 'a screen threw while rendering').toEqual([]);
+});

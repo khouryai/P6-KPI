@@ -55,6 +55,7 @@ import {
 import { checkReason, marksActuals, p6PctComplete, testPctEffective } from './progress';
 import { buildCurve, curvePeriods } from './curve';
 import { groupRows, subsystemRollup } from './rollup';
+import { formatLocationSplit, locationLabel, resolveLocationShares } from './locations';
 import { burnSummary, monthlyEarned, monthlyPlanned } from './burn';
 
 function scaleRecord(rec: Record<string, number>, factor: number): Record<string, number> {
@@ -187,8 +188,19 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
 
     const inBudget = status === 'IN BUDGET' && entry !== null;
     const basis = inBudget && entry ? effectiveBasis(entry, settings) : null;
-    const loc = locIdx.get(normKey(locationOfRow));
-    const complexity = inBudget ? (loc?.complexityFactor ?? settings.defaultComplexity) : null;
+    /*
+     * A split activity is priced at the factor of every location it is shared
+     * between, each weighted by its share: half at a 1.2 location and half at a 1.0
+     * one is 1.1. Unsplit, the one share is 1 and this is that location's factor.
+     */
+    const locationShares = resolveLocationShares(locationOfRow, ovEarly?.locationSplit, locIdx);
+    const locationSplit = locationShares.length > 1 || normKey(locationShares[0].code) !== normKey(locationOfRow);
+    const factorAt = (code: string) => locIdx.get(normKey(code))?.complexityFactor ?? settings.defaultComplexity;
+    const complexity = !inBudget
+      ? null
+      : locationShares.length === 1
+        ? factorAt(locationShares[0].code)
+        : locationShares.reduce((s, x) => s + x.share * factorAt(x.code), 0);
     const stdHours = inBudget && entry ? stdHoursFor(entry, settings, a.originalDuration) : null;
     const ov = ovEarly;
     /*
@@ -282,6 +294,11 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
       location: locationOfRow,
       locationFromRule: !locEdit && !!locRule,
       locationEdited: !!locEdit,
+      locationShares,
+      locationSplit,
+      locationName: locationSplit
+        ? formatLocationSplit(locationShares.map((x) => ({ location: x.name, share: x.share })))
+        : locationShares[0].name,
       // Derived from the Activity ID rather than stored, so imports written by an
       // earlier version of the app group correctly without a migration.
       phase: phaseOfRow,
@@ -384,20 +401,26 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
    */
   const knownLocs = new Set(input.locations.map((l) => normKey(l.code)));
   const ruleLocs: Location[] = [];
+  // A split can name one too, typed straight into Budget Master.
   for (const r of rows) {
-    const k = normKey(r.location);
-    if (!r.location || knownLocs.has(k)) continue;
-    knownLocs.add(k);
-    ruleLocs.push({ code: r.location });
+    for (const x of r.locationShares) {
+      const k = normKey(x.code);
+      if (!x.code || knownLocs.has(k)) continue;
+      knownLocs.add(k);
+      ruleLocs.push({ code: x.code });
+    }
   }
   const allLocationStats: LocationStat[] = [...input.locations, ...ruleLocs].map((loc) => {
     const k = normKey(loc.code);
-    const mine = rows.filter((r) => normKey(r.location) === k);
-    const budgetHours = mine.reduce((s, r) => s + r.budgetHours, 0);
-    const earnedHours = mine.reduce((s, r) => s + r.earnedHours, 0);
+    // Each row with the part of itself that is here: all of it, unless it is split.
+    const mine = rows.flatMap((r) => r.locationShares.filter((x) => normKey(x.code) === k).map((x) => ({ r, share: x.share })));
+    const budgetHours = mine.reduce((s, m) => s + m.r.budgetHours * m.share, 0);
+    const earnedHours = mine.reduce((s, m) => s + m.r.earnedHours * m.share, 0);
     return {
       code: loc.code,
+      label: locationLabel(loc.code, [loc]),
       count: mine.length,
+      shared: mine.filter((m) => m.share < 1).length,
       effectiveFactor: loc.complexityFactor ?? settings.defaultComplexity,
       budgetHours,
       shareOfBudget: budgetAllRows ? budgetHours / budgetAllRows : 0,
@@ -442,6 +465,7 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
       p6Name: row && row.renamed ? row.activity.activityName : null,
       rowType: a ? a.rowType : null,
       location: row?.location ?? a?.location ?? '',
+      locationName: row ? row.locationName : a ? locationLabel(a.location, locIdx) : '',
       phaseName: row ? row.phaseName : a ? phaseLabel(phaseOf(a.activityId)) : '',
       activityType: row?.activityType ?? a?.activityType ?? '',
       matchKey: row ? row.matchKey : null,
@@ -659,3 +683,4 @@ export * from './progress';
 export * from './curve';
 export * from './rollup';
 export * from './burn';
+export * from './locations';

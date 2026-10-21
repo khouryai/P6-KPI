@@ -4,6 +4,7 @@ import { Page, SortableTable, CellInput, ActualDateCell, Badge, statusTone, Noti
 import type { TestProgress as TP, BudgetRow, TestProgressCheck } from '../../engine/types';
 import { fmtPct, fmtHours, fmtDate, num } from '../format';
 import { normKey } from '../../engine/keys';
+import { locationLabel } from '../../engine/locations';
 import { parseDelimitedText } from '../../engine/parse';
 import { readWorkbook, pickSheet, workbookGrid } from '../../engine/workbook';
 import { parseP6Date, isValidISO } from '../../engine/dates';
@@ -55,7 +56,7 @@ export function TestProgress({ route }: { route: Route }) {
   const rows = useMemo<Row[]>(() => {
     let out: Row[] = budgeted.map((r) => ({ ...r, entry: entries.get(normKey(r.activityId)) }));
     if (phase) out = out.filter((r) => r.phase === phase);
-    if (loc) out = out.filter((r) => r.location === loc);
+    if (loc) out = out.filter((r) => r.locationShares.some((s) => s.code === loc));
     if (stateFilter === 'missing') out = out.filter((r) => !r.entry);
     if (stateFilter === 'keyed') out = out.filter((r) => !!r.entry);
     if (stateFilter === 'started') out = out.filter((r) => r.pctComplete > 0 && r.pctComplete < 1);
@@ -203,7 +204,7 @@ export function TestProgress({ route }: { route: Route }) {
     },
     { key: 'status', label: 'What it is', value: (c) => c.status, render: (c) => <Badge tone={statusTone(c.status === 'not in extract' || c.status === 'not budgeted' ? 'NONE' : c.status === 'hidden' ? 'EXCLUDED' : c.status)}>{c.status}</Badge> },
     { key: 'phase', label: 'Phase', value: (c) => c.phaseName },
-    { key: 'loc', label: 'Loc', value: (c) => c.location },
+    { key: 'loc', label: 'Location', value: (c) => c.locationName, render: (c) => <span title={c.location}>{c.locationName}</span> },
     {
       key: 'type',
       label: 'Type',
@@ -279,7 +280,7 @@ export function TestProgress({ route }: { route: Route }) {
       ),
     },
     { key: 'phase', label: 'Phase', value: (r) => r.phaseName },
-    { key: 'loc', label: 'Loc', value: (r) => r.location },
+    { key: 'loc', label: 'Location', value: (r) => r.locationName, render: (r) => <span title={r.location}>{r.locationName}</span> },
     { key: 'budget', label: 'Budget h', value: (r) => r.budgetHours, num: true, render: (r) => fmtHours(r.budgetHours) },
     /*
      * The P6 dates, read-only, so the window you are keying against is on the same
@@ -479,8 +480,8 @@ export function TestProgress({ route }: { route: Route }) {
             ))}
           </select>
           <select className="input" value={loc} onChange={(e) => setLoc(e.target.value)}>
-            {opts(budgeted.map((r) => r.location), 'All locations').map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
+            {opts(budgeted.flatMap((r) => r.locationShares.map((s) => s.code)), 'All locations').map((o) => (
+              <option key={o.value} value={o.value}>{o.value ? locationLabel(o.value, state.data.locations) : o.label}</option>
             ))}
           </select>
           <select className="input" value={stateFilter} onChange={(e) => setStateFilter(e.target.value as StateFilter)}>

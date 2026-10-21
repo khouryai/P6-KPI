@@ -55,8 +55,19 @@ export type Subsystem = { code: string; name?: string; notes?: string };
 
 export type Location = {
   code: string; // W40, discovered from Activity IDs
+  /**
+   * What the code means, e.g. "Millbury Station" for W40. Where it is set, every
+   * screen and report shows it in place of the code; the code stays the key.
+   */
   name?: string;
   complexityFactor?: number; // undefined means use defaultComplexity
+};
+
+/** One location's part of an activity split across several: `{ W40, 0.5 }`. */
+export type LocationShare = {
+  location: string;
+  /** 0 to 1. */
+  share: number;
 };
 
 export type LibraryEntry = {
@@ -203,6 +214,14 @@ export type ActivityOverride = {
    */
   phase?: string;
   location?: string;
+  /**
+   * Shares this one activity between locations: half at W40, half at 2W. Whatever
+   * the shares leave unassigned stays at the activity's own location (the ID's, a
+   * rule's or `location` above). Its hours, earned hours and complexity factor are
+   * divided the same way on every rollup by location. Absent means all of it is at
+   * the one location, which is what every activity did before this existed.
+   */
+  locationSplit?: LocationShare[];
   /**
    * Dates to use instead of P6's start and finish for this one activity, until the
    * schedule is corrected. Everything that reads the schedule's dates reads these —
@@ -417,6 +436,20 @@ export type BudgetRow = {
   /** True when somebody moved this activity to its location by hand in Budget Master. */
   locationEdited: boolean;
   /**
+   * Every location this activity's budget is reported under, with its share. One
+   * entry at `location` with share 1 unless the activity is split; the shares
+   * always sum to 1, so rollups by location still add back to the budget.
+   */
+  locationShares: { code: string; name: string; share: number }[];
+  /** True when the activity is split across more than one location. */
+  locationSplit: boolean;
+  /**
+   * The location as it is reported: its name from the Locations screen, or the code
+   * where it has none, and every share when it is split ("Millbury Station 50%,
+   * Phase 2 50%"). `location` is the code, for joining and filtering.
+   */
+  locationName: string;
+  /**
    * The start and finish are yours, not P6's, for at least one of the two. P6's
    * dates are still on `activity`. `p6Agrees` is true once a later import carries
    * the same dates, so the override can be cleared.
@@ -527,7 +560,12 @@ export type LibraryStat = {
 
 export type LocationStat = {
   code: string;
+  /** The name to report it by: the one given on the Locations screen, or the code. */
+  label: string;
+  /** Activities with any share here. A split activity counts at each of its locations. */
   count: number;
+  /** Of those, the ones carrying only part of their hours here. */
+  shared: number;
   effectiveFactor: number;
   budgetHours: number;
   /** This location as a share of the whole budget. */
@@ -848,6 +886,7 @@ export type TestProgressCheck = {
   p6Name: string | null;
   rowType: RowType | null;
   location: string;
+  locationName: string;
   phaseName: string;
   activityType: string;
   /** The library key it priced through, when it is a budgeted activity. */

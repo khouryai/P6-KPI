@@ -58,6 +58,8 @@ export type PeriodActivity = {
   activityId: string;
   activityName: string;
   location: string;
+  /** The location as it is reported: its name, or every share of a split. */
+  locationName: string;
   /** The raw phase key, e.g. "P2". Joins this row to its phase's figures. */
   phase: string;
   phaseName: string;
@@ -504,6 +506,7 @@ export function periodLog(rows: BudgetRow[], from: string, to: string, plan: Per
       activityId: r.activityId,
       activityName: r.activityName,
       location: r.location,
+      locationName: r.locationName,
       phase: r.phase,
       phaseName: r.phaseName,
       outcome,

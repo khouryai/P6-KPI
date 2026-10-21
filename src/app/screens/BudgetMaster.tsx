@@ -8,6 +8,7 @@ import { isValidISO } from '../../engine/dates';
 import { href, type Route } from '../router';
 import { TERMS } from '../../engine/vocab';
 import { normalisePhaseValue, phaseLabel, phaseOf } from '../../engine/parse';
+import { formatLocationSplit, locationLabel, parseLocationSplit } from '../../engine/locations';
 
 const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> = {
   review: { label: 'Needing REVIEW', test: (r) => r.status === 'REVIEW' },
@@ -19,10 +20,11 @@ const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> 
   override: { label: 'Has an hours override', test: (r) => r.overrideHours !== null },
   edited: {
     label: 'Carries an edit of yours',
-    test: (r) => r.renamed || r.visibility !== null || r.overrideHours !== null || r.phaseEdited || r.locationEdited || r.datesEdited,
+    test: (r) => r.renamed || r.visibility !== null || r.overrideHours !== null || r.phaseEdited || r.locationEdited || r.locationSplit || r.datesEdited,
   },
   dates: { label: 'Dates changed — for the scheduler', test: (r) => r.datesEdited },
   moved: { label: 'Moved to another phase or location', test: (r) => r.phaseEdited || r.locationEdited },
+  split: { label: 'Split across locations', test: (r) => r.locationSplit },
   forcedzero: { label: 'Forced in but carrying no hours', test: (r) => r.visibility === 'INCLUDED' && r.status === 'IN BUDGET' && r.budgetHours === 0 },
 };
 
@@ -55,7 +57,8 @@ export function BudgetMaster({ route }: { route: Route }) {
   const rows = useMemo(() => {
     let r = source;
     if (flag && FLAGS[flag]) r = r.filter(FLAGS[flag].test);
-    if (loc) r = r.filter((x) => x.location === loc);
+    // A split activity is at each of its locations, so filtering to any one finds it.
+    if (loc) r = r.filter((x) => x.locationShares.some((s) => s.code === loc));
     if (phase) r = r.filter((x) => x.phase === phase);
     if (work) r = r.filter((x) => x.workType === work);
     // Matched against the parts rather than the whole string: an activity whose
@@ -100,6 +103,7 @@ export function BudgetMaster({ route }: { route: Route }) {
         next.visibility === undefined &&
         next.phase === undefined &&
         next.location === undefined &&
+        next.locationSplit === undefined &&
         next.startDate === undefined &&
         next.finishDate === undefined &&
         next.dateNote === undefined &&
@@ -110,6 +114,20 @@ export function BudgetMaster({ route }: { route: Route }) {
   };
 
   const ovOf = (id: string) => state.data.overrides.find((o) => normKey(o.activityId) === normKey(id));
+
+  /** Read a typed split, or say what is wrong with it. Blank clears it. */
+  const readSplit = (text: string): ActivityOverride['locationSplit'] | null => {
+    const got = parseLocationSplit(text);
+    if ('error' in got) {
+      actions.notify('error', `Split not changed. ${got.error} Type it as W40 50, 2W 50 — whatever is left stays at the activity's own location.`);
+      return null;
+    }
+    return got.split.length ? got.split : undefined;
+  };
+  const setSplit = (r: BudgetRow, text: string) => {
+    const split = readSplit(text);
+    if (split !== null) setOv(r.activityId, { locationSplit: split });
+  };
 
   /** A date the same as P6's, or blank, is no override at all. */
   const setDate = (r: BudgetRow, which: 'start' | 'finish', v: string) => {
@@ -204,6 +222,7 @@ export function BudgetMaster({ route }: { route: Route }) {
           merged.visibility === undefined &&
           merged.phase === undefined &&
           merged.location === undefined &&
+          merged.locationSplit === undefined &&
           merged.startDate === undefined &&
           merged.finishDate === undefined &&
           merged.dateNote === undefined &&
@@ -230,6 +249,7 @@ export function BudgetMaster({ route }: { route: Route }) {
   const [bulkNote, setBulkNote] = useState('');
   const [bulkPhase, setBulkPhase] = useState('');
   const [bulkLoc, setBulkLoc] = useState('');
+  const [bulkSplit, setBulkSplit] = useState('');
 
   const dropStale = () => {
     const ids = new Set(model.staleOverrides.map((o) => normKey(o.activityId)));
@@ -251,7 +271,8 @@ export function BudgetMaster({ route }: { route: Route }) {
   }, [model.rows]);
 
   const opts = (vals: string[]) => [{ value: '', label: 'All' }, ...vals.filter(Boolean).sort().map((v) => ({ value: v, label: v }))];
-  const locs = [...new Set(model.rows.map((r) => r.location))];
+  const locs = [...new Set(model.rows.flatMap((r) => r.locationShares.map((s) => s.code)))];
+  const locName = (code: string) => locationLabel(code, state.data.locations);
   const subs = model.subsystems.map((x) => x.code).filter(Boolean);
   const phases = [...new Set(model.rows.map((r) => r.phase))];
   const works = [...new Set(model.rows.map((r) => r.workType))];
@@ -345,6 +366,35 @@ export function BudgetMaster({ route }: { route: Route }) {
           />
           {r.locationEdited && <Badge tone="purple">moved</Badge>}
           {r.locationFromRule && <Badge tone="muted">rule</Badge>}
+        </span>
+      ),
+    },
+    {
+      key: 'split',
+      label: 'Split',
+      value: (r) => (r.locationSplit ? formatLocationSplit(r.locationShares) : ''),
+      hint: 'Editable. Shares this activity between locations, e.g. W40 50, 2W 50. Whatever the percentages leave stays at the Loc, so W40 50 alone means half here and half at W40; locations named without a percentage share the rest evenly. Hours, earned hours and the complexity factor are divided the same way on every rollup by location. Clear it to put all of it back at the Loc.',
+      render: (r) => (
+        <span className="flex items-center gap-1">
+          <CellInput
+            className="cell-input cell-long"
+            value={r.locationSplit ? formatLocationSplit(r.locationShares) : ''}
+            placeholder="—"
+            title={r.locationSplit ? r.locationShares.map((x) => `${x.name}: ${fmtPct(x.share, 0)} — ${fmtHours(r.budgetHours * x.share)} h`).join('\n') : `All of it at ${r.locationName}. Type e.g. W40 50 to send half of it there.`}
+            onCommit={(v) => setSplit(r, v)}
+          />
+          {r.locationSplit && <Badge tone="purple">split</Badge>}
+        </span>
+      ),
+    },
+    {
+      key: 'locname',
+      label: 'Location',
+      value: (r) => r.locationName,
+      hint: 'The location as every report shows it: the name given on the Locations screen, or the code where it has none, with each share when the activity is split. Name a code on the Locations screen.',
+      render: (r) => (
+        <span className="cell-text" title={r.locationShares.map((x) => `${x.code}${x.name !== x.code ? ` = ${x.name}` : ''}${r.locationSplit ? ` — ${fmtPct(x.share, 0)}` : ''}`).join('\n')}>
+          {r.locationName}
         </span>
       ),
     },
@@ -572,7 +622,7 @@ export function BudgetMaster({ route }: { route: Route }) {
   const subtitle =
     view === 'hidden'
       ? `${rows.length} of ${hiddenCount} hidden activities. They are in no total, no curve and no export. Priced here as if they were back in, so you can see what each one would add: ${fmtHours(total)} h.`
-      : `${rows.length} of ${model.rows.length} activities shown. Budget ${fmtHours(total)} h, earned ${fmtHours(earned)} h. Name, Show, Phase, Loc, Cur start, Cur finish, ${TERMS.discipline}, Override h and Note are yours to edit and survive every import; everything from P6 is read-only.`;
+      : `${rows.length} of ${model.rows.length} activities shown. Budget ${fmtHours(total)} h, earned ${fmtHours(earned)} h. Name, Show, Phase, Loc, Split, Cur start, Cur finish, ${TERMS.discipline}, Override h and Note are yours to edit and survive every import; everything from P6 is read-only.`;
 
   return (
     <Page
@@ -587,7 +637,7 @@ export function BudgetMaster({ route }: { route: Route }) {
           </select>
           <input className="input" placeholder="Search ID, name, key" value={text} onChange={(e) => setText(e.target.value)} />
           <select className="input" value={phase} onChange={(e) => setPhase(e.target.value)}>{opts(phases).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All phases' : (model.groups.phase.find((g) => g.key === o.value)?.label ?? o.label)}</option>)}</select>
-          <select className="input" value={loc} onChange={(e) => setLoc(e.target.value)}>{opts(locs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All locations' : o.label}</option>)}</select>
+          <select className="input" value={loc} onChange={(e) => setLoc(e.target.value)}>{opts(locs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All locations' : locName(o.value) !== o.value ? `${locName(o.value)} (${o.value})` : o.label}</option>)}</select>
           <select className="input" value={work} onChange={(e) => setWork(e.target.value)}>{opts(works).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All work types' : o.label}</option>)}</select>
           <select className="input" value={disc} onChange={(e) => setDisc(e.target.value)}>{opts(discs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? `All ${TERMS.disciplineLowerPlural}` : o.label}</option>)}</select>
           {subs.length > 0 && (
@@ -632,8 +682,8 @@ export function BudgetMaster({ route }: { route: Route }) {
           ))}
       </datalist>
       <datalist id="budget-locations">
-        {[...new Set([...model.rows.map((r) => r.location), ...state.data.locations.map((l) => l.code)])].filter(Boolean).sort().map((l) => (
-          <option key={l} value={l} />
+        {[...new Set([...locs, ...state.data.locations.map((l) => l.code)])].filter(Boolean).sort().map((l) => (
+          <option key={l} value={l}>{locName(l) !== l ? locName(l) : undefined}</option>
         ))}
       </datalist>
       <datalist id="budget-disciplines">
@@ -720,6 +770,27 @@ export function BudgetMaster({ route }: { route: Route }) {
               </div>
               <div className="mt-1 text-[11.5px] text-[var(--text-subtle)]">
                 Moves these activities to another location, and its complexity factor with them. Blank puts each back.
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Split across locations</div>
+              <div className="mt-1 flex gap-2">
+                <input className="input w-40" placeholder="W40 50, 2W 50" value={bulkSplit} onChange={(e) => setBulkSplit(e.target.value)} />
+                <button
+                  className="btn"
+                  disabled={rows.length === 0}
+                  onClick={() => {
+                    const split = readSplit(bulkSplit);
+                    if (split === null) return;
+                    applyToShown({ locationSplit: split }, split ? `Split as ${formatLocationSplit(split)}` : 'Put all of each back at its own location');
+                  }}
+                >
+                  Apply
+                </button>
+              </div>
+              <div className="mt-1 text-[11.5px] text-[var(--text-subtle)]">
+                Shares each activity's hours between locations. Whatever the percentages leave stays at each activity's own location. Blank clears the split.
               </div>
             </div>
 
@@ -869,6 +940,8 @@ function tidyOverride(o: ActivityOverride): ActivityOverride {
   if (o.visibility) out.visibility = o.visibility;
   if (o.phase?.trim()) out.phase = o.phase.trim();
   if (o.location?.trim()) out.location = o.location.trim();
+  const split = (o.locationSplit ?? []).filter((x) => x.location?.trim() && x.share > 0).map((x) => ({ location: x.location.trim(), share: x.share }));
+  if (split.length) out.locationSplit = split;
   if (o.startDate && isValidISO(o.startDate)) out.startDate = o.startDate;
   if (o.finishDate && isValidISO(o.finishDate)) out.finishDate = o.finishDate;
   if (o.dateNote?.trim()) out.dateNote = o.dateNote.trim();
