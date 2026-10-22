@@ -52,10 +52,38 @@ export function Dashboard() {
 
   const rows = useMemo(() => (selected === null ? model.rows : model.rows.filter((r) => r.phase === selected)), [model.rows, selected]);
   const totals = useMemo(() => rowTotals(rows), [rows]);
+  /*
+   * What the percent complete is taken over, and what it leaves out. The figure is
+   * earned hours over budget hours across the activities in the budget, so every
+   * activity carrying no hours — excluded, hidden, deleted in P6, or still in
+   * REVIEW — is out of it. Saying which, and how many, is what lets the number be
+   * checked against Budget Master rather than taken on trust.
+   */
+  const counted = useMemo(() => {
+    const hidden = selected === null ? model.hiddenRows : model.hiddenRows.filter((r) => r.phase === selected);
+    const review = rows.filter((r) => r.status === 'REVIEW');
+    const noStart = rows.filter((r) => r.status === 'IN BUDGET' && r.earnedHours > 0 && !r.earnStart);
+    return {
+      excludedByYou: rows.filter((r) => r.status === 'EXCLUDED' && r.visibility === 'EXCLUDED').length,
+      excludedByLibrary: rows.filter((r) => r.status === 'EXCLUDED' && r.visibility !== 'EXCLUDED').length,
+      deletedInP6: rows.filter((r) => r.status === 'DELETED' || r.status === 'CANCELLED').length,
+      hidden: hidden.length,
+      review: review.length,
+      reviewHours: review.reduce((s, r) => s + (r.hoursIfPriced ?? 0), 0),
+      noStart: noStart.length,
+      noStartHours: noStart.reduce((s, r) => s + r.earnedHours, 0),
+    };
+  }, [rows, selected, model.hiddenRows]);
   const curve = useMemo(
     () => (selected === null ? model.curve : buildCurve(rows, dataDate, cadence).curve),
     [selected, model.curve, rows, dataDate, cadence],
   );
+
+  /** Where the earned curve ends, to say why it can read lower than the percent. */
+  const curveEarnedPct = useMemo(() => {
+    const last = [...curve].reverse().find((p) => p.earned !== null);
+    return last && totals.budgetHours ? (last.earned as number) / totals.budgetHours : null;
+  }, [curve, totals.budgetHours]);
 
   const exportPng = async () => {
     const chart = chartRef.current;
@@ -178,7 +206,8 @@ export function Dashboard() {
     ['Locations discovered', s.locations],
     ['Activity types discovered', s.activityTypes],
     ['Activities in budget', s.inBudget],
-    ['Excluded by library', s.excluded],
+    ['Excluded by you', s.forcedOut],
+    ['Excluded by library', s.excluded - s.forcedOut],
     ['Deleted or cancelled', s.deletedOrCancelled],
     ['Needing REVIEW', s.review],
     ['Hidden by you (in none of the above)', s.hidden],
@@ -314,6 +343,66 @@ export function Dashboard() {
             <Stat label="Percent complete" value={fmtPct(totals.pctComplete)} sub={`${totals.inProgress} in progress, ${totals.finished} finished`} />
           </>
         )}
+      </div>
+
+      <div className="mt-4">
+        <Panel title={`What ${selected === null ? 'the' : `${selectedLabel}’s`} percent complete counts`}>
+          <div className="space-y-2 text-[12.5px]">
+            <p>
+              <b>{fmtPct(totals.pctComplete, 1)}</b> ={' '}
+              {percent ? 'earned over budget' : <>{fmtHours(totals.earnedHours)} h earned ÷ {fmtHours(totals.budgetHours)} h budget</>}, across the{' '}
+              <a className="btn-link" href={href('budget', { view: 'inbudget', ...(selected !== null ? { phase: selected } : {}) })}>
+                <b>{totals.inBudget}</b> activities in the budget
+              </a>{' '}
+              — Budget Master’s <i>In the budget</i> view lists exactly these. Each counts by its hours, so a big activity moves the figure more than a small one.
+            </p>
+            {counted.excludedByYou + counted.excludedByLibrary + counted.deletedInP6 + counted.hidden + counted.review > 0 && (
+              <div>
+                <div className="text-[var(--text-muted)]">Left out, because they carry no hours:</div>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                  {counted.excludedByYou > 0 && (
+                    <li>
+                      <a className="btn-link" href={href('budget', { view: 'excluded', flag: 'byyou' })}>{counted.excludedByYou} excluded by you</a>
+                    </li>
+                  )}
+                  {counted.hidden > 0 && (
+                    <li>
+                      <a className="btn-link" href={href('budget', { view: 'hidden' })}>{counted.hidden} hidden (removed) by you</a>
+                    </li>
+                  )}
+                  {counted.excludedByLibrary > 0 && (
+                    <li>
+                      <a className="btn-link" href={href('budget', { view: 'excluded' })}>{counted.excludedByLibrary} excluded by their Activity Library key</a> (Include = N on the key)
+                    </li>
+                  )}
+                  {counted.deletedInP6 > 0 && (
+                    <li>
+                      <a className="btn-link" href={href('budget', { view: 'excluded' })}>{counted.deletedInP6} marked (Deleted) or (Cancelled) in P6</a>
+                    </li>
+                  )}
+                  {counted.review > 0 && (
+                    <li>
+                      <a className="btn-link" href={href('budget', { flag: 'review' })}>{counted.review} in REVIEW</a> — no rate yet, so not counted either way
+                      {!percent && counted.reviewHours > 0 ? <>; pricing them would add about {fmtHours(counted.reviewHours)} h to the budget</> : null}.{' '}
+                      <a className="btn-link" href={href('budget', { flag: 'review' })}>See what each needs</a>.
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
+            {counted.noStart > 0 && (
+              <p className="text-[var(--text-muted)]">
+                <a className="btn-link" href={href('budget', { flag: 'nostart' })}>
+                  {counted.noStart} {counted.noStart === 1 ? 'activity has' : 'activities have'} a percent complete but no actual start
+                </a>
+                {percent ? '' : ` (${fmtHours(counted.noStartHours)} earned h)`}: counted in the percent, but not on the earned curve below, which places hours between an
+                actual start and finish
+                {curveEarnedPct !== null && Math.abs(curveEarnedPct - totals.pctComplete) > 0.0005 ? <> — which is why the curve’s last earned point reads {fmtPct(curveEarnedPct, 1)}</> : null}.
+                Key their actual starts to bring the two together.
+              </p>
+            )}
+          </div>
+        </Panel>
       </div>
 
       <div className="mt-4">

@@ -71,7 +71,7 @@ describe('the full data extract', () => {
     expect(acts).toHaveLength(model.rows.length + model.hiddenRows.length);
     const hidden = acts.find((r) => r.Activity_ID === second.activityId)!;
     expect(hidden.Hidden).toBe('Y');
-    expect(hidden.Show).toBe('Hide');
+    expect(hidden.In_Budget_Setting).toBe('Hide (remove)');
     const split = acts.find((r) => r.Activity_ID === first.activityId)!;
     expect(String(split.Location_Name)).toContain('Millbury Station 25%');
     expect(split.Budget_Note).toBe('shared with ZZ9');

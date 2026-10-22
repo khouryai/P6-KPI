@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, Select, Badge, Notice, Panel, statusTone, type Column } from '../components/ui';
 import type { ActivityOverride, ActivityVisibility, BudgetRow } from '../../engine/types';
 import { fmtHours, fmtPct, fmtDate, num } from '../format';
 import { normKey } from '../../engine/keys';
-import { isValidISO } from '../../engine/dates';
 import { href, type Route } from '../router';
 import { TERMS } from '../../engine/vocab';
 import { normalisePhaseValue, phaseLabel, phaseOf } from '../../engine/parse';
 import { formatLocationSplit, locationLabel, parseLocationSplit } from '../../engine/locations';
+import { upsertOverrides } from '../overrides';
+import { ReviewPanel } from '../components/ReviewPanel';
 
 const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> = {
   review: { label: 'Needing REVIEW', test: (r) => r.status === 'REVIEW' },
@@ -24,25 +25,37 @@ const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> 
   },
   dates: { label: 'Dates changed — for the scheduler', test: (r) => r.datesEdited },
   moved: { label: 'Moved to another phase or location', test: (r) => r.phaseEdited || r.locationEdited },
+  byyou: { label: 'Excluded or included by you', test: (r) => r.visibility === 'EXCLUDED' || r.visibility === 'INCLUDED' },
+  nostart: {
+    label: 'Earning with no actual start — in the percent, not on the curve',
+    test: (r) => r.status === 'IN BUDGET' && r.earnedHours > 0 && !r.earnStart,
+  },
   split: { label: 'Split across locations', test: (r) => r.locationSplit },
   forcedzero: { label: 'Forced in but carrying no hours', test: (r) => r.visibility === 'INCLUDED' && r.status === 'IN BUDGET' && r.budgetHours === 0 },
 };
 
-/** What the Show column offers, in the order a person works through them. */
+/** What the In budget? column offers, in the order a person works through them. */
 const VISIBILITY_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'Auto' },
-  { value: 'INCLUDED', label: 'Force in' },
+  { value: 'INCLUDED', label: 'Include' },
   { value: 'EXCLUDED', label: 'Exclude' },
-  { value: 'HIDDEN', label: 'Hide' },
+  { value: 'HIDDEN', label: 'Hide (remove)' },
 ];
 
-/** Which set of activities the screen is looking at. */
-type View = 'active' | 'hidden';
+/**
+ * Which set of activities the screen is looking at. Every view but Hidden is drawn
+ * from the activities in the program; In the budget is exactly the set the percent
+ * complete on the Dashboard is taken over, so the two can be checked against each
+ * other, and Excluded is everything listed but carrying no hours.
+ */
+type View = 'active' | 'inbudget' | 'excluded' | 'hidden';
+const VIEWS: View[] = ['active', 'inbudget', 'excluded', 'hidden'];
+const isOut = (r: BudgetRow) => r.status === 'EXCLUDED' || r.status === 'DELETED' || r.status === 'CANCELLED';
 
 export function BudgetMaster({ route }: { route: Route }) {
   const { state, model, actions } = useApp();
   const flag = route.params.get('flag');
-  const [view, setView] = useState<View>(route.params.get('view') === 'hidden' ? 'hidden' : 'active');
+  const [view, setView] = useState<View>(VIEWS.find((v) => v === route.params.get('view')) ?? 'active');
   const [loc, setLoc] = useState(route.params.get('loc') ?? '');
   const [phase, setPhase] = useState(route.params.get('phase') ?? '');
   const [work, setWork] = useState(route.params.get('work') ?? '');
@@ -50,9 +63,29 @@ export function BudgetMaster({ route }: { route: Route }) {
   const [sub, setSub] = useState(route.params.get('sub') ?? '');
   const [status, setStatus] = useState('');
   const [win, setWin] = useState('');
-  const [text, setText] = useState('');
+  const [text, setText] = useState(route.params.get('q') ?? '');
+  // A link followed while this screen is already open changes the route, not the mount.
+  const routeQ = route.params.get('q');
+  const routeView = route.params.get('view');
+  useEffect(() => {
+    if (routeQ !== null) setText(routeQ);
+  }, [routeQ]);
+  useEffect(() => {
+    const v = VIEWS.find((x) => x === routeView);
+    if (v) setView(v);
+  }, [routeView]);
 
-  const source = view === 'hidden' ? model.hiddenRows : model.rows;
+  const source = useMemo(
+    () =>
+      view === 'hidden'
+        ? model.hiddenRows
+        : view === 'inbudget'
+          ? model.rows.filter((r) => r.status === 'IN BUDGET')
+          : view === 'excluded'
+            ? model.rows.filter(isOut)
+            : model.rows,
+    [view, model.rows, model.hiddenRows],
+  );
 
   const rows = useMemo(() => {
     let r = source;
@@ -92,25 +125,7 @@ export function BudgetMaster({ route }: { route: Route }) {
    * written by an edit: it is the one thing tying this file to the next import.
    */
   const setOv = (activityId: string, patch: Partial<Omit<ActivityOverride, 'activityId'>>) => {
-    actions.update('overrides', (ovs) => {
-      const i = ovs.findIndex((o) => normKey(o.activityId) === normKey(activityId));
-      const base: ActivityOverride = i >= 0 ? ovs[i] : { activityId };
-      const next = tidyOverride({ ...base, ...patch, activityId: base.activityId, updatedAt: new Date().toISOString() });
-      const empty =
-        next.overrideHours === undefined &&
-        next.nameOverride === undefined &&
-        next.discipline === undefined &&
-        next.visibility === undefined &&
-        next.phase === undefined &&
-        next.location === undefined &&
-        next.locationSplit === undefined &&
-        next.startDate === undefined &&
-        next.finishDate === undefined &&
-        next.dateNote === undefined &&
-        next.note === undefined;
-      if (empty) return i >= 0 ? ovs.filter((_, j) => j !== i) : ovs;
-      return i >= 0 ? ovs.map((o, j) => (j === i ? next : o)) : [...ovs, next];
-    });
+    actions.update('overrides', (ovs) => upsertOverrides(ovs, [activityId], patch));
   };
 
   const ovOf = (id: string) => state.data.overrides.find((o) => normKey(o.activityId) === normKey(id));
@@ -188,7 +203,7 @@ export function BudgetMaster({ route }: { route: Route }) {
     actions.notify('ok', bits.length ? `Forced ${acts} into the budget. ${bits.join('; ')}. Price them in the Activity Library, then Save.` : `Forced ${acts} into the budget. Save to write.`);
   };
 
-  /** The Show column. Forcing in also makes the type priceable; the rest is a plain edit. */
+  /** The In budget? column. Including also makes the type priceable; the rest is a plain edit. */
   const setVisibility = (row: BudgetRow, v: ActivityVisibility | undefined) => {
     setOv(row.activityId, { visibility: v });
     if (v === 'INCLUDED') reportPriceable(ensurePriceable([row.activityType]), 1);
@@ -206,34 +221,7 @@ export function BudgetMaster({ route }: { route: Route }) {
     const ids = rows.map((r) => r.activityId);
     if (ids.length === 0) return;
     if (!confirm(`${verb}: ${ids.length} ${ids.length === 1 ? 'activity' : 'activities'}. Nothing is deleted and this can be undone here. Continue?`)) return;
-    const stamp = new Date().toISOString();
-    actions.update('overrides', (ovs) => {
-      const next = [...ovs];
-      for (const id of ids) {
-        const i = next.findIndex((o) => normKey(o.activityId) === normKey(id));
-        const base: ActivityOverride = i >= 0 ? next[i] : { activityId: id };
-        const merged = tidyOverride({ ...base, ...patch, updatedAt: stamp });
-        // An override with nothing left in it is not an override. Dropping the row
-        // keeps `activity-overrides.json` to the decisions somebody actually made.
-        const empty =
-          merged.overrideHours === undefined &&
-          merged.nameOverride === undefined &&
-          merged.discipline === undefined &&
-          merged.visibility === undefined &&
-          merged.phase === undefined &&
-          merged.location === undefined &&
-          merged.locationSplit === undefined &&
-          merged.startDate === undefined &&
-          merged.finishDate === undefined &&
-          merged.dateNote === undefined &&
-          merged.note === undefined;
-        if (empty) {
-          if (i >= 0) next.splice(i, 1);
-        } else if (i >= 0) next[i] = merged;
-        else next.push(merged);
-      }
-      return next;
-    });
+    actions.update('overrides', (ovs) => upsertOverrides(ovs, ids, patch));
     if (patch.visibility === 'INCLUDED') reportPriceable(ensurePriceable(rows.map((r) => r.activityType)), ids.length);
     else actions.notify('ok', `${verb}: ${ids.length} ${ids.length === 1 ? 'activity' : 'activities'}. Save to write.`);
   };
@@ -318,9 +306,9 @@ export function BudgetMaster({ route }: { route: Route }) {
     },
     {
       key: 'vis',
-      label: 'Show',
+      label: 'In budget?',
       value: (r) => r.visibility ?? '',
-      hint: 'Editable. Auto follows the Activity Library. Force in budgets it anyway. Exclude leaves it listed with no hours. Hide takes it out of every screen, total and curve — nothing is deleted and you can bring it back from the Hidden view.',
+      hint: 'Editable: your decision for this one activity. Auto follows the Activity Library. Include budgets it whatever the library or a P6 (Deleted) marker says. Exclude keeps it listed with no hours, out of every total and the percent complete. Hide (remove) takes it off every screen, total and curve — nothing is deleted, and the Hidden view brings it back.',
       render: (r) => (
         <Select
           value={r.visibility ?? ''}
@@ -328,6 +316,33 @@ export function BudgetMaster({ route }: { route: Route }) {
           onChange={(v) => setVisibility(r, (v || undefined) as ActivityVisibility | undefined)}
         />
       ),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      value: (r) => r.status,
+      render: (r) => (
+        <span className="flex items-center gap-1">
+          <Badge tone={statusTone(r.status)}>{r.status}</Badge>
+          {r.visibility === 'INCLUDED' && <Badge tone="purple">forced</Badge>}
+          {r.visibility === 'EXCLUDED' && <Badge tone="purple">by you</Badge>}
+        </span>
+      ),
+    },
+    {
+      key: 'why',
+      label: 'Why / what to do',
+      value: (r) => r.statusReason,
+      width: '340px',
+      hint: 'Why an activity is not in the budget — or is, at zero hours — and what to do about it. Blank for an activity in the budget carrying hours.',
+      render: (r) =>
+        r.statusReason ? (
+          <span className={`cell-text${r.status === 'REVIEW' ? ' tone-warn' : ''}`} title={r.statusReason}>
+            {r.statusReason}
+          </span>
+        ) : (
+          <span className="text-[var(--text-subtle)]">—</span>
+        ),
     },
     {
       key: 'phase',
@@ -405,18 +420,6 @@ export function BudgetMaster({ route }: { route: Route }) {
       render: (r) => (
         <span className="cell-text" title={r.matchKey}>
           {r.matchKey}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      value: (r) => r.status,
-      render: (r) => (
-        <span className="flex items-center gap-1">
-          <Badge tone={statusTone(r.status)}>{r.status}</Badge>
-          {r.visibility === 'INCLUDED' && <Badge tone="purple">forced</Badge>}
-          {r.visibility === 'EXCLUDED' && <Badge tone="purple">by you</Badge>}
         </span>
       ),
     },
@@ -602,27 +605,21 @@ export function BudgetMaster({ route }: { route: Route }) {
     );
     const n = num(raw ?? '');
     if (n === undefined || n <= 0) return;
-    const stamp = new Date().toISOString();
     const ids = forcedAtZero.map((r) => r.activityId);
-    actions.update('overrides', (ovs) => {
-      const next = [...ovs];
-      for (const id of ids) {
-        const i = next.findIndex((o) => normKey(o.activityId) === normKey(id));
-        const base: ActivityOverride = i >= 0 ? next[i] : { activityId: id };
-        const merged = tidyOverride({ ...base, overrideHours: n, updatedAt: stamp });
-        if (i >= 0) next[i] = merged;
-        else next.push(merged);
-      }
-      return next;
-    });
+    actions.update('overrides', (ovs) => upsertOverrides(ovs, ids, { overrideHours: n }));
     actions.notify('ok', `Set ${n} h on ${ids.length} ${ids.length === 1 ? 'activity' : 'activities'}. Save to write.`);
   };
 
   const hiddenCount = model.summary.hidden;
+  const inBudgetCount = model.rows.filter((r) => r.status === 'IN BUDGET').length;
+  const outCount = model.rows.filter(isOut).length;
+  const pct = total ? earned / total : 0;
   const subtitle =
     view === 'hidden'
       ? `${rows.length} of ${hiddenCount} hidden activities. They are in no total, no curve and no export. Priced here as if they were back in, so you can see what each one would add: ${fmtHours(total)} h.`
-      : `${rows.length} of ${model.rows.length} activities shown. Budget ${fmtHours(total)} h, earned ${fmtHours(earned)} h. Name, Show, Phase, Loc, Split, Cur start, Cur finish, ${TERMS.discipline}, Override h and Note are yours to edit and survive every import; everything from P6 is read-only.`;
+      : view === 'excluded'
+        ? `${rows.length} of ${outCount} activities listed but out of the budget: excluded by you, excluded by their Activity Library key, or marked (Deleted) or (Cancelled) in P6. They carry no hours and are in no total and not in the percent complete. Why / what to do says which, and In budget? brings one back.`
+        : `${rows.length} of ${view === 'inbudget' ? inBudgetCount : model.rows.length} activities shown. Budget ${fmtHours(total)} h, earned ${fmtHours(earned)} h — ${fmtPct(pct, 1)} complete${rows.length === model.rows.length || view === 'inbudget' ? ', the figure on the Dashboard' : ' for what is shown'}. Name, In budget?, Phase, Loc, Split, Cur start, Cur finish, ${TERMS.discipline}, Override h and Note are yours to edit and survive every import; everything from P6 is read-only.`;
 
   return (
     <Page
@@ -631,9 +628,11 @@ export function BudgetMaster({ route }: { route: Route }) {
       subtitle={subtitle}
       toolbar={
         <>
-          <select className="input" value={view} onChange={(e) => setView(e.target.value as View)} title="Hidden activities are kept but take no part in anything">
-            <option value="active">Active activities</option>
-            <option value="hidden">Hidden activities ({hiddenCount})</option>
+          <select className="input" value={view} onChange={(e) => setView(e.target.value as View)} title="Which activities to list. Hidden ones are kept but take no part in anything.">
+            <option value="active">All activities ({model.rows.length})</option>
+            <option value="inbudget">In the budget — what the percent counts ({inBudgetCount})</option>
+            <option value="excluded">Excluded — listed, no hours ({outCount})</option>
+            <option value="hidden">Hidden — removed by you ({hiddenCount})</option>
           </select>
           <input className="input" placeholder="Search ID, name, key" value={text} onChange={(e) => setText(e.target.value)} />
           <select className="input" value={phase} onChange={(e) => setPhase(e.target.value)}>{opts(phases).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All phases' : (model.groups.phase.find((g) => g.key === o.value)?.label ?? o.label)}</option>)}</select>
@@ -655,12 +654,24 @@ export function BudgetMaster({ route }: { route: Route }) {
             Bulk edit
           </button>
           <span className="ml-auto flex items-center gap-2">
-            {view === 'active' ? (
+            {view === 'excluded' ? (
+              <>
+                <button className="btn btn-mini" disabled={rows.length === 0} title="Clear your decision on each: the Activity Library decides again" onClick={() => setVisibilityOnShown(undefined)}>
+                  Back to Auto {rows.length}
+                </button>
+                <button className="btn btn-mini btn-primary" disabled={rows.length === 0} title="Budget every one of them, whatever the library or P6 says" onClick={() => setVisibilityOnShown('INCLUDED')}>
+                  Include {rows.length}
+                </button>
+                <button className="btn btn-mini" disabled={rows.length === 0} title="Take them off every list. Reversible from the Hidden view." onClick={() => setVisibilityOnShown('HIDDEN')}>
+                  Hide {rows.length}
+                </button>
+              </>
+            ) : view !== 'hidden' ? (
               <>
                 <button className="btn btn-mini" disabled={rows.length === 0} title="Take every activity in view out of the program. Reversible from the Hidden view." onClick={() => setVisibilityOnShown('HIDDEN')}>
                   Hide {rows.length}
                 </button>
-                <button className="btn btn-mini" disabled={rows.length === 0} title="Leave them listed but carrying no hours" onClick={() => setVisibilityOnShown('EXCLUDED')}>
+                <button className="btn btn-mini" disabled={rows.length === 0} title="Leave them listed but carrying no hours, out of the percent complete" onClick={() => setVisibilityOnShown('EXCLUDED')}>
                   Exclude {rows.length}
                 </button>
               </>
@@ -818,13 +829,13 @@ export function BudgetMaster({ route }: { route: Route }) {
         <div className="mb-3">
           <Notice tone="info">
             Nothing is hidden. Hiding is for schedule rows that are noise rather than work — placeholders, duplicates, activities that belong to another contractor. Set a
-            row's <b>Show</b> column to Hide, or filter the active list and use the Hide button. Nothing is deleted: the P6 import keeps every row exactly as exported, and
+            row's <b>In budget?</b> column to Hide (remove), or filter the list and use the Hide button. Nothing is deleted: the P6 import keeps every row exactly as exported, and
             anything hidden comes back from here.
           </Notice>
         </div>
       )}
 
-      {view === 'active' && forcedAtZero.length > 0 && (
+      {view !== 'hidden' && forcedAtZero.length > 0 && (
         <div className="mb-3">
           <Notice tone="warn">
             <b>{forcedAtZero.length} forced-in {forcedAtZero.length === 1 ? 'activity carries' : 'activities carry'} no hours.</b> They are in the budget and listed on Test
@@ -837,7 +848,7 @@ export function BudgetMaster({ route }: { route: Route }) {
         </div>
       )}
 
-      {view === 'active' && forcedButUnpriced.length > 0 && (
+      {view !== 'hidden' && forcedButUnpriced.length > 0 && (
         <div className="mb-3">
           <Notice tone="warn">
             <b>{forcedButUnpriced.length} {forcedButUnpriced.length === 1 ? 'activity is' : 'activities are'} forced into the budget but cannot be priced.</b> Their activity
@@ -850,7 +861,7 @@ export function BudgetMaster({ route }: { route: Route }) {
         </div>
       )}
 
-      {view === 'active' && flag === 'dates' && (
+      {view !== 'hidden' && flag === 'dates' && (
         <div className="mb-3">
           <Notice tone="info">
             {rows.length === 0 ? (
@@ -883,17 +894,26 @@ export function BudgetMaster({ route }: { route: Route }) {
         </div>
       )}
 
-      {view === 'active' && flag === 'review' && rows.length > 0 && (
+      {view === 'active' && (flag === 'review' || status === 'REVIEW') && <ReviewPanel rows={model.rows} />}
+      {view !== 'hidden' && flag !== 'review' && status !== 'REVIEW' && model.summary.review > 0 && (
         <div className="mb-3">
           <Notice tone="warn">
-            <b>{rows.length} activities have no rate.</b> Their activity type is not in the Activity Library, so they budget zero hours and sit here asking a question
-            nobody has answered. Each one is either work (price its type in the <a href={href('library')}>Activity Library</a>, and every activity of that type is fixed at
-            once) or it is not (set <b>Show</b> to Hide, or use <b>Hide {rows.length}</b> above to clear the whole list). Hiding is reversible and deletes nothing.
+            <b>{model.summary.review} {model.summary.review === 1 ? 'activity is' : 'activities are'} in REVIEW:</b> no rate, so no hours, and not in the percent complete.{' '}
+            <a href={href('budget', { flag: 'review' })}>See what they are and what each needs</a>.
+          </Notice>
+        </div>
+      )}
+      {flag === 'nostart' && rows.length > 0 && (
+        <div className="mb-3">
+          <Notice tone="info">
+            <b>{rows.length} {rows.length === 1 ? 'activity has' : 'activities have'} a percent complete but no actual start</b>, worth {fmtHours(earned)} earned h. Those hours
+            are in the percent complete, but the earned curve places hours between an activity’s actual start and finish, so they are on no curve. Key an actual start on
+            Progress or the Two-Week Log and they join the curve on that date.
           </Notice>
         </div>
       )}
 
-      {view === 'active' && model.staleOverrides.length > 0 && (
+      {view !== 'hidden' && model.staleOverrides.length > 0 && (
         <Panel
           title={`${model.staleOverrides.length} of your edits point at an activity that is not in this schedule`}
           meta={<button className="btn-link danger" onClick={dropStale}>delete them all</button>}
@@ -929,25 +949,6 @@ export function BudgetMaster({ route }: { route: Route }) {
       />
     </Page>
   );
-}
-
-/** Drop blank and undefined fields so activity-overrides.json stays readable. */
-function tidyOverride(o: ActivityOverride): ActivityOverride {
-  const out: ActivityOverride = { activityId: o.activityId.trim() };
-  if (o.overrideHours !== undefined && o.overrideHours !== null && Number.isFinite(o.overrideHours)) out.overrideHours = o.overrideHours;
-  if (o.nameOverride?.trim()) out.nameOverride = o.nameOverride.trim();
-  if (o.discipline?.trim()) out.discipline = o.discipline.trim();
-  if (o.visibility) out.visibility = o.visibility;
-  if (o.phase?.trim()) out.phase = o.phase.trim();
-  if (o.location?.trim()) out.location = o.location.trim();
-  const split = (o.locationSplit ?? []).filter((x) => x.location?.trim() && x.share > 0).map((x) => ({ location: x.location.trim(), share: x.share }));
-  if (split.length) out.locationSplit = split;
-  if (o.startDate && isValidISO(o.startDate)) out.startDate = o.startDate;
-  if (o.finishDate && isValidISO(o.finishDate)) out.finishDate = o.finishDate;
-  if (o.dateNote?.trim()) out.dateNote = o.dateNote.trim();
-  if (o.note?.trim()) out.note = o.note.trim();
-  if (o.updatedAt) out.updatedAt = o.updatedAt;
-  return out;
 }
 
 /**

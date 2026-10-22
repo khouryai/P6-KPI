@@ -232,12 +232,13 @@ export function buildWorkbook(
    */
   const byId = new Map(model.rows.map((r) => [r.activityId, r]));
   XLSX.utils.book_append_sheet(wb, wsFrom([
-    ['Period_End', 'P6_Activity_ID', 'Activity_Name', 'Phase', 'Location', 'Reason', 'Note', 'Recorded_At'],
+    ['Period_End', 'P6_Activity_ID', 'Activity_Name', 'Phase', 'Location', 'Reason', 'Note', 'Recorded_At', 'Still_Applies'],
     ...[...missedReasons.entries]
       .sort((a, b) => b.periodEnd.localeCompare(a.periodEnd) || a.activityId.localeCompare(b.activityId))
       .map((e) => {
         const r = byId.get(e.activityId);
-        return [d(e.periodEnd), e.activityId, r?.activityName ?? '', r?.phaseName ?? '', r?.locationName ?? '', e.reason, e.note ?? '', e.updatedAt];
+        // Kept as the record of that review, but an activity since started or finished is no longer owed it.
+        return [d(e.periodEnd), e.activityId, r?.activityName ?? '', r?.phaseName ?? '', r?.locationName ?? '', e.reason, e.note ?? '', e.updatedAt, r && (r.actualStart || r.actualFinish) ? '' : 'Y'];
       }),
   ]), 'Missed_Reasons');
   XLSX.utils.book_append_sheet(wb, wsFrom([

@@ -382,6 +382,13 @@ export type TeamActual = {
 // ---------------------------------------------------------------------------
 
 export type ActivityStatus = 'IN BUDGET' | 'EXCLUDED' | 'REVIEW' | 'DELETED' | 'CANCELLED';
+/**
+ * Why an activity is in REVIEW. NO KEY: its activity type was never added to the
+ * Activity Library (a schedule brought back from the import history, a library
+ * restored from a backup, or a key deleted from the file). RETIRED KEY: the type
+ * has a key, and somebody retired it. NO TYPE: P6 gave it no name to read a type from.
+ */
+export type ReviewCause = 'NO KEY' | 'RETIRED KEY' | 'NO TYPE';
 export type RateStatus = 'SET' | 'DEFAULT' | 'NEEDS SHIFTS' | 'EXCLUDED' | 'NO MATCH';
 export type BaselineSource = 'BASELINE' | 'CURRENT' | 'NONE';
 /** Where a percent complete came from: you typed it, or P6's durations implied it. */
@@ -472,6 +479,20 @@ export type BudgetRow = {
   matchKey: string; // resolved key, library spelling when matched
   rateStatus: RateStatus;
   status: ActivityStatus;
+  /** Why the activity is in REVIEW; null for any other status. */
+  reviewCause: ReviewCause | null;
+  /**
+   * Why the status is what it is, and what to do about it, in a sentence. Empty for
+   * an activity in the budget carrying hours, which needs no explaining.
+   */
+  statusReason: string;
+  /**
+   * For an activity in REVIEW: the hours it would carry if its type were added to
+   * the Activity Library on the default rate (DUR basis, default crew and shift, at
+   * its location's complexity). What leaving it unanswered is keeping out of the
+   * budget. null for any other status.
+   */
+  hoursIfPriced: number | null;
   /** The Subsystem text as it was typed, which can name several at once. */
   discipline: string;
   /**

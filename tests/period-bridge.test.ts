@@ -103,6 +103,17 @@ describe('which rows take a reason', () => {
   });
 
   /*
+   * SLOW was due to finish in the window and did not, so it reads MISSED — but it
+   * has an actual start. Work under way is never asked why it missed.
+   */
+  it('a missed row that has an actual start or finish does not take one', () => {
+    expect(row(SLOW).outcome).toBe('MISSED');
+    expect(row(SLOW).actualStart).not.toBeNull();
+    expect(needsReason(row(SLOW))).toBe(false);
+    expect(needsReason({ ...row(IDLE), actualFinish: '2026-08-30' })).toBe(false);
+  });
+
+  /*
    * The complaint this came from: an activity given a reason while it waited was
    * then started, moved to STARTED, and still offered — and was still filed under —
    * the reason it no longer had.
@@ -126,18 +137,21 @@ describe('which rows take a reason', () => {
     balances(b);
     expect(b.shortfall.CONSTRAINT).toBe(0);
     expect(b.byReason).toEqual([]);
-    expect(b.shortfall.PACE).toBeCloseTo(Math.max(0, pred.plannedHours - pred.earnedHours), 6);
+    const slow = after.activities.find((a) => a.activityId === SLOW)!;
+    expect(b.shortfall.PACE).toBeCloseTo(Math.max(0, pred.plannedHours - pred.earnedHours) + Math.max(0, slow.plannedHours - slow.earnedHours), 6);
     // The answer is still on file for the period it was given in.
     expect(box.log.entries).toHaveLength(1);
   });
 });
 
 describe('the bridge from planned to achieved', () => {
-  it('with no reasons given, a missed or not-started shortfall is owed an answer', () => {
+  it('with no reasons given, a missed or not-started shortfall is owed an answer — unless it has started', () => {
     const b = periodBridge(log.activities, () => null);
     balances(b);
     expect(b.shortfall.CONSTRAINT).toBe(0);
-    expect(b.shortfall.UNEXPLAINED).toBeCloseTo(row(PRED).plannedHours + row(IDLE).plannedHours + (row(SLOW).plannedHours - row(SLOW).earnedHours), 6);
+    expect(b.shortfall.UNEXPLAINED).toBeCloseTo(row(PRED).plannedHours + row(IDLE).plannedHours, 6);
+    // SLOW missed its finish but is under way: what it is short is pace.
+    expect(b.shortfall.PACE).toBeCloseTo(row(SLOW).plannedHours - row(SLOW).earnedHours, 6);
     // Nothing is held by a constraint, so the workable plan is the whole plan.
     expect(b.workablePlanned).toBeCloseTo(log.plannedHours, 6);
     expect(b.workableAchievement).toBeCloseTo(log.achievement as number, 6);

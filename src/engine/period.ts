@@ -693,13 +693,18 @@ export type PeriodBridge = {
 
 /**
  * Whether a row takes a reason: MISSED and NOT STARTED, the activities the plan was
- * counting on that did not happen. Nothing else does. Once an activity has started
- * it is no longer behind for want of starting, so a reason given while it was
- * waiting stops applying — it is kept on file for the period it was given in, but
- * the row no longer offers it and the bridge no longer reads it. Whatever such a row
- * still falls short of its baseline spread is pace.
+ * counting on that did not happen — and only while nothing has happened to them.
+ *
+ * An activity with an actual start (or an actual finish) is under way or done. It
+ * is no longer behind for want of starting, so it is never asked why it missed:
+ * that includes a MISSED one that started earlier and simply has not finished by
+ * its planned date. A reason given while it was waiting stops applying the moment
+ * an actual date is keyed — it is kept on file for the period it was given in, but
+ * the row no longer offers it, the report no longer prints it, and the bridge no
+ * longer reads it. Whatever such a row still falls short of its plan is pace.
  */
 export function needsReason(a: PeriodActivity): boolean {
+  if (a.actualStart || a.actualFinish) return false;
   return a.outcome === 'MISSED' || a.outcome === 'NOT STARTED';
 }
 

@@ -344,3 +344,32 @@ test('exports everything to a chosen folder by hand, and on the schedule set', a
   await expect(page.getByText(/Last export .*TC_Budget_Data_latest\.xlsx/)).toBeVisible();
   expect(errors, 'a screen threw while rendering').toEqual([]);
 });
+
+/**
+ * REVIEW says what it is and what to do, and one click answers it. Retiring the
+ * only key in the library puts every activity in REVIEW, which is the situation
+ * the panel exists for.
+ */
+test('REVIEW activities say why, and the panel answers them', async ({ page }) => {
+  const errors = await open(page);
+  await importSchedule(page, 'current', schedule({ finished: 2, ahead: 2 }));
+  await page.goto('/#/library');
+  await page.getByRole('button', { name: 'retire' }).first().click();
+
+  await page.goto('/#/budget');
+  await expect(page.getByText(/4 activities are in REVIEW: no rate/)).toBeVisible();
+  await page.getByRole('link', { name: 'See what they are and what each needs' }).click();
+  await expect(page.getByText('4 activities are in REVIEW — what they are and what to do')).toBeVisible();
+  await expect(page.getByText('Its key was retired').first()).toBeVisible();
+  await expect(page.locator('.tbl tbody tr').filter({ hasText: '0-P2-TC-A10-FA-000' }).first()).toContainText('has an Activity Library key that was retired');
+
+  await page.goto('/#/dashboard');
+  await expect(page.getByText(/What the percent complete counts/)).toBeVisible();
+  await expect(page.getByRole('link', { name: '4 in REVIEW' })).toBeVisible();
+
+  await page.goto('/#/budget?flag=review');
+  await page.getByRole('button', { name: 'Restore key' }).click();
+  await expect(page.getByText(/retired key restored/)).toBeVisible();
+  await expect(page.getByText(/in REVIEW — what they are/)).toHaveCount(0);
+  expect(errors, 'a screen threw while rendering').toEqual([]);
+});

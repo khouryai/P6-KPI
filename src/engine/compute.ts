@@ -26,6 +26,7 @@ import type {
   P6Activity,
   PctSource,
   RateStatus,
+  ReviewCause,
   StaleOverride,
   Summary,
   TeamActual,
@@ -129,6 +130,8 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
   const { kept: current, dropped: repeatedRows, duplicateIds: duplicateIdCount, dateConflicts: duplicateDateConflicts } = oneRowPerId(input.current);
   const notes: string[] = [];
   const libIdx = indexLibrary(input.library);
+  /** Keys somebody retired: their types read REVIEW, and saying so is half the answer. */
+  const retiredKeys = new Set(input.library.filter((e) => e.retired).map((e) => normKey(e.matchKey)));
   const locIdx = firstByKey<Location>(input.locations, (l) => l.code);
   // The baseline is read one row per Activity ID too, the same row the current schedule keeps.
   const baseIdx = firstByKey<P6Activity>(oneRowPerId((input.baseline ?? []).filter((a) => a.rowType === 'ACTIVITY')).kept, (a) => a.activityId);
@@ -196,11 +199,9 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
     const locationShares = resolveLocationShares(locationOfRow, ovEarly?.locationSplit, locIdx);
     const locationSplit = locationShares.length > 1 || normKey(locationShares[0].code) !== normKey(locationOfRow);
     const factorAt = (code: string) => locIdx.get(normKey(code))?.complexityFactor ?? settings.defaultComplexity;
-    const complexity = !inBudget
-      ? null
-      : locationShares.length === 1
-        ? factorAt(locationShares[0].code)
-        : locationShares.reduce((s, x) => s + x.share * factorAt(x.code), 0);
+    const factor =
+      locationShares.length === 1 ? factorAt(locationShares[0].code) : locationShares.reduce((s, x) => s + x.share * factorAt(x.code), 0);
+    const complexity = inBudget ? factor : null;
     const stdHours = inBudget && entry ? stdHoursFor(entry, settings, a.originalDuration) : null;
     const ov = ovEarly;
     /*
@@ -220,6 +221,15 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
         ? overrideHours
         : excelRound((stdHours ?? 0) * (complexity ?? 1));
     const needsShifts = inBudget && rateStatus === 'NEEDS SHIFTS';
+    const reviewCause: ReviewCause | null =
+      status !== 'REVIEW' ? null : !a.activityType.trim() ? 'NO TYPE' : retiredKeys.has(normKey(a.activityType)) ? 'RETIRED KEY' : 'NO KEY';
+    /*
+     * What answering the REVIEW would add, priced exactly as adding the type from
+     * Budget Master prices it: a bare key on the DUR basis, so the figure is the
+     * default crew and shift over P6's own duration rather than a RATE zero.
+     */
+    const hoursIfPriced =
+      reviewCause && reviewCause !== 'NO TYPE' ? excelRound(stdHoursFor({ matchKey: a.activityType, basis: 'DUR' }, settings, a.originalDuration) * factor) : null;
 
     // Baseline dates: matched on trimmed Activity ID. Fall back to current dates when absent.
     const bl = baseIdx.get(normKey(a.activityId));
@@ -311,6 +321,9 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
       matchKey: match.matchKey,
       rateStatus,
       status,
+      reviewCause,
+      statusReason: statusReasonFor({ status, visibility, reviewCause, activityType: a.activityType, matchKey: match.matchKey, excludeReason: a.excludeReason, budgetHours, needsShifts, hoursIfPriced, overrideHours }),
+      hoursIfPriced,
       discipline: disciplineText,
       disciplines: splitDisciplines(disciplineText),
       basis,
@@ -628,6 +641,47 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
     testProgressChecks,
     notes,
   };
+}
+
+/**
+ * Why an activity's status is what it is, and what to do about it, in a sentence.
+ *
+ * Every status but IN BUDGET means an activity carrying no hours, and the status
+ * word alone never said which of several quite different things had happened — a
+ * type nobody priced, a key somebody retired, a decision of yours, a P6 marker.
+ * Each wants a different answer from a different screen, so the sentence names it.
+ */
+export function statusReasonFor(r: {
+  status: ActivityStatus;
+  visibility: ActivityVisibility | null;
+  reviewCause: ReviewCause | null;
+  activityType: string;
+  matchKey: string;
+  excludeReason: P6Activity['excludeReason'];
+  budgetHours: number;
+  needsShifts: boolean;
+  hoursIfPriced: number | null;
+  overrideHours: number | null;
+}): string {
+  const worth = r.hoursIfPriced !== null && r.hoursIfPriced > 0 ? ` On the default rate it would carry about ${Math.round(r.hoursIfPriced)} h.` : '';
+  switch (r.status) {
+    case 'REVIEW':
+      if (r.reviewCause === 'NO TYPE') return 'P6 gave it no name, so there is no activity type to price it by. Name it in P6 and re-import, or exclude or hide it here.';
+      if (r.reviewCause === 'RETIRED KEY')
+        return `Its type "${r.activityType}" has an Activity Library key that was retired, so it has no rate and carries no hours.${worth} Restore the key to price it again, or exclude or hide it if it is not work in this budget.`;
+      return `Its type "${r.activityType}" is not in the Activity Library, so it has no rate and carries no hours.${worth} If it is work in this budget, add the type to the library and price it; if not, exclude or hide it.`;
+    case 'EXCLUDED':
+      if (r.visibility === 'EXCLUDED') return 'You set it to Exclude: listed, carrying no hours, and left out of every total and the percent complete. Set it back to Auto to let the Activity Library decide.';
+      return `Its Activity Library key "${r.matchKey}" is set not to include, so every activity of the type carries no hours. Set Include to Y on the key to budget them all, or Include this one on its own.`;
+    case 'DELETED':
+    case 'CANCELLED':
+      return `P6 marks the activity name (${r.status === 'DELETED' ? 'Deleted' : 'Cancelled'}), so it is out of the budget. Include it to budget it anyway, or hide it to take it off the lists.`;
+    case 'IN BUDGET':
+      if (r.budgetHours !== 0) return '';
+      if (r.overrideHours === 0) return 'In the budget, with 0 h typed as its hours override.';
+      if (r.needsShifts) return 'In the budget but priced at 0 h: its key is on the RATE basis with no number of shifts. Set Duration shifts on the key in the Activity Library.';
+      return 'In the budget but priced at 0 h: P6 gives it no original duration, and the DUR basis multiplies by it. Type its hours under Override h, or put its key on the RATE basis.';
+  }
 }
 
 /**

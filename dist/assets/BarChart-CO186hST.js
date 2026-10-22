@@ -1,0 +1,1 @@
+import{r as a,ae as t,af as o}from"./index-CLvxiDCn.js";var i=["axis","item"],p=a.forwardRef((r,e)=>a.createElement(t,{chartName:"BarChart",defaultTooltipEventType:"axis",validateTooltipEventTypes:i,tooltipPayloadSearcher:o,categoricalChartProps:r,ref:e}));export{p as B};

@@ -498,6 +498,28 @@ export function TestProgress({ route }: { route: Route }) {
         </>
       }
     >
+      {model.rows.length > budgeted.length && (
+        <div className="mb-3">
+          <Notice tone="info">
+            Only activities in the budget are listed, because only they have hours to earn.{' '}
+            {[
+              model.summary.review ? (
+                <a key="r" href={href('budget', { flag: 'review' })}>
+                  {model.summary.review} in REVIEW (no rate yet — see what each needs)
+                </a>
+              ) : null,
+              model.summary.excluded + model.summary.deletedOrCancelled ? (
+                <a key="x" href={href('budget', { view: 'excluded' })}>
+                  {model.summary.excluded + model.summary.deletedOrCancelled} excluded or deleted in P6
+                </a>
+              ) : null,
+            ]
+              .filter(Boolean)
+              .flatMap((x, i) => (i ? [' and ', x] : [x]))}{' '}
+            are not, and none of them is in the percent complete.
+          </Notice>
+        </div>
+      )}
       <details className="card mb-4">
         <summary className="cursor-pointer card-title">
           Which dates decide when an activity earns — and what the monthly P6 import changes
@@ -659,7 +681,7 @@ export function TestProgress({ route }: { route: Route }) {
           />
           <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">
             <b>Not in extract</b> and <b>WBS</b> rows are safe to delete: no activity can ever claim them. A <b>REVIEW</b> or <b>EXCLUDED</b> row is the opposite — the
-            activity is really there and your percent is real, and it is the Activity Library or the Show column that is stopping it earning. Fix that and it starts
+            activity is really there and your percent is real, and it is the Activity Library or Budget Master’s In budget? column that is stopping it earning. Fix that and it starts
             working; delete the row and you lose the keying.
           </p>
         </Panel>

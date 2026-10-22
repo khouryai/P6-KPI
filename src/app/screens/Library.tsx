@@ -7,6 +7,7 @@ import { fmtHours, fmtPct, num } from '../format';
 import { normKey } from '../../engine/keys';
 import type { Route } from '../router';
 import { TERMS } from '../../engine/vocab';
+import { ReviewPanel } from '../components/ReviewPanel';
 
 export function Library({ route }: { route: Route }) {
   const { state, model, actions } = useApp();
@@ -204,6 +205,10 @@ export function Library({ route }: { route: Route }) {
           onClose={() => setCrewFor(null)}
         />
       )}
+      <ReviewPanel
+        rows={model.rows}
+        title={`${model.summary.review} ${model.summary.review === 1 ? 'activity is' : 'activities are'} in REVIEW because ${model.summary.review === 1 ? 'its type has' : 'their types have'} no live key here`}
+      />
       <datalist id="subsystem-codes">{knownSubsystems.map((c) => <option key={c} value={c} />)}</datalist>
       <datalist id="disciplines">{disciplines.map((d) => <option key={d} value={d} />)}</datalist>
       <div className="mb-3 flex flex-wrap gap-3 text-[12px]">

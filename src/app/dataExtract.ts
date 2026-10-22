@@ -19,7 +19,7 @@ import * as XLSX from 'xlsx';
 import type { ActivityVisibility, BudgetRow, Model } from '../engine/types';
 import type { StoreData } from '../storage/store';
 import { formatLocationSplit } from '../engine/compute';
-import { periodLog, addDays, OUTCOMES, type PeriodActivity, type PeriodPhase } from '../engine/period';
+import { periodLog, addDays, needsReason, OUTCOMES, type PeriodActivity, type PeriodPhase } from '../engine/period';
 import { capacityByMonth, DEFAULT_CAPACITY, type CapacityRow } from '../engine/capacity';
 import { normKey } from '../engine/keys';
 import { isValidISO } from '../engine/dates';
@@ -101,7 +101,7 @@ function table<T>(name: string, purpose: string, cols: Col<T>[], rows: T[]): Ext
   return { name, purpose, ws, rows: rows.length, headerRow: 0, columns: cols.map((c) => ({ header: c.h, def: { meaning: c.meaning, kind: c.kind ?? 'text' } })) };
 }
 
-const SHOW: Record<ActivityVisibility, string> = { INCLUDED: 'Force in', EXCLUDED: 'Exclude', HIDDEN: 'Hide' };
+const SHOW: Record<ActivityVisibility, string> = { INCLUDED: 'Include', EXCLUDED: 'Exclude', HIDDEN: 'Hide (remove)' };
 const source = (edited: boolean, rule: boolean) => (edited ? 'Moved by hand' : rule ? 'Activity ID Rule' : 'Activity ID');
 
 /**
@@ -131,10 +131,13 @@ export const STATUS_CODES: { field: string; value: string; meaning: string; appe
   { field: 'Earn_Window', value: 'PROGRESS AS AT', meaning: 'Started, not finished; hours accrue from the actual start to the Progress as at date keyed.', appearsIn: 'All_Activities, Budget_Master' },
   { field: 'Earn_Window', value: 'IN PROGRESS', meaning: 'Started, not finished; hours accrue from the actual start to the data date.', appearsIn: 'All_Activities, Budget_Master' },
   { field: 'Earn_Window', value: 'NOT STARTED', meaning: 'No actual start, so nothing has been earned on a date.', appearsIn: 'All_Activities, Budget_Master' },
-  { field: 'Show', value: 'Auto', meaning: 'In or out of the budget as the Activity Library decides.', appearsIn: 'All_Activities' },
-  { field: 'Show', value: 'Force in', meaning: 'In the budget whatever the library or a P6 (Deleted) marker says.', appearsIn: 'All_Activities' },
-  { field: 'Show', value: 'Exclude', meaning: 'Listed, carrying no hours.', appearsIn: 'All_Activities' },
-  { field: 'Show', value: 'Hide', meaning: 'Out of the program: in no total, curve or other sheet. Listed on All_Activities with Hidden = Y.', appearsIn: 'All_Activities' },
+  { field: 'In_Budget_Setting', value: 'Auto', meaning: 'In or out of the budget as the Activity Library decides.', appearsIn: 'All_Activities' },
+  { field: 'In_Budget_Setting', value: 'Include', meaning: 'You put it in the budget, whatever the library or a P6 (Deleted) marker says.', appearsIn: 'All_Activities, Stale_Edits' },
+  { field: 'In_Budget_Setting', value: 'Exclude', meaning: 'You took it out of the budget: listed, carrying no hours, out of every total and the percent complete.', appearsIn: 'All_Activities, Stale_Edits' },
+  { field: 'In_Budget_Setting', value: 'Hide (remove)', meaning: 'You removed it from the program: in no total, curve or other sheet. Listed on All_Activities with Hidden = Y.', appearsIn: 'All_Activities, Stale_Edits' },
+  { field: 'Review_Cause', value: 'NO KEY', meaning: 'Its activity type is not in the Activity Library, so it has no rate. Add the type to the library, or exclude or hide it.', appearsIn: 'All_Activities' },
+  { field: 'Review_Cause', value: 'RETIRED KEY', meaning: 'Its activity type has a library key that was retired. Restore the key, or exclude or hide it.', appearsIn: 'All_Activities' },
+  { field: 'Review_Cause', value: 'NO TYPE', meaning: 'P6 gave it no name, so there is no activity type to price it by.', appearsIn: 'All_Activities' },
   { field: 'Phase_Source / Location_Source', value: 'Activity ID', meaning: 'Read from the Activity ID: 2nd segment for phase, 4th for location.', appearsIn: 'All_Activities' },
   { field: 'Phase_Source / Location_Source', value: 'Activity ID Rule', meaning: 'An Activity ID Rule overrides what the ID says.', appearsIn: 'All_Activities' },
   { field: 'Phase_Source / Location_Source', value: 'Moved by hand', meaning: 'Moved in Budget Master. Beats a rule and the ID.', appearsIn: 'All_Activities' },
@@ -169,9 +172,13 @@ function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
         { h: 'Activity_Name', meaning: 'The name every screen shows: your rename if there is one, otherwise P6’s.', v: (r) => r.activityName },
         { h: 'P6_Activity_Name', meaning: 'The name P6 exported. It still decides the activity type, so a rename never re-prices.', v: (r) => r.activity.activityName },
         { h: 'Renamed', meaning: 'Y when you renamed the activity in Budget Master.', kind: 'flag', v: (r) => flag(r.renamed) },
-        { h: 'Show', meaning: 'What you set in Budget Master’s Show column. See Status_Codes.', v: (r) => (r.visibility ? SHOW[r.visibility] : 'Auto') },
+        { h: 'In_Budget_Setting', meaning: 'What you set in Budget Master’s In budget? column. See Status_Codes.', v: (r) => (r.visibility ? SHOW[r.visibility] : 'Auto') },
         { h: 'Hidden', meaning: 'Y when hidden: out of every total and every other sheet.', kind: 'flag', v: (r) => flag(r.hidden) },
         { h: 'Status', meaning: 'Whether the activity is in the budget, and if not why. See Status_Codes.', v: (r) => r.status },
+        { h: 'Status_Reason', meaning: 'Why the status is what it is, and what to do about it. Blank for an activity in the budget carrying hours.', v: (r) => r.statusReason },
+        { h: 'Review_Cause', meaning: 'For an activity in REVIEW, why it has no rate. See Status_Codes.', v: (r) => r.reviewCause ?? '' },
+        { h: 'Hours_If_Priced', meaning: 'For an activity in REVIEW, the hours it would carry if its type were priced on the default rate.', kind: 'hours', v: (r) => blank(r.hoursIfPriced) },
+        { h: 'In_Percent_Complete', meaning: 'Y when the activity is in the budget, so its hours are in the percent complete on the Dashboard.', kind: 'flag', v: (r) => flag(!r.hidden && r.status === 'IN BUDGET') },
         { h: 'Rate_Status', meaning: 'How completely its Activity Library key is priced. See Status_Codes.', v: (r) => r.rateStatus },
         { h: 'Phase_Code', meaning: 'The phase key, e.g. P2: the 2nd segment of the Activity ID unless a rule or a move says otherwise.', v: (r) => r.phase },
         { h: 'Phase', meaning: 'The phase as reported, e.g. Phase 2.', v: (r) => r.phaseName },
@@ -345,6 +352,8 @@ function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
    */
   const dataDate = isValidISO(data.settings.dataDate) ? data.settings.dataDate : null;
   const log = dataDate ? periodLog(model.rows, addDays(dataDate, -13), dataDate) : null;
+  // Only a row still owed an answer carries one: anything with an actual start or finish is under way or done.
+  const reasonOf = (a: PeriodActivity) => (log && needsReason(a) ? effectiveReasonFor(data.missedReasons, a.activityId, log.to) : undefined);
   const periodLabel = log ? `${log.from} to ${log.to}` : 'No data date set';
   out.push(
     table<PeriodActivity>(
@@ -373,18 +382,19 @@ function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
         { h: 'Start_Slip_Days', meaning: 'Calendar days the current start is past the planned one. Negative is pulled in.', kind: 'int', v: (a) => blank(a.startSlipDays) },
         { h: 'Finish_Variance_Days', meaning: 'Calendar days between the planned and the actual finish. Negative is early.', kind: 'int', v: (a) => blank(a.finishVarianceDays) },
         { h: 'Spread_To_Data_Date', meaning: 'Y when nobody said when its progress happened, so its hours are spread to the data date — not evidence of work in this fortnight.', kind: 'flag', v: (a) => flag(a.spreadToDataDate) },
-        { h: 'Why_Missed', meaning: 'The reason recorded on the Two-Week Log for a missed or unstarted activity.', v: (a) => (log ? effectiveReasonFor(data.missedReasons, a.activityId, log.to)?.entry.reason ?? '' : '') },
-        { h: 'Reason_From_Other_Period', meaning: 'Y when that reason was recorded against a different fortnight and carried to this one.', kind: 'flag', v: (a) => flag(!!log && !!effectiveReasonFor(data.missedReasons, a.activityId, log.to)?.carried) },
+        { h: 'Needs_Reason', meaning: 'Y for a MISSED or NOT STARTED activity with no actual start or finish: the plan counted on it and nothing has happened. Anything under way or done is never asked why it missed.', kind: 'flag', v: (a) => flag(needsReason(a)) },
+        { h: 'Why_Missed', meaning: 'The reason recorded on the Two-Week Log, for a row that needs one. Blank on anything with an actual start or finish.', v: (a) => reasonOf(a)?.entry.reason ?? '' },
+        { h: 'Reason_From_Other_Period', meaning: 'Y when that reason was recorded against a different fortnight and carried to this one.', kind: 'flag', v: (a) => flag(!!reasonOf(a)?.carried) },
         {
           h: 'Outside_Team_Control',
           meaning: 'Y when the reason is marked outside the team’s control, which takes the shortfall out of the workable plan.',
           kind: 'flag',
           v: (a) => {
-            const e = log ? effectiveReasonFor(data.missedReasons, a.activityId, log.to) : undefined;
+            const e = reasonOf(a);
             return flag(!!e && isOutsideControl(data.missedReasons, e.entry.reason));
           },
         },
-        { h: 'Reason_Note', meaning: 'Anything the reason itself cannot say.', v: (a) => (log ? effectiveReasonFor(data.missedReasons, a.activityId, log.to)?.entry.note ?? '' : '') },
+        { h: 'Reason_Note', meaning: 'Anything the reason itself cannot say.', v: (a) => reasonOf(a)?.entry.note ?? '' },
         { h: 'Rows_In_Export', meaning: 'How many P6 rows this line stands for; more than one when the export repeats the Activity ID.', kind: 'int', v: (a) => a.rows },
       ],
       log?.activities ?? [],
@@ -531,7 +541,7 @@ function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
         { h: 'Activity_ID', meaning: 'The Activity ID the edit was keyed against.', v: (o) => o.activityId },
         { h: 'Has_Hours', meaning: 'Y when it carries an hours override.', kind: 'flag', v: (o) => flag(o.hasHours) },
         { h: 'Renamed', meaning: 'Y when it carries a rename.', kind: 'flag', v: (o) => flag(o.renamed) },
-        { h: 'Show', meaning: 'The Show setting it carries, if any.', v: (o) => (o.visibility ? SHOW[o.visibility] : '') },
+        { h: 'In_Budget_Setting', meaning: 'The In budget? setting it carries, if any.', v: (o) => (o.visibility ? SHOW[o.visibility] : '') },
         { h: 'Note', meaning: 'The note it carries.', v: (o) => o.note },
       ],
       model.staleOverrides,
@@ -701,6 +711,7 @@ const SOURCE_SHEETS: Record<string, { purpose: string; keyValue?: boolean; colum
     columns: {
       Location: d('The location as reported.'),
       Reason: d('The reason picked on the Two-Week Log.'),
+      Still_Applies: d('Y while the activity still has no actual start or finish. Blank once it has started or finished: the reason is kept as a record of that review, but is no longer shown, tallied or carried to a later fortnight.'),
       Recorded_At: d('When it was recorded.'),
       Period_End: d('The last day of the review period it was recorded against.', 'date'),
     },
