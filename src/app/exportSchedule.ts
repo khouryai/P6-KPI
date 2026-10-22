@@ -31,8 +31,11 @@ export type ExportSchedule = {
    * is saved, so "every other Monday" has a definite first Monday.
    */
   anchor?: string;
-  /** A folder chosen for the export, or the data folder's exports sub-folder. */
-  destination: 'folder' | 'data-folder';
+  /**
+   * A folder chosen for this export, the data folder's exports sub-folder, or —
+   * for the S-curve — whatever folder the Excel export uses, so the two land together.
+   */
+  destination: 'folder' | 'data-folder' | 'excel-folder';
   files: ExportFiles;
   /**
    * When the schedule was last set. A moment before this is not owed: changing the
@@ -42,7 +45,19 @@ export type ExportSchedule = {
   /** ISO datetime of the last export that ran, scheduled or by hand. */
   lastRunAt?: string;
   lastResult?: { ok: boolean; at: string; files: string[]; error?: string; trigger: 'manual' | 'scheduled' };
+  /**
+   * The S-curve export only: which curves the picture stacks, top to bottom —
+   * '*' for the whole project, otherwise phase keys (P2, P3) — and whether it is
+   * drawn in percent complete or man hours.
+   */
+  phases?: string[];
+  unit?: 'percent' | 'hours';
 };
+
+/** What one export's files are called: a dated name, and the one replaced each time. */
+export type ExportFileNaming = { prefix: string; latest: string; ext: string };
+export const EXCEL_FILES: ExportFileNaming = { prefix: 'TC_Budget_Data', latest: 'TC_Budget_Data_latest', ext: 'xlsx' };
+export const SCURVE_FILES: ExportFileNaming = { prefix: 'SCurve', latest: 'SCurve_Latest', ext: 'png' };
 
 export const DEFAULT_SCHEDULE: ExportSchedule = {
   enabled: false,
@@ -155,10 +170,10 @@ export function fortnightAnchor(weekday: number, from: Date): string {
 }
 
 /** The file names one run writes. The dated name sorts in time order in a folder listing. */
-export function exportFileNames(files: ExportFiles, when: Date): string[] {
+export function exportFileNames(files: ExportFiles, when: Date, naming: ExportFileNaming = EXCEL_FILES): string[] {
   const p = (n: number) => String(n).padStart(2, '0');
-  const dated = `TC_Budget_Data_${when.getFullYear()}-${p(when.getMonth() + 1)}-${p(when.getDate())}_${p(when.getHours())}${p(when.getMinutes())}.xlsx`;
-  const latest = 'TC_Budget_Data_latest.xlsx';
+  const dated = `${naming.prefix}_${when.getFullYear()}-${p(when.getMonth() + 1)}-${p(when.getDate())}_${p(when.getHours())}${p(when.getMinutes())}.${naming.ext}`;
+  const latest = `${naming.latest}.${naming.ext}`;
   return files === 'dated' ? [dated] : files === 'latest' ? [latest] : [dated, latest];
 }
 

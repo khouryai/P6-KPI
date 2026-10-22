@@ -47,27 +47,56 @@ export function buildCurve(
   const periods = curvePeriods(rows, dataDate, cadence);
   if (!periods.length) return { curve: [], periods: [] };
   const totalBudget = rows.reduce((s, r) => s + r.budgetHours, 0);
-  const curve = periods.map((p) => {
-    let planned = 0;
-    let forecast = 0;
-    let earned = 0;
-    for (const r of rows) {
-      if (r.budgetHours === 0 && r.earnedHours === 0) continue;
-      planned += r.budgetHours * accruedFraction(p, r.baselineStart, r.baselineFinish);
-      forecast += r.budgetHours * accruedFraction(p, r.currentStart, r.currentFinish);
-      earned += r.earnedHours * accruedFraction(p, r.earnStart, r.earnEnd);
-    }
-    const earnedOrNull = dataDate && p > dataDate ? null : earned;
-    return {
-      periodEnd: p,
-      planned,
-      forecast,
-      earned: earnedOrNull,
-      plannedPct: totalBudget ? planned / totalBudget : 0,
-      earnedPct: earnedOrNull === null ? null : totalBudget ? earnedOrNull / totalBudget : 0,
-    };
-  });
+  const curve = periods.map((p) => pointAt(rows, p, dataDate, totalBudget));
   return { curve, periods };
+}
+
+/** The curve's value at one date. Earned stops at the data date, as the line does. */
+function pointAt(rows: BudgetRow[], p: string, dataDate: string | null, totalBudget: number): CurvePoint {
+  let planned = 0;
+  let forecast = 0;
+  let earned = 0;
+  for (const r of rows) {
+    if (r.budgetHours === 0 && r.earnedHours === 0) continue;
+    planned += r.budgetHours * accruedFraction(p, r.baselineStart, r.baselineFinish);
+    forecast += r.budgetHours * accruedFraction(p, r.currentStart, r.currentFinish);
+    earned += r.earnedHours * accruedFraction(p, r.earnStart, r.earnEnd);
+  }
+  const earnedOrNull = dataDate && p > dataDate ? null : earned;
+  return {
+    periodEnd: p,
+    planned,
+    forecast,
+    earned: earnedOrNull,
+    plannedPct: totalBudget ? planned / totalBudget : 0,
+    earnedPct: earnedOrNull === null ? null : totalBudget ? earnedOrNull / totalBudget : 0,
+  };
+}
+
+/** The curve's value at any date, not only at a period end. */
+export function curvePointAt(rows: BudgetRow[], date: string, dataDate: string | null): CurvePoint {
+  return pointAt(rows, date, dataDate, rows.reduce((s, r) => s + r.budgetHours, 0));
+}
+
+/**
+ * The curve with a point added at each of these dates, kept in date order.
+ *
+ * A line marking a date — the data date, today — can only sit on a period the axis
+ * has, and on a month-end curve neither falls on one: the line snaps back to the
+ * last month end, a week or three out. Adding the point puts the line exactly on
+ * its date, and the curves pass through their true value there. A date outside the
+ * curve's span is left out rather than stretching the axis to reach it.
+ */
+export function withPointsAt(curve: CurvePoint[], rows: BudgetRow[], dates: (string | null)[], dataDate: string | null, opts: { extend?: boolean } = {}): CurvePoint[] {
+  if (curve.length === 0) return curve;
+  const first = curve[0].periodEnd;
+  const last = curve[curve.length - 1].periodEnd;
+  const have = new Set(curve.map((c) => c.periodEnd));
+  // `extend` lets a date past either end stretch the axis: a finished phase is flat
+  // from its last period on, and today belongs on its picture rather than off it.
+  const inReach = (d: string) => opts.extend || (d >= first && d <= last);
+  const extra = [...new Set(dates.filter((d): d is string => !!d && inReach(d) && !have.has(d)))].map((d) => curvePointAt(rows, d, dataDate));
+  return [...curve, ...extra].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
 }
 
 

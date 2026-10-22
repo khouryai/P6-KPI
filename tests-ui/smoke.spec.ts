@@ -318,9 +318,10 @@ test('exports everything to a chosen folder by hand, and on the schedule set', a
   await importSchedule(page, 'current', schedule({ finished: 2, ahead: 2 }));
 
   await page.goto('/#/settings');
-  await page.getByRole('button', { name: 'Choose folder…' }).click();
-  await expect(page.getByText('Exports will be saved in picked.')).toBeVisible();
-  await page.getByRole('button', { name: 'Export now to this folder' }).click();
+  const card = page.locator('.card').filter({ has: page.getByRole('heading', { name: 'Scheduled Excel export' }) });
+  await card.getByRole('button', { name: 'Choose folder…' }).click();
+  await expect(page.getByText('Excel exports will be saved in picked.')).toBeVisible();
+  await card.getByRole('button', { name: 'Export now to this folder' }).click();
   await expect(page.getByText(/Excel export written to picked\\TC_Budget_Data_2026-10-21_/)).toBeVisible();
 
   const first = await exportedFiles(page);
@@ -330,10 +331,10 @@ test('exports everything to a chosen folder by hand, and on the schedule set', a
   expect(wb.SheetNames).toContain('All_Activities');
 
   // Every day at 07:00, one file replaced each time.
-  await page.getByRole('combobox').filter({ hasText: 'A new dated file each time' }).selectOption('latest');
-  await page.getByRole('combobox').filter({ hasText: 'Every weekday' }).selectOption('daily');
-  await page.getByLabel('Time of day').fill('07:00');
-  await page.getByLabel('Export automatically').check();
+  await card.getByLabel('Files').selectOption('latest');
+  await card.getByLabel('How often').selectOption('daily');
+  await card.getByLabel('Time of day').fill('07:00');
+  await card.getByLabel('Export automatically').check();
   await expect(page.getByText(/Exports every day at 07:00/)).toBeVisible();
   // Setting it at 06:57 owes nothing yet: yesterday's 07:00 came before the schedule did.
   await page.clock.fastForward('01:00');
@@ -413,5 +414,44 @@ test('the Two-Week Log changes and clears a reason from any reporting date', asy
   await expect(why()).toHaveValue('');
   await ending.fill('2026-09-23');
   await expect(why()).toHaveValue('');
+  expect(errors, 'a screen threw while rendering').toEqual([]);
+});
+
+/**
+ * The S-curve picture: the phases ticked, stacked one above the other, written to
+ * the Excel export's folder as SCurve_Latest.png.
+ */
+test('exports an S-curve per phase chosen, stacked, as SCurve_Latest.png', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker = async () =>
+      (await navigator.storage.getDirectory()).getDirectoryHandle('picked', { create: true });
+  });
+  const errors = await open(page);
+  await importSchedule(page, 'current', schedule({ finished: 2, ahead: 2 }));
+  await page.goto('/#/settings');
+  const dataDate = page.locator('input[type=date]').first();
+  await dataDate.fill('2026-09-23');
+  await dataDate.dispatchEvent('change');
+
+  const excel = page.locator('.card').filter({ has: page.getByRole('heading', { name: 'Scheduled Excel export' }) });
+  await excel.getByRole('button', { name: 'Choose folder…' }).click();
+  const card = page.locator('.card').filter({ has: page.getByRole('heading', { name: 'Scheduled S-curve export' }) });
+  await card.getByLabel('Whole project').uncheck();
+  await card.getByLabel('Phase 2').check();
+  await card.getByLabel('Phase 5').check();
+  await card.getByRole('button', { name: 'Export now to this folder' }).click();
+  await expect(page.getByText(/S-curve export written to picked\\SCurve_Latest\.png/)).toBeVisible();
+
+  const files = await exportedFiles(page);
+  const png = files.find((f) => f.name === 'SCurve_Latest.png');
+  expect(png, 'SCurve_Latest.png was not written').toBeTruthy();
+  const bytes = new Uint8Array(png!.bytes);
+  expect([...bytes.slice(1, 4)].map((b) => String.fromCharCode(b)).join('')).toBe('PNG');
+  const view = new DataView(bytes.buffer);
+  const width = view.getUint32(16);
+  const height = view.getUint32(20);
+  // Two charts stacked: well over twice the height of one 380 px chart, at 2x.
+  expect(width).toBeGreaterThan(2000);
+  expect(height).toBeGreaterThan(2 * 380 * 2);
   expect(errors, 'a screen threw while rendering').toEqual([]);
 });

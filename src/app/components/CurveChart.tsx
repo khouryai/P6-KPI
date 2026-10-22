@@ -14,6 +14,7 @@ const AMBER = '#d97706';
 const GOOD = '#00875a';
 const GRID = '#e4e7ec';
 const AXIS = '#6e7179';
+const TODAY = '#e60012';
 
 type TipItem = { name?: string; value?: unknown; color?: string; dataKey?: string };
 
@@ -75,8 +76,16 @@ export const CurveChart = forwardRef<
     total?: number;
     /** Month-end periods label as YYYY-MM; anything finer needs the day. */
     monthly?: boolean;
+    /** Draw a TODAY line as well as the data date's, at this date. */
+    today?: string | null;
+    /**
+     * A fixed width in pixels instead of filling the container. For a chart drawn
+     * off screen to be exported: a responsive one waits on the browser to lay the
+     * page out, which a minimised window may not do for a long time.
+     */
+    width?: number;
   }
->(function CurveChart({ curve, dataDate, height = 380, percent = false, total = 0, monthly = true }, ref) {
+>(function CurveChart({ curve, dataDate, height = 380, percent = false, total = 0, monthly = true, today = null, width }, ref) {
   const scale = percent && total > 0 ? (v: number | null) => (v === null ? null : v / total) : (v: number | null) => v;
   /*
    * The tick is the period end itself, not the month it falls in.
@@ -100,15 +109,33 @@ export const CurveChart = forwardRef<
    * month ends, or a data date outside the schedule — the last period at or before
    * it is the honest place for the line, rather than no line at all.
    */
-  const marker = dataDate
-    ? (curve.filter((c) => c.periodEnd <= dataDate).pop()?.periodEnd ?? null)
-    : null;
+  const markerAt = (date: string | null) => (date ? (curve.filter((c) => c.periodEnd <= date).pop()?.periodEnd ?? null) : null);
+  const marker = markerAt(dataDate);
+  /*
+   * A month-end curve can carry points that are not month ends — the data date and
+   * today, put in so their lines sit on their dates. Their month would then label
+   * twice ("2026-09, 2026-09"), so the axis labels only the month ends.
+   */
+  const monthEnd = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return d === new Date(y, m, 0).getDate();
+  };
+  const ticks = monthly && data.some((d) => !monthEnd(d.label)) ? data.filter((d) => monthEnd(d.label)).map((d) => d.label) : undefined;
+  /*
+   * Today, when it is asked for and lands somewhere the data date's line does not.
+   * The same spot gets one line saying both, rather than two drawn on top of each other.
+   */
+  // Not past the curve's end: a line pinned to the last period would claim a date it is not at.
+  const lastPeriod = curve[curve.length - 1]?.periodEnd ?? null;
+  const todayMarker = today && lastPeriod && today <= lastPeriod ? markerAt(today) : null;
+  const todayOwn = todayMarker && todayMarker !== marker ? todayMarker : null;
+  const bothLabel = today && todayMarker && todayMarker === marker ? ` · TODAY ${fmtDate(today)}` : '';
   const axisTick = { fontSize: 10.5, fill: AXIS, fontFamily: "'IBM Plex Mono', ui-monospace, Menlo, monospace" };
   return (
-    <div ref={ref} className="w-full" style={{ height }}>
-      <ResponsiveContainer width="100%" height="100%">
+    <div ref={ref} className={width ? undefined : 'w-full'} style={width ? { width, height } : { height }}>
+      <Fit width={width} height={height}>
         {/* The top margin is the DATA DATE label's room: at 8 it was cropped by the frame. */}
-        <ComposedChart data={data} margin={{ top: 20, right: 44, left: 8, bottom: 0 }}>
+        <ComposedChart data={data} margin={{ top: 20, right: 44, left: 8, bottom: 0 }} {...(width ? { width, height } : {})}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
           <XAxis
             dataKey="label"
@@ -117,6 +144,7 @@ export const CurveChart = forwardRef<
             axisLine={{ stroke: GRID }}
             interval="preserveStartEnd"
             minTickGap={28}
+            ticks={ticks}
             tickFormatter={(v: string) => (monthly ? v.slice(0, 7) : fmtDate(v))}
           />
           <YAxis
@@ -138,14 +166,34 @@ export const CurveChart = forwardRef<
                  pasted into a mail nobody can hover the line to find out when the
                  schedule was measured, and "as at when?" is the first question
                  anybody asks of an S-curve. */
-              label={{ value: `DATA DATE ${fmtDate(dataDate)}`, position: 'top', fontSize: 9.5, fill: AXIS, letterSpacing: '0.08em' }}
+              label={{ value: `DATA DATE ${fmtDate(dataDate)}${bothLabel}`, position: 'top', fontSize: 9.5, fill: AXIS, letterSpacing: '0.08em' }}
+            />
+          )}
+          {todayOwn && (
+            <ReferenceLine
+              x={todayOwn}
+              stroke={TODAY}
+              strokeWidth={1.5}
+              strokeDasharray="2 3"
+              // Inside the plot, so it never sits on the DATA DATE label above it.
+              label={{ value: `TODAY ${fmtDate(today)}`, position: 'insideTopRight', fontSize: 9.5, fill: TODAY, letterSpacing: '0.08em' }}
             />
           )}
           <Line type="monotone" dataKey="planned" legendType="plainline" name="Planned (baseline)" stroke={INK} strokeWidth={2} dot={false} isAnimationActive={false} />
           <Line type="monotone" dataKey="forecast" legendType="plainline" name="Forecast (current)" stroke={AMBER} strokeWidth={2} dot={false} strokeDasharray="6 3" isAnimationActive={false} />
           <Line type="monotone" dataKey="earned" legendType="plainline" name="Earned (actual dates)" stroke={GOOD} strokeWidth={2.5} dot={false} connectNulls={false} isAnimationActive={false} />
         </ComposedChart>
-      </ResponsiveContainer>
+      </Fit>
     </div>
   );
 });
+
+/** Fill the container, or keep a fixed size. */
+function Fit({ width, height, children }: { width?: number; height: number; children: React.ReactElement }) {
+  if (width) return <div style={{ width, height }}>{children}</div>;
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      {children}
+    </ResponsiveContainer>
+  );
+}

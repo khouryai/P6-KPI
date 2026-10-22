@@ -207,7 +207,8 @@ export function Settings() {
             <button className="btn" disabled={busy} onClick={() => void exportXlsx('source')}>Original workbook layout (.xlsx)</button>
           </div>
         </div>
-        <ScheduledExportCard />
+        <ScheduledExportCard job="excel" />
+        <ScheduledExportCard job="scurve" />
         <div className="card space-y-3">
           <h2 className="card-title">Version</h2>
           <div className="flex flex-wrap gap-2">

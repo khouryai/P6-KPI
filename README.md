@@ -57,6 +57,7 @@ The workbook never has to be opened again, and neither does Excel:
 | Defaults, dates, storage, backups | **Settings** |
 | Hand a spreadsheet to project controls | **Settings → Export everything**: the full data extract (below). **Original workbook layout** writes only the source workbook's sheets. Curve CSV and chart PNG are on the Dashboard. |
 | An Excel extract on a schedule | **Settings → Scheduled Excel export**: every day, every weekday, a day of the week, every two weeks or a day of the month, at a time you set, into a folder you choose (or the data folder's `exports`). A new dated file each time, one `TC_Budget_Data_latest.xlsx` replaced each time, or both. |
+| The S-curve as a picture, on a schedule | **Settings → Scheduled S-curve export**: `SCurve_Latest.png`, one curve for each phase ticked (and the whole project, if ticked), stacked one above the other in phase order. Each has its DATA DATE line and a red TODAY line, and its title says how complete it is against how complete the baseline expected it to be — at the data date and by today, with the gap in points. In % complete or man hours, on its own schedule, into the Excel export's folder, a folder of its own or the data folder's `exports`. **Download a copy** makes one there and then. |
 
 ## The full data extract
 
