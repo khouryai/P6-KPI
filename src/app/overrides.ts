@@ -18,6 +18,7 @@ export function tidyOverride(o: ActivityOverride): ActivityOverride {
   if (o.nameOverride?.trim()) out.nameOverride = o.nameOverride.trim();
   if (o.discipline?.trim()) out.discipline = o.discipline.trim();
   if (o.visibility) out.visibility = o.visibility;
+  if (o.kind) out.kind = o.kind;
   if (o.phase?.trim()) out.phase = o.phase.trim();
   if (o.location?.trim()) out.location = o.location.trim();
   const split = (o.locationSplit ?? []).filter((x) => x.location?.trim() && x.share > 0).map((x) => ({ location: x.location.trim(), share: x.share }));

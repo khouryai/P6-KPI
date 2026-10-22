@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, Select, Badge, statusTone, Notice, type Column } from '../components/ui';
-import type { LibraryStat, LibraryEntry, Basis, CrewLine } from '../../engine/types';
+import type { LibraryStat, LibraryEntry, Basis, CrewLine, ActivityKind } from '../../engine/types';
+import { ACTIVITY_KINDS, KIND_LABEL } from '../../engine/types';
 import { assignSubsystem, crewLines, setCrewCount, splitDisciplines } from '../../engine/compute';
 import { fmtHours, fmtPct, num } from '../format';
 import { normKey } from '../../engine/keys';
@@ -97,6 +98,19 @@ export function Library({ route }: { route: Route }) {
           </span>
         );
       },
+    },
+    {
+      key: 'kind',
+      label: 'Static / Dynamic',
+      value: (r) => KIND_LABEL[r.entry.kind ?? 'OTHER'],
+      hint: 'Whether activities of this type are static testing, dynamic testing, or other. Every activity of the type takes it, unless Budget Master sets one on its own. Rollups and exports split the KPIs by it.',
+      render: (r) => (
+        <Select
+          value={r.entry.kind ?? ''}
+          options={[{ value: '', label: 'Other (not set)' }, ...ACTIVITY_KINDS.filter((k) => k !== 'OTHER').map((k) => ({ value: k, label: KIND_LABEL[k] })), { value: 'OTHER', label: 'Other' }]}
+          onChange={(v) => edit(r.matchKey, { kind: (v || undefined) as ActivityKind | undefined })}
+        />
+      ),
     },
     { key: 'inc', label: 'Include', value: (r) => `${r.entry.includeOverride ?? ''}${r.include}`, render: (r) => <span className="flex items-center gap-1"><Select value={r.entry.includeOverride ?? ''} options={incOpts} onChange={(v) => edit(r.matchKey, { includeOverride: (v || undefined) as 'Y' | 'N' | undefined })} /><Badge tone={r.include === 'Y' ? 'good' : 'muted'}>{r.include}</Badge></span> },
     { key: 'basis', label: 'Basis', value: (r) => r.basisEff, render: (r) => <Select value={r.entry.basis ?? ''} options={basisOpts} onChange={(v) => edit(r.matchKey, { basis: (v || undefined) as Basis | undefined })} /> },
@@ -352,7 +366,7 @@ function CrewEditor({
 /** Drop undefined fields so the JSON stays tidy. */
 function clean(e: LibraryEntry): LibraryEntry {
   const out: LibraryEntry = { matchKey: e.matchKey };
-  for (const k of ['discipline', 'includeOverride', 'basis', 'crewSize', 'shiftHours', 'durationShifts', 'notes', 'retired'] as const) {
+  for (const k of ['discipline', 'kind', 'includeOverride', 'basis', 'crewSize', 'shiftHours', 'durationShifts', 'notes', 'retired'] as const) {
     const v = e[k];
     if (v !== undefined && v !== null && v !== '') (out as Record<string, unknown>)[k] = v;
   }

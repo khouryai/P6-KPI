@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, Select, Badge, Notice, Panel, statusTone, type Column } from '../components/ui';
-import type { ActivityOverride, ActivityVisibility, BudgetRow } from '../../engine/types';
+import type { ActivityKind, ActivityOverride, ActivityVisibility, BudgetRow } from '../../engine/types';
+import { ACTIVITY_KINDS, KIND_LABEL } from '../../engine/types';
 import { fmtHours, fmtPct, fmtDate, num } from '../format';
 import { normKey } from '../../engine/keys';
 import { href, type Route } from '../router';
@@ -21,7 +22,7 @@ const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> 
   override: { label: 'Has an hours override', test: (r) => r.overrideHours !== null },
   edited: {
     label: 'Carries an edit of yours',
-    test: (r) => r.renamed || r.visibility !== null || r.overrideHours !== null || r.phaseEdited || r.locationEdited || r.locationSplit || r.datesEdited,
+    test: (r) => r.renamed || r.visibility !== null || r.overrideHours !== null || r.phaseEdited || r.locationEdited || r.locationSplit || r.datesEdited || r.kindSource === 'activity',
   },
   dates: { label: 'Dates changed — for the scheduler', test: (r) => r.datesEdited },
   moved: { label: 'Moved to another phase or location', test: (r) => r.phaseEdited || r.locationEdited },
@@ -60,6 +61,7 @@ export function BudgetMaster({ route }: { route: Route }) {
   const [phase, setPhase] = useState(route.params.get('phase') ?? '');
   const [work, setWork] = useState(route.params.get('work') ?? '');
   const [disc, setDisc] = useState(route.params.get('disc') ?? '');
+  const [kind, setKind] = useState(route.params.get('kind') ?? '');
   const [sub, setSub] = useState(route.params.get('sub') ?? '');
   const [status, setStatus] = useState('');
   const [win, setWin] = useState('');
@@ -98,6 +100,7 @@ export function BudgetMaster({ route }: { route: Route }) {
     // Subsystem reads "ATS, IXL" is an ATS activity and an IXL one, and drilling in
     // from the ATS row of a rollup has to find it.
     if (disc) r = r.filter((x) => x.disciplines.some((d) => normKey(d) === normKey(disc)));
+    if (kind) r = r.filter((x) => x.kind === kind);
     // An activity can draw on several subsystems, so this narrows to the ones that
     // draw on this group at all rather than to a group that "owns" the activity.
     if (sub) r = r.filter((x) => (x.subsystemHours[sub] ?? 0) > 0);
@@ -114,7 +117,7 @@ export function BudgetMaster({ route }: { route: Route }) {
       );
     }
     return r;
-  }, [source, flag, loc, phase, work, disc, sub, status, win, text]);
+  }, [source, flag, loc, phase, work, disc, kind, sub, status, win, text]);
 
   /**
    * One upsert for every per-activity edit.
@@ -128,6 +131,8 @@ export function BudgetMaster({ route }: { route: Route }) {
     actions.update('overrides', (ovs) => upsertOverrides(ovs, [activityId], patch));
   };
 
+  /** What the activity's Activity Library key says, for the Auto choice to name. */
+  const libraryKind = (key: string): ActivityKind => state.data.library.find((e) => !e.retired && normKey(e.matchKey) === normKey(key))?.kind ?? 'OTHER';
   const ovOf = (id: string) => state.data.overrides.find((o) => normKey(o.activityId) === normKey(id));
 
   /** Read a typed split, or say what is wrong with it. Blank clears it. */
@@ -233,6 +238,7 @@ export function BudgetMaster({ route }: { route: Route }) {
 
   const [showBulk, setShowBulk] = useState(false);
   const [bulkDiscipline, setBulkDiscipline] = useState('');
+  const [bulkKind, setBulkKind] = useState('');
   const [bulkHours, setBulkHours] = useState('');
   const [bulkNote, setBulkNote] = useState('');
   const [bulkPhase, setBulkPhase] = useState('');
@@ -420,6 +426,22 @@ export function BudgetMaster({ route }: { route: Route }) {
       render: (r) => (
         <span className="cell-text" title={r.matchKey}>
           {r.matchKey}
+        </span>
+      ),
+    },
+    {
+      key: 'kind',
+      label: 'Static / Dynamic',
+      value: (r) => KIND_LABEL[r.kind],
+      hint: 'Editable. Static, Dynamic or Other for this one activity. Auto follows its Activity Library key (Other when the key has none). Rollups and exports split the KPIs by it.',
+      render: (r) => (
+        <span className="flex items-center gap-1">
+          <Select
+            value={r.kindSource === 'activity' ? r.kind : ''}
+            options={[{ value: '', label: `Auto (${KIND_LABEL[libraryKind(r.matchKey)]})` }, ...ACTIVITY_KINDS.map((k) => ({ value: k, label: KIND_LABEL[k] }))]}
+            onChange={(v) => setOv(r.activityId, { kind: (v || undefined) as ActivityKind | undefined })}
+          />
+          {r.kindSource === 'activity' && <Badge tone="purple">yours</Badge>}
         </span>
       ),
     },
@@ -638,6 +660,10 @@ export function BudgetMaster({ route }: { route: Route }) {
           <select className="input" value={phase} onChange={(e) => setPhase(e.target.value)}>{opts(phases).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All phases' : (model.groups.phase.find((g) => g.key === o.value)?.label ?? o.label)}</option>)}</select>
           <select className="input" value={loc} onChange={(e) => setLoc(e.target.value)}>{opts(locs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All locations' : locName(o.value) !== o.value ? `${locName(o.value)} (${o.value})` : o.label}</option>)}</select>
           <select className="input" value={work} onChange={(e) => setWork(e.target.value)}>{opts(works).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? 'All work types' : o.label}</option>)}</select>
+          <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
+            <option value="">Static, Dynamic and Other</option>
+            {ACTIVITY_KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k]} only</option>)}
+          </select>
           <select className="input" value={disc} onChange={(e) => setDisc(e.target.value)}>{opts(discs).map((o) => <option key={o.value} value={o.value}>{o.label === 'All' ? `All ${TERMS.disciplineLowerPlural}` : o.label}</option>)}</select>
           {subs.length > 0 && (
             <select className="input" value={sub} onChange={(e) => setSub(e.target.value)} title={`Activities whose crew includes this ${TERMS.subsystemLower}`}>
@@ -710,6 +736,26 @@ export function BudgetMaster({ route }: { route: Route }) {
           className="mb-3"
         >
           <div className="grid gap-4 md:grid-cols-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Static / Dynamic</div>
+              <div className="mt-1 flex gap-2">
+                <select className="input w-40" value={bulkKind} onChange={(e) => setBulkKind(e.target.value)}>
+                  <option value="">Auto (library decides)</option>
+                  {ACTIVITY_KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
+                </select>
+                <button
+                  className="btn"
+                  disabled={rows.length === 0}
+                  onClick={() => applyToShown({ kind: (bulkKind || undefined) as ActivityKind | undefined }, bulkKind ? `Set to ${KIND_LABEL[bulkKind as ActivityKind]}` : 'Hand Static / Dynamic back to the Activity Library')}
+                >
+                  Apply
+                </button>
+              </div>
+              <div className="mt-1 text-[11.5px] text-[var(--text-subtle)]">
+                For these activities only. Auto follows each one's Activity Library key. To set a whole type, use the Activity Library.
+              </div>
+            </div>
+
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{TERMS.subsystem}</div>
               <div className="mt-1 flex gap-2">

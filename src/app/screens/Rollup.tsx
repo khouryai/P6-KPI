@@ -16,6 +16,7 @@ const DIMS: { id: GroupDim; label: string; note: string }[] = [
     label: TERMS.discipline,
     note: `From the ${TERMS.disciplineLower} you set on each Activity Library key. A key naming more than one — "ATS, IXL" — has its hours shared evenly between them.`,
   },
+  { id: 'kind', label: 'Static / Dynamic', note: 'Static, Dynamic or Other, as set on each Activity Library key or on the activity in Budget Master. Unset is Other.' },
   { id: 'workType', label: 'Work type', note: 'From the 3rd segment of the Activity ID, so TC is Testing and Commissioning.' },
 ];
 
@@ -78,6 +79,7 @@ export function Rollup() {
     if (dim === 'phase') params.phase = g.key;
     if (dim === 'discipline') params.disc = g.key;
     if (dim === 'workType') params.work = g.key;
+    if (dim === 'kind') params.kind = g.key;
     if (withinPhase && dim !== 'phase') params.phase = withinPhase;
     return href('budget', params);
   };

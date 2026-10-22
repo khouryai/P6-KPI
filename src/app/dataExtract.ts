@@ -17,6 +17,8 @@
  */
 import * as XLSX from 'xlsx';
 import type { ActivityVisibility, BudgetRow, Model } from '../engine/types';
+import { ACTIVITY_KINDS, KIND_LABEL as KIND_NAME } from '../engine/types';
+import { phaseOrder } from './scurve';
 import type { StoreData } from '../storage/store';
 import { formatLocationSplit } from '../engine/compute';
 import { periodLog, addDays, needsReason, OUTCOMES, type PeriodActivity, type PeriodPhase } from '../engine/period';
@@ -147,6 +149,13 @@ export const STATUS_CODES: { field: string; value: string; meaning: string; appe
   { field: 'Outcome', value: 'CONTINUED', meaning: 'Began earlier, still running, and earned hours inside the fortnight.', appearsIn: 'Two_Week_Log' },
   { field: 'Outcome', value: 'MISSED', meaning: 'The plan had it finishing inside the fortnight. It did not finish.', appearsIn: 'Two_Week_Log' },
   { field: 'Outcome', value: 'NOT STARTED', meaning: 'The plan had it starting inside the fortnight. It never started.', appearsIn: 'Two_Week_Log' },
+  { field: 'Static_Dynamic', value: 'Static', meaning: 'Static testing.', appearsIn: 'All_Activities, Activity_Locations, Activity_Resources, Two_Week_Log, KPI_By_Static_Dynamic, Budget_Master, Activity_Library' },
+  { field: 'Static_Dynamic', value: 'Dynamic', meaning: 'Dynamic testing.', appearsIn: 'All_Activities, Activity_Locations, Activity_Resources, Two_Week_Log, KPI_By_Static_Dynamic, Budget_Master, Activity_Library' },
+  { field: 'Static_Dynamic', value: 'Other', meaning: 'Neither, or not set yet: an activity whose key and own setting are both blank is Other.', appearsIn: 'All_Activities, Activity_Locations, Activity_Resources, Two_Week_Log, KPI_By_Static_Dynamic, Budget_Master, Activity_Library' },
+  { field: 'Static_Dynamic', value: 'All', meaning: 'Static, Dynamic and Other together: the phase or project total.', appearsIn: 'KPI_By_Static_Dynamic' },
+  { field: 'Static_Dynamic_Source', value: 'Set on the activity', meaning: 'Chosen for this one activity in Budget Master. Beats the library.', appearsIn: 'All_Activities' },
+  { field: 'Static_Dynamic_Source', value: 'Activity Library key', meaning: 'Taken from the activity’s Activity Library key.', appearsIn: 'All_Activities' },
+  { field: 'Static_Dynamic_Source', value: 'Not set', meaning: 'Set nowhere, so Other.', appearsIn: 'All_Activities' },
   { field: 'Include', value: 'Y / N', meaning: 'Whether an activity type carries hours. Types marked (by BART), (by Others) or (Deleted) default to N.', appearsIn: 'Activity_Library' },
   { field: 'Group', value: 'Unassigned', meaning: 'Hours whose crew names no resource group: the library key is priced as a plain headcount.', appearsIn: 'Resources, Activity_Resources, Earned_vs_Actual sheets' },
 ];
@@ -156,6 +165,7 @@ export const STATUS_CODES: { field: string; value: string; meaning: string; appe
  */
 function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
   const ovIdx = new Map(data.overrides.map((o) => [normKey(o.activityId), o]));
+  const kindOf = new Map(model.rows.map((r) => [normKey(r.activityId), r.kind]));
   const tpIdx = new Map(data.testProgress.map((t) => [normKey(t.activityId), t]));
   const ov = (r: BudgetRow) => ovIdx.get(normKey(r.activityId));
   const tp = (r: BudgetRow) => tpIdx.get(normKey(r.activityId));
@@ -184,6 +194,8 @@ function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
         { h: 'Phase', meaning: 'The phase as reported, e.g. Phase 2.', v: (r) => r.phaseName },
         { h: 'Phase_Source', meaning: 'Where the phase came from. See Status_Codes.', v: (r) => source(r.phaseEdited, r.phaseFromRule) },
         { h: 'Work_Type', meaning: '3rd segment of the Activity ID: TC is test and commissioning, AC acceptance.', v: (r) => r.workType },
+        { h: 'Static_Dynamic', meaning: 'Static, Dynamic or Other: the activity’s own setting in Budget Master, else its Activity Library key’s, else Other. See Status_Codes.', v: (r) => KIND_NAME[r.kind] },
+        { h: 'Static_Dynamic_Source', meaning: 'Where Static_Dynamic came from. See Status_Codes.', v: (r) => (r.kindSource === 'activity' ? 'Set on the activity' : r.kindSource === 'library' ? 'Activity Library key' : 'Not set') },
         { h: 'Location_Code', meaning: 'The location code: the 4th segment of the Activity ID unless a rule or a move says otherwise. Where a split leaves a share.', v: (r) => r.location },
         { h: 'Location_Name', meaning: 'The location as reported: its name from the Locations screen (the code where it has none), with every share when split.', v: (r) => r.locationName },
         { h: 'Location_Source', meaning: 'Where the location code came from. See Status_Codes.', v: (r) => source(r.locationEdited, r.locationFromRule) },
@@ -241,6 +253,7 @@ function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
         { h: 'Activity_ID', meaning: 'The P6 Activity ID.', v: (x) => x.r.activityId },
         { h: 'Activity_Name', meaning: 'The name as reported.', v: (x) => x.r.activityName },
         { h: 'Phase', meaning: 'The phase as reported.', v: (x) => x.r.phaseName },
+        { h: 'Static_Dynamic', meaning: 'Static, Dynamic or Other. See Status_Codes.', v: (x) => KIND_NAME[x.r.kind] },
         { h: 'Location_Code', meaning: 'The location code of this share.', v: (x) => x.code },
         { h: 'Location_Name', meaning: 'That location’s name from the Locations screen, or the code where it has none.', v: (x) => x.name },
         { h: 'Share', meaning: 'This location’s share of the activity. The shares of one activity add to 100%.', kind: 'pct', v: (x) => x.share },
@@ -264,6 +277,7 @@ function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
         { h: 'Activity_ID', meaning: 'The P6 Activity ID.', v: (l) => l.r.activityId },
         { h: 'Activity_Name', meaning: 'The name as reported.', v: (l) => l.r.activityName },
         { h: 'Phase', meaning: 'The phase as reported.', v: (l) => l.r.phaseName },
+        { h: 'Static_Dynamic', meaning: 'Static, Dynamic or Other. See Status_Codes.', v: (l) => KIND_NAME[l.r.kind] },
         { h: 'Location_Name', meaning: 'The location as reported.', v: (l) => l.r.locationName },
         { h: 'Resource_Code', meaning: 'The resource group code, e.g. ATS. Blank when the type is priced as a plain headcount.', v: (l) => l.x.code },
         { h: 'Resource', meaning: 'The resource group as reported, or Unassigned.', v: (l) => l.x.label },
@@ -276,7 +290,42 @@ function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
     ),
   );
 
-  const DIM_NAME = { phase: 'Phase', location: 'Location', discipline: 'Subsystem', workType: 'Work type' } as const;
+  /*
+   * The KPIs split by Static / Dynamic, phase by phase and for the whole project.
+   * Every phase has a row for each of the three, even one carrying nothing, so the
+   * sheet reads the same shape every time it is opened.
+   */
+  type KpiRow = { phase: string; kind: string; rows: BudgetRow[] };
+  const phases = [...new Map(model.rows.map((r) => [r.phase, r.phaseName])).entries()].sort((a, b) => phaseOrder(a[0]) - phaseOrder(b[0]) || a[1].localeCompare(b[1]));
+  const kpiRows: KpiRow[] = [
+    ...[['', 'Whole project'] as [string, string], ...phases].flatMap(([key, name]) => {
+      const inPhase = key === '' && name === 'Whole project' ? model.rows : model.rows.filter((r) => r.phase === key);
+      return [...ACTIVITY_KINDS.map((k) => ({ phase: name || 'No phase in the ID', kind: KIND_NAME[k], rows: inPhase.filter((r) => r.kind === k) })), { phase: name || 'No phase in the ID', kind: 'All', rows: inPhase }];
+    }),
+  ];
+  const sum = (rs: BudgetRow[], f: (r: BudgetRow) => number) => rs.reduce((s, r) => s + f(r), 0);
+  out.push(
+    table<KpiRow>(
+      'KPI_By_Static_Dynamic',
+      'The KPIs split by Static / Dynamic: for the whole project and each phase, a row each for Static, Dynamic and Other, and one for all three together. Percentages are of that row’s own budget.',
+      [
+        { h: 'Phase', meaning: 'The phase as reported, or Whole project.', v: (x) => x.phase },
+        { h: 'Static_Dynamic', meaning: 'Static, Dynamic, Other, or All for the three together. See Status_Codes.', v: (x) => x.kind },
+        { h: 'In_Budget', meaning: 'Activities in the budget.', kind: 'int', v: (x) => x.rows.filter((r) => r.status === 'IN BUDGET').length },
+        { h: 'Budget_Hours', meaning: 'Budget hours.', kind: 'hours', v: (x) => sum(x.rows, (r) => r.budgetHours) },
+        { h: 'Earned_Hours', meaning: 'Earned hours.', kind: 'hours', v: (x) => sum(x.rows, (r) => r.earnedHours) },
+        { h: 'Remaining_Hours', meaning: 'Budget hours not yet earned.', kind: 'hours', v: (x) => sum(x.rows, (r) => r.remainingHours) },
+        { h: 'Pct_Complete', meaning: 'Earned over budget hours, for this row alone.', kind: 'pct', v: (x) => { const b = sum(x.rows, (r) => r.budgetHours); return b ? sum(x.rows, (r) => r.earnedHours) / b : ''; } },
+        { h: 'Share_Of_Phase_Budget', meaning: 'This row’s budget as a share of its phase’s (or the project’s) whole budget.', kind: 'pct', v: (x) => { const whole = sum(x.phase === 'Whole project' ? model.rows : model.rows.filter((r) => r.phaseName === x.phase), (r) => r.budgetHours); return whole ? sum(x.rows, (r) => r.budgetHours) / whole : ''; } },
+        { h: 'Not_Started', meaning: 'In-budget activities not yet begun.', kind: 'int', v: (x) => x.rows.filter((r) => r.status === 'IN BUDGET' && r.earnWindowSource === 'NOT STARTED').length },
+        { h: 'In_Progress', meaning: 'In-budget activities started and not finished.', kind: 'int', v: (x) => x.rows.filter((r) => r.status === 'IN BUDGET' && (r.earnWindowSource === 'IN PROGRESS' || r.earnWindowSource === 'PROGRESS AS AT')).length },
+        { h: 'Finished', meaning: 'In-budget activities with an actual finish.', kind: 'int', v: (x) => x.rows.filter((r) => r.status === 'IN BUDGET' && !!r.actualFinish).length },
+      ],
+      kpiRows,
+    ),
+  );
+
+  const DIM_NAME = { phase: 'Phase', location: 'Location', discipline: 'Subsystem', workType: 'Work type', kind: 'Static / Dynamic' } as const;
   type G = { dim: keyof typeof DIM_NAME; g: Model['groups']['phase'][number] };
   out.push(
     table<G>(
@@ -365,6 +414,7 @@ function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
         { h: 'Activity_ID', meaning: 'The P6 Activity ID.', v: (a) => a.activityId },
         { h: 'Activity_Name', meaning: 'The name as reported.', v: (a) => a.activityName },
         { h: 'Phase', meaning: 'The phase as reported.', v: (a) => a.phaseName },
+        { h: 'Static_Dynamic', meaning: 'Static, Dynamic or Other. See Status_Codes.', v: (a) => KIND_NAME[kindOf.get(normKey(a.activityId)) ?? 'OTHER'] },
         { h: 'Location_Name', meaning: 'The location as reported.', v: (a) => a.locationName },
         { h: 'Outcome', meaning: 'What happened to the activity in the fortnight. See Status_Codes.', v: (a) => a.outcome },
         { h: 'Planned_Hours', meaning: 'Budget hours the baseline planned to accrue inside the fortnight.', kind: 'hours', v: (a) => a.plannedHours },
@@ -659,6 +709,7 @@ const SOURCE_SHEETS: Record<string, { purpose: string; keyValue?: boolean; colum
       Shift_Eff: d('The shift hours in use.', 'number'),
       Std_Hours_If_RATE: d('Hours one instance carries on the RATE basis; n/a for DUR.', 'hours'),
       Notes: d('Notes on the key.'),
+      Static_Dynamic: d('Static, Dynamic or Other, for every activity of the type unless one is set on its own in Budget Master. See Status_Codes.'),
     },
   },
   Progress: {
@@ -704,6 +755,7 @@ const SOURCE_SHEETS: Record<string, { purpose: string; keyValue?: boolean; colum
       Crew_Size: d('Heads across every resource line.', 'int'),
       Resources: d('The crew, e.g. ATS x1, IXL x1.'),
       Location_Split: d('The split across locations by code. Blank when at one location.'),
+      Static_Dynamic: d('Static, Dynamic or Other for the activity. See Status_Codes.'),
     },
   },
   Missed_Reasons: {

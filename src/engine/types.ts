@@ -70,8 +70,19 @@ export type LocationShare = {
   share: number;
 };
 
+/**
+ * Whether an activity is static testing, dynamic testing, or anything else. Set on
+ * an Activity Library key for every activity of the type, or on one activity in
+ * Budget Master, which wins. Unset is OTHER.
+ */
+export type ActivityKind = 'STATIC' | 'DYNAMIC' | 'OTHER';
+export const ACTIVITY_KINDS: ActivityKind[] = ['STATIC', 'DYNAMIC', 'OTHER'];
+export const KIND_LABEL: Record<ActivityKind, string> = { STATIC: 'Static', DYNAMIC: 'Dynamic', OTHER: 'Other' };
+
 export type LibraryEntry = {
   matchKey: string; // stripped activity type, first-seen spelling
+  /** Static, dynamic or other, for every activity of this type. Undefined is OTHER. */
+  kind?: ActivityKind;
   discipline?: string;
   includeOverride?: 'Y' | 'N'; // undefined means auto
   basis?: Basis; // undefined means defaultBasis
@@ -206,6 +217,8 @@ export type ActivityOverride = {
   nameOverride?: string;
   /** Replaces the library entry's discipline for this one activity. */
   discipline?: string;
+  /** Static, dynamic or other for this one activity, whatever its library key says. */
+  kind?: ActivityKind;
   /**
    * Moves this one activity to another phase or location, whatever its Activity ID
    * says and whatever an Activity ID Rule says. P6 is never touched; clearing the
@@ -474,6 +487,10 @@ export type BudgetRow = {
   phaseName: string;
   /** Raw 3rd segment, e.g. "TC" or "AC". */
   workType: string;
+  /** Static, dynamic or other: this activity's own setting, else its library key's, else OTHER. */
+  kind: ActivityKind;
+  /** Where `kind` came from. */
+  kindSource: 'activity' | 'library' | 'default';
   seqCode: string;
   activityType: string;
   matchKey: string; // resolved key, library spelling when matched
@@ -597,7 +614,7 @@ export type LocationStat = {
 };
 
 /** A dimension the budget can be rolled up by. */
-export type GroupDim = 'phase' | 'location' | 'discipline' | 'workType';
+export type GroupDim = 'phase' | 'location' | 'discipline' | 'workType' | 'kind';
 
 /**
  * Hours attributed to one subsystem. Unlike a GroupStat this is NOT a partition of

@@ -316,6 +316,8 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
       phaseEdited: !!phaseEdit,
       phaseName: phaseLabel(phaseOfRow),
       workType: workTypeOf(a.activityId),
+      kind: ov?.kind ?? entry?.kind ?? 'OTHER',
+      kindSource: ov?.kind ? 'activity' : entry?.kind ? 'library' : 'default',
       seqCode: a.seqCode,
       activityType: a.activityType,
       matchKey: match.matchKey,
@@ -622,6 +624,7 @@ export function computeBase(input: Omit<ModelInput, 'teamActuals'>): ModelBase {
     location: groupRows(rows, 'location'),
     discipline: groupRows(rows, 'discipline'),
     workType: groupRows(rows, 'workType'),
+    kind: groupRows(rows, 'kind'),
   };
 
   return {

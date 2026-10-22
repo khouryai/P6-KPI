@@ -455,3 +455,21 @@ test('exports an S-curve per phase chosen, stacked, as SCurve_Latest.png', async
   expect(height).toBeGreaterThan(2 * 380 * 2);
   expect(errors, 'a screen threw while rendering').toEqual([]);
 });
+
+/** Static / Dynamic, set on a library key and overridden on one activity, splits the rollup. */
+test('Static / Dynamic is set in the library, overridden in Budget Master, and splits the rollup', async ({ page }) => {
+  const errors = await open(page);
+  await importSchedule(page, 'current', schedule({ finished: 2, ahead: 2 }));
+  await page.goto('/#/library');
+  await page.locator('.tbl tbody tr').first().locator('select').first().selectOption('STATIC');
+  await page.goto('/#/budget');
+  const row = page.locator('.tbl tbody tr').filter({ hasText: '0-P5-TC-B20-FA-000' }).first();
+  await row.locator('select').filter({ has: page.locator('option', { hasText: 'Auto (Static)' }) }).selectOption('DYNAMIC');
+  await expect(row.getByText('yours')).toBeVisible();
+  await page.goto('/#/rollup');
+  await page.getByRole('button', { name: 'Static / Dynamic', exact: true }).click();
+  const groups = page.locator('.tbl tbody tr');
+  await expect(groups.filter({ hasText: 'Static' })).toHaveCount(1);
+  await expect(groups.filter({ hasText: 'Dynamic' })).toHaveCount(1);
+  expect(errors, 'a screen threw while rendering').toEqual([]);
+});

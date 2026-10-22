@@ -6,6 +6,7 @@
  * exactly, however the rows are cut.
  */
 import type { BudgetRow, GroupDim, GroupStat, Subsystem, SubsystemCell, SubsystemStat } from './types';
+import { KIND_LABEL, type ActivityKind } from './types';
 import { normKey } from './keys';
 import { phaseLabel } from './parse';
 
@@ -105,6 +106,7 @@ const DIM_PARTS: Record<GroupDim, (r: BudgetRow) => { key: string; weight: numbe
       ? r.disciplines.map((d) => ({ key: d, weight: 1 / r.disciplines.length }))
       : [{ key: r.disciplines[0] ?? '', weight: 1 }],
   workType: (r) => [{ key: r.workType, weight: 1 }],
+  kind: (r) => [{ key: r.kind, weight: 1 }],
 };
 
 const DIM_LABEL: Record<GroupDim, (key: string) => string> = {
@@ -112,6 +114,7 @@ const DIM_LABEL: Record<GroupDim, (key: string) => string> = {
   location: (k) => (k === '' ? 'No location in the ID' : k),
   discipline: (k) => (k === '' ? 'No discipline set' : k),
   workType: (k) => (k === '' ? 'No work type in the ID' : k),
+  kind: (k) => KIND_LABEL[k as ActivityKind] ?? k,
 };
 
 /**
