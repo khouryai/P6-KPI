@@ -1,6 +1,6 @@
 import { useApp } from '../state';
 import { Page, SortableTable, CellInput, type Column } from '../components/ui';
-import type { LocationStat } from '../../engine/types';
+import type { Location, LocationStat } from '../../engine/types';
 import { fmtHours, fmtPct, num } from '../format';
 import { normKey } from '../../engine/keys';
 import { href } from '../router';
@@ -9,15 +9,18 @@ export function Locations() {
   const { state, model, actions } = useApp();
   const def = state.data.settings.defaultComplexity;
   const edit = (code: string, patch: { name?: string; complexityFactor?: number }) =>
-    actions.update('locations', (ls) =>
-      ls.map((l) => {
-        if (normKey(l.code) !== normKey(code)) return l;
+    actions.update('locations', (ls) => {
+      const apply = (l: Location) => {
         const next = { ...l, ...patch };
         if (next.name === undefined || next.name === '') delete next.name;
         if (next.complexityFactor === undefined) delete next.complexityFactor;
         return next;
-      }),
-    );
+      };
+      // A code a rule or a Budget Master split produced is listed here but was never
+      // saved, so there is nothing to update: add it, or the edit is silently dropped.
+      if (!ls.some((l) => normKey(l.code) === normKey(code))) return [...ls, apply({ code })];
+      return ls.map((l) => (normKey(l.code) === normKey(code) ? apply(l) : l));
+    });
   const columns: Column<LocationStat>[] = [
     { key: 'code', label: 'Location', value: (r) => r.code, render: (r) => <span className="font-semibold">{r.code}</span> },
     {
