@@ -17,7 +17,7 @@
 import { describe, it, expect } from 'vitest';
 import type { MissedReasonLog } from '../src/engine/types';
 import { DEFAULT_MISSED_REASONS } from '../src/engine/types';
-import { addReasonToCatalogue, effectiveReasonFor, isReasonUnused, reasonCatalogue, reasonFor, reasonUsage, removeReasonFromCatalogue, setMissedReason, tallyReasons } from '../src/app/missedReasons';
+import { addReasonToCatalogue, effectiveReasonFor, isCurrentReason, isReasonUnused, reasonCatalogue, reasonFor, reasonUsage, removeReasonFromCatalogue, setMissedReason, tallyReasons } from '../src/app/missedReasons';
 import { normKey } from '../src/engine/keys';
 import type { DataUpdater } from '../src/app/state';
 
@@ -211,26 +211,60 @@ describe('the answer follows the activity', () => {
     }
   });
 
-  it('prefers this period\u2019s own answer over one kept from another', () => {
+  /*
+   * The complaint this came from: an answer given at one review showed greyed out
+   * at another reporting date and could not be changed or cleared from there. The
+   * answer is the activity's; the reporting date only decides which activities are
+   * listed.
+   */
+  it('shows the last answer given in every period, whichever review it was given at', () => {
     const { box, update } = harness();
     setMissedReason(update, 'A-1', '2026-08-31', 'Weather');
     setMissedReason(update, 'A-1', '2026-09-14', 'Access not available');
-    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-14')).toEqual({
-      entry: expect.objectContaining({ reason: 'Access not available' }),
-      carried: false,
-    });
-    // And each review still keeps its own: the older answer is not overwritten.
+    for (const end of ['2026-08-17', '2026-08-31', '2026-09-14', '2026-10-12']) {
+      expect(effectiveReasonFor(box.log, 'A-1', end)?.entry.reason, `end ${end}`).toBe('Access not available');
+    }
+    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-14')?.carried).toBe(false);
+    expect(effectiveReasonFor(box.log, 'A-1', '2026-08-31')?.carried).toBe(true);
+  });
+
+  it('changes an answer from any reporting date, not only the one it was given at', () => {
+    const { box, update } = harness();
+    setMissedReason(update, 'A-1', '2026-09-14', 'Access not available');
+    setMissedReason(update, 'A-1', '2026-08-31', 'Weather');
+    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-14')?.entry.reason).toBe('Weather');
     expect(effectiveReasonFor(box.log, 'A-1', '2026-08-31')?.entry.reason).toBe('Weather');
   });
 
-  it('takes the nearest period, and the later one when two are equally far off', () => {
+  it('changes an older review\u2019s answer again, back at that review', () => {
     const { box, update } = harness();
     setMissedReason(update, 'A-1', '2026-08-31', 'Weather');
-    setMissedReason(update, 'A-1', '2026-09-28', 'Access not available');
-    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-20')?.entry.reason).toBe('Access not available');
-    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-05')?.entry.reason).toBe('Weather');
-    // Equidistant: 14 days either side of 14 Sep.
-    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-14')?.entry.reason).toBe('Access not available');
+    setMissedReason(update, 'A-1', '2026-09-14', 'Access not available');
+    setMissedReason(update, 'A-1', '2026-08-31', 'Resource not available');
+    expect(effectiveReasonFor(box.log, 'A-1', '2026-09-14')?.entry.reason).toBe('Resource not available');
+  });
+
+  it('clears from any reporting date, and stays cleared at every other', () => {
+    const { box, update } = harness();
+    setMissedReason(update, 'A-1', '2026-08-31', 'Weather');
+    setMissedReason(update, 'A-1', '2026-09-14', 'Access not available');
+    setMissedReason(update, 'A-1', '2026-10-12', '');
+    for (const end of ['2026-08-31', '2026-09-14', '2026-10-12']) expect(effectiveReasonFor(box.log, 'A-1', end), `end ${end}`).toBeUndefined();
+  });
+
+  it('keeps what each review said, as history, with the current one marked', () => {
+    const { box, update } = harness();
+    setMissedReason(update, 'A-1', '2026-08-31', 'Weather');
+    setMissedReason(update, 'A-1', '2026-09-14', 'Access not available');
+    expect(box.log.entries).toHaveLength(2);
+    expect(box.log.entries.filter((e) => isCurrentReason(box.log, e)).map((e) => e.reason)).toEqual(['Access not available']);
+  });
+
+  it('keeps the note written at a review when that review\u2019s answer is changed', () => {
+    const { box, update } = harness();
+    setMissedReason(update, 'A-1', '2026-08-31', 'Weather', 'Storm closed the yard');
+    setMissedReason(update, 'A-1', '2026-08-31', 'Access not available');
+    expect(effectiveReasonFor(box.log, 'A-1', '2026-08-31')?.entry.note).toBe('Storm closed the yard');
   });
 
   it('says nothing about an activity nobody has answered for', () => {

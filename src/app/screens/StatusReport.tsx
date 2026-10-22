@@ -371,13 +371,12 @@ export function StatusReport() {
           <span
             className="cell-text"
             title={
-              (eff.carried ? `Carried from the period ending ${fmtDate(eff.entry.periodEnd)}. ` : '') +
+              (eff.carried ? `Given at the review ending ${fmtDate(eff.entry.periodEnd)}. ` : '') +
               (outside ? 'Outside the team’s control: its hours are held by a constraint, not counted against the workable plan.' : 'The team’s own reason.')
             }
           >
             {eff.entry.reason}
             {outside && <span className="ml-1 tone-info">(constraint)</span>}
-            {eff.carried && <span className="ml-1 text-[var(--text-subtle)]">(carried)</span>}
           </span>
         );
       },

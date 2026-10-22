@@ -10,6 +10,7 @@ import * as XLSX from 'xlsx';
 import type { BurnRow, Model, Settings, P6Activity, TestProgress, MissedReasonLog } from '../engine/types';
 import { p6PctComplete, marksActuals, formatLocationSplit } from '../engine/compute';
 import { fiscalYearDetail, fiscalYearLabel, fiscalYearOf, forecastYears, fyStart } from '../engine/fiscal';
+import { isCurrentReason } from './missedReasons';
 
 const d = (iso: string | null | undefined): Date | '' => (iso ? new Date(`${iso}T00:00:00`) : '');
 const wsFrom = (rows: unknown[][]) => XLSX.utils.aoa_to_sheet(rows, { cellDates: true });
@@ -232,13 +233,13 @@ export function buildWorkbook(
    */
   const byId = new Map(model.rows.map((r) => [r.activityId, r]));
   XLSX.utils.book_append_sheet(wb, wsFrom([
-    ['Period_End', 'P6_Activity_ID', 'Activity_Name', 'Phase', 'Location', 'Reason', 'Note', 'Recorded_At', 'Still_Applies'],
+    ['Period_End', 'P6_Activity_ID', 'Activity_Name', 'Phase', 'Location', 'Reason', 'Note', 'Recorded_At', 'Still_Applies', 'Is_Current'],
     ...[...missedReasons.entries]
       .sort((a, b) => b.periodEnd.localeCompare(a.periodEnd) || a.activityId.localeCompare(b.activityId))
       .map((e) => {
         const r = byId.get(e.activityId);
         // Kept as the record of that review, but an activity since started or finished is no longer owed it.
-        return [d(e.periodEnd), e.activityId, r?.activityName ?? '', r?.phaseName ?? '', r?.locationName ?? '', e.reason, e.note ?? '', e.updatedAt, r && (r.actualStart || r.actualFinish) ? '' : 'Y'];
+        return [d(e.periodEnd), e.activityId, r?.activityName ?? '', r?.phaseName ?? '', r?.locationName ?? '', e.reason, e.note ?? '', e.updatedAt, r && (r.actualStart || r.actualFinish) ? '' : 'Y', isCurrentReason(missedReasons, e) ? 'Y' : ''];
       }),
   ]), 'Missed_Reasons');
   XLSX.utils.book_append_sheet(wb, wsFrom([

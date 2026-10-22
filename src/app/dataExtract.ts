@@ -384,7 +384,7 @@ function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
         { h: 'Spread_To_Data_Date', meaning: 'Y when nobody said when its progress happened, so its hours are spread to the data date — not evidence of work in this fortnight.', kind: 'flag', v: (a) => flag(a.spreadToDataDate) },
         { h: 'Needs_Reason', meaning: 'Y for a MISSED or NOT STARTED activity with no actual start or finish: the plan counted on it and nothing has happened. Anything under way or done is never asked why it missed.', kind: 'flag', v: (a) => flag(needsReason(a)) },
         { h: 'Why_Missed', meaning: 'The reason recorded on the Two-Week Log, for a row that needs one. Blank on anything with an actual start or finish.', v: (a) => reasonOf(a)?.entry.reason ?? '' },
-        { h: 'Reason_From_Other_Period', meaning: 'Y when that reason was recorded against a different fortnight and carried to this one.', kind: 'flag', v: (a) => flag(!!reasonOf(a)?.carried) },
+        { h: 'Reason_From_Other_Period', meaning: 'Y when the activity’s current reason was given at a review ending on a different date. A reason is the activity’s at every reporting date.', kind: 'flag', v: (a) => flag(!!reasonOf(a)?.carried) },
         {
           h: 'Outside_Team_Control',
           meaning: 'Y when the reason is marked outside the team’s control, which takes the shortfall out of the workable plan.',
@@ -711,6 +711,7 @@ const SOURCE_SHEETS: Record<string, { purpose: string; keyValue?: boolean; colum
     columns: {
       Location: d('The location as reported.'),
       Reason: d('The reason picked on the Two-Week Log.'),
+      Is_Current: d('Y for the answer the activity currently stands on: the last one given, shown at every reporting date. Blank for an earlier review’s answer that a later one replaced, kept as the history of what was said when.'),
       Still_Applies: d('Y while the activity still has no actual start or finish. Blank once it has started or finished: the reason is kept as a record of that review, but is no longer shown, tallied or carried to a later fortnight.'),
       Recorded_At: d('When it was recorded.'),
       Period_End: d('The last day of the review period it was recorded against.', 'date'),

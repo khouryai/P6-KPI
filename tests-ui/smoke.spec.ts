@@ -373,3 +373,45 @@ test('REVIEW activities say why, and the panel answers them', async ({ page }) =
   await expect(page.getByText(/in REVIEW — what they are/)).toHaveCount(0);
   expect(errors, 'a screen threw while rendering').toEqual([]);
 });
+
+/**
+ * A missed reason is the activity's, whatever reporting date the log is set to:
+ * given at one date, it shows at another, and can be changed and cleared there.
+ */
+test('the Two-Week Log changes and clears a reason from any reporting date', async ({ page }) => {
+  const errors = await open(page);
+  const rows: unknown[][] = [['Activity ID', 'Activity Name', 'Original Duration', 'Remaining Duration', 'Start', 'Finish']];
+  rows.push(['0-P2-TC-A10-FA-0010', '[T&C] A10 - Core Network Test', 5, 5, new Date(2026, 8, 14), new Date(2026, 8, 18)]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows, { cellDates: true }), 'P6_Extract');
+  await importSchedule(page, 'current', XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellDates: true }) as Buffer);
+  await page.goto('/#/settings');
+  const dataDate = page.locator('input[type=date]').first();
+  await dataDate.fill('2026-09-23');
+  await dataDate.dispatchEvent('change');
+
+  await page.goto('/#/period');
+  const ending = page.getByLabel('Ending');
+  const why = () =>
+    page.locator('.tbl tbody tr').filter({ hasText: '0-P2-TC-A10-FA-0010' }).locator('select').filter({ has: page.locator('option', { hasText: '— why? —' }) });
+  await ending.fill('2026-09-23');
+  await why().selectOption('Weather');
+
+  // Another reporting date: the same answer, editable, not greyed.
+  await ending.fill('2026-09-25');
+  await expect(why()).toHaveValue('Weather');
+  await expect(why()).toBeEnabled();
+  await expect(why()).not.toHaveClass(/is-carried/);
+  await why().selectOption('Access not available');
+  await ending.fill('2026-09-23');
+  await expect(why()).toHaveValue('Access not available');
+
+  // Cleared at one date is cleared at every date.
+  await ending.fill('2026-09-25');
+  page.once('dialog', (d) => void d.accept());
+  await why().selectOption('');
+  await expect(why()).toHaveValue('');
+  await ending.fill('2026-09-23');
+  await expect(why()).toHaveValue('');
+  expect(errors, 'a screen threw while rendering').toEqual([]);
+});

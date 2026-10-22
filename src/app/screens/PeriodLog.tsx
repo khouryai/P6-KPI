@@ -147,7 +147,7 @@ function MissedReasonCell({
   options: string[];
   /** The chosen reason is outside the team's control, so its hours leave the workable plan. */
   outside?: boolean;
-  /** The period this answer was written against, when it was not this one. */
+  /** The review this answer was given at, when it ended on a different date from this one. */
   carriedFrom?: string;
   onChange: (reason: string) => void;
   onAdd: (reason: string) => void;
@@ -156,12 +156,12 @@ function MissedReasonCell({
   return (
     <span className="flex items-center gap-1">
     <select
-      className={`cell-input${carriedFrom ? ' is-carried' : ''}`}
+      className="cell-input"
       value={value}
       title={
-        (carriedFrom
-          ? `${value}\n\nCarried from the period ending ${fmtDate(carriedFrom)}. It stays with the activity until somebody gives this period its own answer; picking one here records it against this period.`
-          : value || 'Say why this activity is behind. Pick a reason, or add one of your own.') + control
+        (value
+          ? `${value}${carriedFrom ? `\n\nGiven at the review ending ${fmtDate(carriedFrom)}.` : ''}\n\nThe activity's answer at every reporting date: change it or clear it here, whatever date it was given at.`
+          : 'Say why this activity is behind. Pick a reason, or add one of your own. It applies at every reporting date.') + control
       }
       onChange={(e) => {
         if (e.target.value !== ADD_REASON) return onChange(e.target.value);
@@ -371,7 +371,7 @@ export function PeriodLog() {
       lines.push(`Why ${behind.length} missed or not started`);
       for (const t of reasonTally.given) lines.push(`  ${String(t.count).padStart(3)}  ${t.reason}${outsideOf(t.reason) ? '  (outside our control)' : ''}`);
       if (reasonTally.unexplained) lines.push(`  ${String(reasonTally.unexplained).padStart(3)}  no reason given yet`);
-      if (reasonTally.carried) lines.push(`  (${reasonTally.carried} of these answers carried over from an earlier review)`);
+      if (reasonTally.carried) lines.push(`  (${reasonTally.carried} of these answers given at an earlier review)`);
       lines.push('');
     }
     for (const o of OUTCOMES) {
@@ -431,7 +431,7 @@ export function PeriodLog() {
       key: 'reason',
       label: 'Why behind',
       value: (a) => (needsReason(a) ? effectiveReasonFor(missedReasons, a.activityId, log.to)?.entry.reason ?? '' : ''),
-      hint: 'Why this activity is behind its plan: missed, or not started. Once it starts the question goes away and the column clears. A reason outside the team’s control (a predecessor, access, readiness) takes its hours out of the workable plan. It sticks with the Activity ID, so nudging the end date by a day does not lose it; each answer is still stamped with the period it was given for, and a shown answer from another period is marked as carried.',
+      hint: 'Why this activity is behind its plan: missed, or not started. Once it has an actual start or finish the question goes away and the column clears. A reason outside the team’s control (a predecessor, access, readiness) takes its hours out of the workable plan. The reason is the activity’s, not the reporting date’s: whatever date is picked it shows the last answer given, and it can be changed or cleared from any date.',
       render: (a) => {
         if (!needsReason(a)) return <span className="text-[var(--text-subtle)]">—</span>;
         const eff = effectiveReasonFor(missedReasons, a.activityId, log.to);
@@ -441,7 +441,12 @@ export function PeriodLog() {
             options={catalogue}
             outside={eff ? outsideOf(eff.entry.reason) : false}
             carriedFrom={eff?.carried ? eff.entry.periodEnd : undefined}
-            onChange={(reason) => setMissedReason(actions.update, a.activityId, log.to, reason)}
+            onChange={(reason) => {
+              // Clearing removes the activity's answer at every review, so say so when there is history to lose.
+              const given = missedReasons.entries.filter((e) => normKey(e.activityId) === normKey(a.activityId)).length;
+              if (!reason && given > 1 && !confirm(`Clear the reason for ${a.activityId}? It was answered at ${given} reviews; clearing removes every one of those answers.`)) return;
+              setMissedReason(actions.update, a.activityId, log.to, reason);
+            }}
             onAdd={(reason) => addReasonToCatalogue(actions.update, reason)}
           />
         );
@@ -1102,8 +1107,8 @@ export function PeriodLog() {
                 </tbody>
               </table>
               {reasonTally.carried > 0 && (
-                <div className="mt-1 text-[var(--text-muted)]" title="These answers were given for another period and stay with the activity until this one gets its own. Pick a reason on the row to record it against this period.">
-                  {reasonTally.carried} carried from an earlier review
+                <div className="mt-1 text-[var(--text-muted)]" title="These answers were given at a review ending on another date. A reason is the activity's at every reporting date: change or clear it on the row from here.">
+                  {reasonTally.carried} given at an earlier review
                 </div>
               )}
               <div className="mt-2 text-[11.5px] text-[var(--text-subtle)]">

@@ -13,13 +13,16 @@
  *   obvious ones, and anything typed into the dropdown joins it permanently — kept
  *   explicitly rather than derived from the reasons in use, so a reason stays on
  *   offer after the last activity carrying it is re-dated or finished.
- * - A reason belongs to an activity first and to a period second. An activity
- *   missed in three consecutive fortnights usually has three different stories, so
- *   each answer is stamped with the period it was given for and the second review
- *   never overwrites the first. But the answer is still the ACTIVITY's: shifting the
- *   window's end date by a day is the same activity with the same story, so the
- *   nearest answer it has is what shows, marked as carried when it came from another
- *   period. Writing one always stamps the period on screen.
+ * - A reason belongs to the activity, not to a reporting date. Whatever date the log
+ *   is set to, an activity shows one answer — the last one anybody gave it — and it
+ *   can be changed or cleared from there, whatever date it was first given at. An
+ *   earlier version tied each answer to the period it was written in and showed a
+ *   neighbouring period's answer greyed out as "carried", which read as locked: it
+ *   could be overridden but not cleared, and two reviews' answers showed or hid
+ *   depending on the end date picked. Each answer is still stamped with the review
+ *   it was given at, and a later answer given at a different review is added beside
+ *   the earlier one rather than over it, so the history of what was said when
+ *   survives for the export; it just never decides what the screen shows.
  */
 import type { MissedReason, MissedReasonLog } from '../engine/types';
 import { DEFAULT_MISSED_REASONS, DEFAULT_OUTSIDE_CONTROL } from '../engine/types';
@@ -77,59 +80,67 @@ export function reasonFor(log: MissedReasonLog, activityId: string, periodEnd: s
   return log.entries.find((e) => normKey(e.activityId) === normKey(activityId) && e.periodEnd === periodEnd);
 }
 
-/** Whole days between two ISO dates, however they are ordered. */
-function daysApart(a: string, b: string): number {
-  return Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000;
-}
-
 /**
- * The answer that stands for this activity when the log is showing this period.
- *
- * The reason belongs to the ACTIVITY first and to the period second. A reason keyed
- * against the fortnight to 9 Sep is still the reason that activity is late when the
- * window is nudged to the 8th or the 10th — the same activity, the same story, one
- * day of arithmetic apart — and the first version of this looked for an exact
- * periodEnd and so blanked every answer the moment somebody moved the end date by a
- * day. Answers still live per period, and writing one always stamps the period on
- * screen, so a fortnight that gets its own story keeps it and every earlier review
- * stays able to explain itself. What changed is only the reading: the nearest answer
- * that activity has wins, and `carried` says when it came from another period, so a
- * story being reused is visible rather than silently presented as this week's.
+ * The answer that stands for this activity, whatever period the log is showing: the
+ * last one given, at any review. `carried` says only that it was given at a review
+ * ending on a different date — for the tooltip and the export, never to lock it.
  */
 export type EffectiveReason = { entry: MissedReason; carried: boolean };
 
 export function effectiveReasonFor(log: MissedReasonLog, activityId: string, periodEnd: string): EffectiveReason | undefined {
-  const mine = log.entries.filter((e) => normKey(e.activityId) === normKey(activityId));
-  if (mine.length === 0) return undefined;
-  const exact = mine.find((e) => e.periodEnd === periodEnd);
-  if (exact) return { entry: exact, carried: false };
-  // The nearest period, and the later one when two sit equally far off: of two
-  // stories the same distance away, the more recent is the likelier to still hold.
-  const best = mine.reduce((a, b) => {
-    const da = daysApart(a.periodEnd, periodEnd);
-    const db = daysApart(b.periodEnd, periodEnd);
-    return db < da || (db === da && b.periodEnd > a.periodEnd) ? b : a;
-  });
-  return { entry: best, carried: true };
+  const entry = currentReason(log, activityId);
+  return entry ? { entry, carried: entry.periodEnd !== periodEnd } : undefined;
 }
 
 /**
- * Record why one activity was missed in one period. An empty reason removes the
- * record, so clearing a row leaves no trace of an answer nobody gave.
+ * The activity's current answer: the most recently given, at whichever review.
+ * Ties on the timestamp — two answers written in the same instant, or a file with
+ * none — go to the one later in the file, which is the one written last.
+ */
+export function currentReason(log: MissedReasonLog, activityId: string): MissedReason | undefined {
+  let best: { e: MissedReason; at: number; i: number } | undefined;
+  log.entries.forEach((e, i) => {
+    if (normKey(e.activityId) !== normKey(activityId) || !e.reason.trim()) return;
+    const at = Date.parse(e.updatedAt) || 0;
+    if (!best || at > best.at || (at === best.at && i > best.i)) best = { e, at, i };
+  });
+  return best?.e;
+}
+
+/**
+ * Whether this answer is the one its activity currently stands on, rather than one
+ * an earlier review gave and a later one replaced.
+ */
+export function isCurrentReason(log: MissedReasonLog, entry: MissedReason): boolean {
+  return currentReason(log, entry.activityId) === entry;
+}
+
+/**
+ * Give one activity its reason, from the log showing the period ending `periodEnd`.
+ *
+ * It becomes the activity's answer in every period. It is recorded against the
+ * period on screen — replacing what was said at that same review, and kept beside
+ * what earlier reviews said, as the history. An empty reason clears the activity's
+ * answer altogether, at every review, so a cleared row stays cleared whatever date
+ * is picked next.
  */
 export function setMissedReason(update: DataUpdater, activityId: string, periodEnd: string, reason: string, note?: string): void {
   const text = reason.trim();
   update('missedReasons', (log) => {
-    const i = log.entries.findIndex((e) => normKey(e.activityId) === normKey(activityId) && e.periodEnd === periodEnd);
-    if (!text) return i >= 0 ? { ...log, entries: log.entries.filter((_, j) => j !== i) } : log;
+    if (!text) return { ...log, entries: log.entries.filter((e) => normKey(e.activityId) !== normKey(activityId)) };
+    const same = log.entries.find((e) => normKey(e.activityId) === normKey(activityId) && e.periodEnd === periodEnd);
+    // A note written with this review's answer survives the answer being changed.
+    const keptNote = note === undefined ? same?.note : note.trim();
     const entry: MissedReason = {
       activityId: activityId.trim(),
       periodEnd,
       reason: text,
-      ...(note?.trim() ? { note: note.trim() } : {}),
+      ...(keptNote ? { note: keptNote } : {}),
       updatedAt: new Date().toISOString(),
     };
-    const entries = i >= 0 ? log.entries.map((e, j) => (j === i ? { ...e, ...entry } : e)) : [...log.entries, entry];
+    // Written last in the file as well as stamped now, so it is the current answer
+    // even when two edits land within the same millisecond.
+    const entries = [...log.entries.filter((e) => !(normKey(e.activityId) === normKey(activityId) && e.periodEnd === periodEnd)), entry];
     // A reason used is a reason kept: it joins the catalogue here rather than only
     // when it was typed, so one imported or pasted in is offered like any other —
     // and using one that had been taken off the list puts it back, since a reason
@@ -223,8 +234,8 @@ export function setOutsideControl(update: DataUpdater, reason: string, outside: 
 
 /**
  * The fortnight's bridge from planned to achieved, with each row's reason read from
- * the log the way the screens show it — the nearest answer the activity has, carried
- * or not — and classed by whether it is outside the team's control.
+ * the log the way the screens show it — the activity's current answer — and classed
+ * by whether it is outside the team's control.
  */
 export function bridgeFor(log: MissedReasonLog, activities: PeriodActivity[], periodEnd: string): PeriodBridge {
   return periodBridge(activities, (a) => {
