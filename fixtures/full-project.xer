@@ -1,0 +1,133 @@
+ERMHDR	19.12	2026-09-14	Project	admin	Sample Scheduler	dbxDatabaseNoName	Project Management	USD
+%T	CURRTYPE
+%F	curr_id	curr_short_name	curr_symbol
+%R	1	USD	$
+%T	CALENDAR
+%F	clndr_id	default_flag	clndr_name	proj_id	base_clndr_id	clndr_type	day_hr_cnt	week_hr_cnt	clndr_data
+%R	1	Y	Standard 5 Day (lunch 12–13)			CA_Base	8	40	(0||CalendarData()((0||DaysOfWeek()((0||1()())(0||2()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||3()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||4()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||5()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||6()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||7()())))(0||VIEW(ShowTotal|Y)())(0||Exceptions()((0||0(d|46352)())(0||1(d|46381)())(0||2(d|46380)((0||0(s|08:00|f|12:00)())))))))
+%R	2	N	Four Tens			CA_Base	10	40	(0||CalendarData()((0||DaysOfWeek()((0||1()())(0||2()((0||0(s|07:00|f|17:00)())))(0||3()((0||0(s|07:00|f|17:00)())))(0||4()((0||0(s|07:00|f|17:00)())))(0||5()((0||0(s|07:00|f|17:00)())))(0||6()())(0||7()())))(0||VIEW(ShowTotal|Y)())(0||Exceptions()())))
+%T	PROJECT
+%F	proj_id	proj_short_name	clndr_id	last_recalc_date	plan_start_date	plan_end_date	scd_end_date	critical_drtn_hr_cnt	critical_path_type	orig_proj_id	sum_base_proj_id	last_schedule_date	export_flag
+%R	200	CBTC-PH2	1	2026-09-14 08:00	2025-01-06 08:00		2030-08-26 17:00	0	CT_TotFloat		201	2026-09-14 09:12	Y
+%R	201	CBTC-PH2-BL1	1	2025-01-06 08:00	2025-01-06 08:00		2030-06-28 17:00	0	CT_TotFloat	200		2025-01-06 09:00	N
+%T	PROJWBS
+%F	wbs_id	proj_id	obs_id	seq_num	proj_node_flag	wbs_short_name	wbs_name	parent_wbs_id
+%R	1000	200	1	0	Y	CBTC-PH2	CBTC Phase 2 (sample)	
+%R	1001	200	1	10	N	CN	Construction	1000
+%R	1002	200	1	20	N	IN	Installation	1000
+%R	1003	200	1	30	N	TC	Testing & Commissioning	1000
+%R	1004	200	1	10	N	A10	A10 – Alpha Station	1003
+%R	1005	200	1	20	N	B20	B20 – Bravo Yard	1003
+%R	1007	200	1	30	N	C30	C30 – Charlie Junction	1003
+%R	1006	200	1	40	N	MS	Milestones	1000
+%R	2000	201	1	0	Y	CBTC-PH2-BL1	CBTC Phase 2 – Baseline 1	
+%R	2003	201	1	30	N	TC	Testing & Commissioning	2000
+%T	TASK
+%F	task_id	proj_id	wbs_id	clndr_id	phys_complete_pct	complete_pct_type	task_type	status_code	task_code	task_name	total_float_hr_cnt	free_float_hr_cnt	remain_drtn_hr_cnt	act_work_qty	remain_work_qty	target_work_qty	target_drtn_hr_cnt	cstr_date	act_start_date	act_end_date	late_start_date	late_end_date	early_start_date	early_end_date	restart_date	reend_date	target_start_date	target_end_date	cstr_type	cstr_date2	cstr_type2	driving_path_flag
+%R	3041	200	1006	1	0	CP_Drtn	TT_Mile	TK_Complete	0-P2-MS-0005	Phase 2 start			0	0	0	0	0		2025-01-06 08:00	2025-01-06 17:00							2025-01-06 08:00	2025-01-06 17:00				N
+%R	3040	200	1006	1	0	CP_Drtn	TT_FinMile	TK_NotStart	0-P2-MS-0010	[MS] - Program Milestone	40	0	0	0	0	0	0				2030-08-26 08:00	2030-08-26 17:00	2030-08-26 08:00	2030-08-26 17:00	2030-08-26 08:00	2030-08-26 17:00	2030-08-26 08:00	2030-08-26 17:00				N
+%R	3000	200	1001	1	0	CP_Drtn	TT_Task	TK_Complete	0-P2-CN-A10-FA-0010	A10 – Cable trough install			0	0	0	0	240		2025-01-06 08:00	2025-02-14 17:00							2025-01-06 08:00	2025-02-14 17:00				N
+%R	3001	200	1001	1	0	CP_Drtn	TT_Task	TK_Active	0-P2-CN-B20-FA-0010	B20 – Equipment room fit-out	0	0	240	0	0	0	480		2026-08-03 08:00		2026-08-03 08:00	2026-10-23 17:00	2026-09-14 08:00	2026-10-23 17:00	2026-09-14 08:00	2026-10-23 17:00	2026-08-03 08:00	2026-10-23 17:00				Y
+%R	3002	200	1001	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-CN-B20-FA-0020	B20 – Signal cable pull	80	0	120	0	0	0	120				2026-09-21 08:00	2026-10-09 17:00	2026-09-21 08:00	2026-10-09 17:00	2026-09-21 08:00	2026-10-09 17:00	2026-09-21 08:00	2026-10-09 17:00				N
+%R	3010	200	1002	1	0	CP_Drtn	TT_Task	TK_Complete	0-P2-IN-A10-FA-0010	A10 – Wayside equipment install			0	0	0	0	80		2025-02-17 08:00	2025-02-28 17:00							2025-02-17 08:00	2025-02-28 17:00				N
+%R	3011	200	1002	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-IN-B20-FA-0010	B20 – Zone controller install	0	0	40	0	0	0	40				2026-10-26 08:00	2026-10-30 17:00	2026-10-26 08:00	2026-10-30 17:00	2026-10-26 08:00	2026-10-30 17:00	2026-10-26 08:00	2026-10-30 17:00				Y
+%R	3012	200	1002	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-IN-C30-FA-0010	C30 – Radio install	-40	0	40	0	0	0	40	2026-09-28 08:00			2026-09-28 08:00	2026-10-02 17:00	2026-09-28 08:00	2026-10-02 17:00	2026-09-28 08:00	2026-10-02 17:00	2026-09-28 08:00	2026-10-02 17:00	CS_MSO			N
+%R	3013	200	1002	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-IN-B20-FA-0020	B20 – Antenna install	120	0	40	0	0	0	40				2026-09-07 08:00	2026-09-11 17:00	2026-09-07 08:00	2026-09-11 17:00	2026-09-07 08:00	2026-09-11 17:00	2026-09-07 08:00	2026-09-11 17:00				N
+%R	3020	200	1004	1	0	CP_Drtn	TT_Task	TK_Complete	0-P2-TC-A10-FA-0010	[T&C] A10 (Ph2) - Core Network Test			0	0	0	0	96		2025-03-03 08:00	2025-03-18 17:00							2025-03-03 08:00	2025-03-18 17:00				N
+%R	3021	200	1004	1	0	CP_Drtn	TT_Task	TK_Complete	0-P2-TC-A10-FA-0020	[T&C] A10 (Ph2) - Wayside SAT/SIT			0	0	0	0	120		2025-04-01 08:00	2025-04-21 17:00							2025-04-01 08:00	2025-04-21 17:00				N
+%R	3022	200	1004	1	60	CP_Drtn	TT_Task	TK_Active	0-P2-TC-A10-FA-0030	[T&C] A10 (Ph2) - Pre-Simulation Test	16	0	32	0	0	0	80		2026-08-18 08:00		2026-08-18 08:00	2026-09-25 17:00	2026-09-14 08:00	2026-09-25 17:00	2026-09-14 08:00	2026-09-25 17:00	2026-08-18 08:00	2026-09-25 17:00				N
+%R	3023	200	1004	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-TC-A10-FA-0040	[T&C] A10 (Ph2) - Sim Mode Test (Adjacent Location) (DF: A10 -> B20)	16	0	40	0	0	0	40				2026-09-28 08:00	2026-10-02 17:00	2026-09-28 08:00	2026-10-02 17:00	2026-09-28 08:00	2026-10-02 17:00	2026-09-28 08:00	2026-10-02 17:00				N
+%R	3028	200	1004	1	0	CP_Drtn	TT_Task	TK_Active	0-P2-TC-A10-FA-0050	[T&C] A10 (Ph2) - Regression Test	400	0	64	0	0	0	80		2026-09-08 08:00		2026-09-08 08:00	2026-11-20 17:00	2026-09-14 08:00	2026-11-20 17:00	2026-09-14 08:00	2026-11-20 17:00	2026-09-08 08:00	2026-11-20 17:00				N
+%R	3024	200	1005	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-TC-B20-FA-0010	[T&C] B20 (Ph2) - Core Network Test	0	0	96	0	0	0	96				2026-11-02 08:00	2026-11-17 17:00	2026-11-02 08:00	2026-11-17 17:00	2026-11-02 08:00	2026-11-17 17:00	2026-11-02 08:00	2026-11-17 17:00				Y
+%R	3025	200	1005	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-TC-B20-FA-0020	[T&C] B20 (Ph2) - Wayside SAT/SIT	40	0	120	0	0	0	120				2027-02-01 08:00	2027-02-19 17:00	2027-02-01 08:00	2027-02-19 17:00	2027-02-01 08:00	2027-02-19 17:00	2027-02-01 08:00	2027-02-19 17:00				N
+%R	3026	200	1005	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-TC-B20-FA-0030	[T&C] B20 (Ph2) - Cutover (By BART)	40	0	160	0	0	0	160	2027-03-01 08:00			2027-03-01 08:00	2027-03-26 17:00	2027-03-01 08:00	2027-03-26 17:00	2027-03-01 08:00	2027-03-26 17:00	2027-03-01 08:00	2027-03-26 17:00	CS_MSOA			N
+%R	3027	200	1005	1	0	CP_Drtn	TT_LOE	TK_NotStart	0-P2-TC-B20-FA-0040	[T&C] B20 (Ph2) - Long Hammock Support	0	0	560	0	0	0	560				2026-11-02 08:00	2027-02-05 17:00	2026-11-02 08:00	2027-02-05 17:00	2026-11-02 08:00	2027-02-05 17:00	2026-11-02 08:00	2027-02-05 17:00				N
+%R	3029	200	1005	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-TC-B20-FA-0050	[T&C] B20 (Ph2) - Wiring Prep (By Others)	600	0	80	0	0	0	80				2026-09-21 08:00	2026-10-02 17:00	2026-09-21 08:00	2026-10-02 17:00	2026-09-21 08:00	2026-10-02 17:00	2026-09-21 08:00	2026-10-02 17:00				N
+%R	3030	200	1007	2	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-TC-C30-FA-0010	[T&C] C30 (Ph2) - Radio Test	-40	0	40	0	0	0	40				2026-10-05 08:00	2026-10-08 17:00	2026-10-05 08:00	2026-10-08 17:00	2026-10-05 08:00	2026-10-08 17:00	2026-10-05 08:00	2026-10-08 17:00				N
+%R	4020	201	2003	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-TC-A10-FA-0010	[T&C] A10 (Ph2) - Core Network Test	0	0	80	0	0	0	80				2025-03-03 08:00	2025-03-14 17:00	2025-03-03 08:00	2025-03-14 17:00	2025-03-03 08:00	2025-03-14 17:00	2025-03-03 08:00	2025-03-14 17:00				N
+%R	4022	201	2003	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-TC-A10-FA-0030	[T&C] A10 (Ph2) - Pre-Simulation Test	0	0	80	0	0	0	80				2026-06-01 08:00	2026-06-12 17:00	2026-06-01 08:00	2026-06-12 17:00	2026-06-01 08:00	2026-06-12 17:00	2026-06-01 08:00	2026-06-12 17:00				N
+%R	4023	201	2003	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-TC-A10-FA-0040	[T&C] A10 (Ph2) - Sim Mode Test (Adjacent Location) (DF: A10 -> B20)	0	0	40	0	0	0	40				2026-06-15 08:00	2026-06-19 17:00	2026-06-15 08:00	2026-06-19 17:00	2026-06-15 08:00	2026-06-19 17:00	2026-06-15 08:00	2026-06-19 17:00				N
+%R	4024	201	2003	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-TC-B20-FA-0010	[T&C] B20 (Ph2) - Core Network Test	0	0	80	0	0	0	80				2026-08-03 08:00	2026-08-14 17:00	2026-08-03 08:00	2026-08-14 17:00	2026-08-03 08:00	2026-08-14 17:00	2026-08-03 08:00	2026-08-14 17:00				N
+%R	4025	201	2003	1	0	CP_Drtn	TT_Task	TK_NotStart	0-P2-TC-B20-FA-0020	[T&C] B20 (Ph2) - Wayside SAT/SIT	0	0	120	0	0	0	120				2026-12-01 08:00	2026-12-18 17:00	2026-12-01 08:00	2026-12-18 17:00	2026-12-01 08:00	2026-12-18 17:00	2026-12-01 08:00	2026-12-18 17:00				N
+%T	TASKPRED
+%F	task_pred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt
+%R	5000	3000	3041	200	200	PR_FS	0
+%R	5001	3010	3000	200	200	PR_FS	0
+%R	5002	3020	3010	200	200	PR_FS	0
+%R	5003	3021	3020	200	200	PR_FS	0
+%R	5004	3022	3021	200	200	PR_FS	0
+%R	5005	3023	3022	200	200	PR_FS	0
+%R	5006	3028	3023	200	200	PR_FS	0
+%R	5007	3011	3001	200	200	PR_FS	0
+%R	5008	3024	3011	200	200	PR_FS	0
+%R	5009	3025	3024	200	200	PR_FS	0
+%R	5010	3026	3025	200	200	PR_FS	0
+%R	5011	3040	3026	200	200	PR_FS	0
+%R	5012	3030	3012	200	200	PR_FS	0
+%R	5013	3030	3002	200	200	PR_SS	-16
+%R	5014	3002	3001	200	200	PR_SS	0
+%R	5015	3027	3024	200	200	PR_SS	0
+%R	5016	3040	3029	200	200	PR_SF	0
+%R	5017	3012	3001	200	200	PR_FS	8
+%R	5018	3025	9999	200	200	PR_FS	0
+%T	RSRC
+%F	rsrc_id	parent_rsrc_id	clndr_id	rsrc_short_name	rsrc_name	rsrc_type
+%R	500		1	ATS-ENG	ATS Test Engineer	RT_Labor
+%R	501		1	IXL-ENG	IXL Test Engineer	RT_Labor
+%R	502		1	ELEC	Electrician	RT_Labor
+%R	503		1	CRANE	Mobile crane	RT_Equip
+%T	ROLES
+%F	role_id	parent_role_id	seq_num	role_name	role_short_name
+%R	600		1	T&C Lead	TC-LEAD
+%T	TASKRSRC
+%F	taskrsrc_id	task_id	proj_id	rsrc_id	role_id	target_qty	remain_qty	act_reg_qty	act_ot_qty	target_start_date	target_end_date	restart_date	reend_date	target_cost	remain_cost	rsrc_type
+%R	7000	3022	200	500		160	32	128	0	2026-08-18 08:00	2026-09-25 17:00			16000	3200	RT_Labor
+%R	7001	3023	200	500		80	80	0	0	2026-09-28 08:00	2026-10-02 17:00			8000	8000	RT_Labor
+%R	7002	3023	200	501		40	40	0	0	2026-09-28 08:00	2026-10-02 17:00			4000	4000	RT_Labor
+%R	7003	3024	200	500		192	192	0	0	2026-11-02 08:00	2026-11-17 17:00			19200	19200	RT_Labor
+%R	7004	3025	200	501		240	240	0	0	2027-02-01 08:00	2027-02-19 17:00			24000	24000	RT_Labor
+%R	7005	3001	200	502		600	240	360	0	2026-08-03 08:00	2026-10-23 17:00			60000	24000	RT_Labor
+%R	7006	3002	200	502		240	240	0	0	2026-09-21 08:00	2026-10-09 17:00			24000	24000	RT_Labor
+%R	7007	3002	200	503		24	24	0	0	2026-09-21 08:00	2026-10-09 17:00			2400	2400	RT_Equip
+%R	7008	3030	200		600	40	40	0	0	2026-10-05 08:00	2026-10-08 17:00			4000	4000	RT_Labor
+%T	ACTVTYPE
+%F	actv_code_type_id	actv_short_len	seq_num	actv_code_type	proj_id	wbs_id	actv_code_type_scope
+%R	700	10	1	Responsible	200		AS_Project
+%R	701	10	2	Area			AS_Global
+%R	702	10	3	Unused code			AS_Global
+%T	ACTVCODE
+%F	actv_code_id	parent_actv_code_id	actv_code_type_id	actv_code_name	short_name	seq_num
+%R	710		700	BART forces	BART	1
+%R	711		700	Hitachi Rail	HRS	2
+%R	712		700	Civil contractor	CONT	3
+%R	720		701	North section	NORTH	1
+%T	TASKACTV
+%F	task_id	actv_code_type_id	actv_code_id	proj_id
+%R	3026	700	710	200
+%R	3024	700	711	200
+%R	3025	700	711	200
+%R	3022	700	711	200
+%R	3001	700	712	200
+%R	3002	700	712	200
+%R	3011	700	712	200
+%R	3012	700	712	200
+%R	3024	701	720	200
+%T	UDFTYPE
+%F	udf_type_id	table_name	udf_type_name	udf_type_label	logical_data_type	super_flag
+%R	800	TASK	user_field_800	Test procedure	FT_TEXT	N
+%R	801	TASK	user_field_801	Readiness date	FT_END_DATE	N
+%R	802	PROJWBS	user_field_802	WBS owner	FT_TEXT	N
+%R	803	TASK	user_field_803	Test cases	FT_INT	N
+%T	UDFVALUE
+%F	udf_type_id	fk_id	proj_id	udf_date	udf_number	udf_text	udf_code_id
+%R	800	3024	200			TP-B20-001 rev C	
+%R	801	3024	200	2026-10-30 00:00			
+%R	803	3024	200		42		
+%R	802	1004	200			Alpha team	
+%T	MEMOTYPE
+%F	memo_type_id	seq_num	eps_flag	proj_flag	wbs_flag	task_flag	memo_type
+%R	900	1	N	N	N	Y	Scope
+%T	TASKMEMO
+%F	memo_id	task_id	memo_type_id	proj_id	task_memo
+%R	950	3024	900	200	<HTML><BODY><p>Core network test for B20 – needs 2 nights.</p><ul><li>Zone controller installed first</li><li>Access: nights &amp; weekends only</li></ul><script>alert(1)</script></BODY></HTML>
+%E

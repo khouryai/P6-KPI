@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../state';
+import { hasP6 } from '../p6Columns';
 import { Page, SortableTable, CellInput, ActualDateCell, Badge, statusTone, Notice, Panel, type Column, type HeroStat } from '../components/ui';
 import type { TestProgress as TP, BudgetRow, TestProgressCheck } from '../../engine/types';
 import { fmtPct, fmtHours, fmtDate, num } from '../format';
@@ -332,6 +333,19 @@ export function TestProgress({ route }: { route: Route }) {
       ),
     },
     { key: 'src', label: 'Source', value: (r) => r.pctSource, render: (r) => <Badge tone={statusTone(r.pctSource)}>{r.pctSource}</Badge> },
+    // P6's own figure beside the one being keyed, when the schedule came from an XER:
+    // a reference, never a source — the budget's percent is still yours or the durations'.
+    ...(hasP6(model.rows)
+      ? [
+          {
+            key: 'p6pct',
+            label: 'P6 %',
+            value: (r: Row) => r.activity.p6?.p6Pct ?? null,
+            num: true,
+            render: (r: Row) => (r.activity.p6 ? <span className="text-[var(--text-muted)]" title={`P6 records ${fmtPct(r.activity.p6.p6Pct, 0)} (${r.activity.p6.pctType.toLowerCase()} percent complete). Shown for reference: it does not feed the budget.`}>{fmtPct(r.activity.p6.p6Pct, 0)}</span> : ''),
+          } satisfies Column<Row>,
+        ]
+      : []),
     {
       key: 'ov',
       label: '% keyed',

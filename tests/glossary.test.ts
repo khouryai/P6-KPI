@@ -25,6 +25,8 @@ function labelsInUse(): string[] {
 const SELF_EVIDENT = new Set([
   'Activity name', 'Name', 'Notes', 'Discipline', 'All', 'Y', 'N', '(auto)',
   'Locations', 'First start', 'Last finish', 'Needs attention', 'Status',
+  // Tab names on the Schedule screen: places, not quantities.
+  'Activities & Gantt', 'About the file',
 ]);
 
 describe('glossary', () => {

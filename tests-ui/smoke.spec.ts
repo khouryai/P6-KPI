@@ -52,6 +52,7 @@ async function importSchedule(page: Page, kind: 'current' | 'baseline', bytes: B
 
 const SCREENS = [
   ['dashboard', 'Dashboard'],
+  ['schedule', 'Schedule'],
   ['import', 'Import'],
   ['library', 'Activity Library'],
   ['locations', 'Locations'],
@@ -89,6 +90,40 @@ test('every screen opens with a schedule loaded', async ({ page }) => {
     await page.goto(`/#/${route}`);
     await expect(page.locator('h1').first(), `${route} did not render`).toHaveText(heading);
   }
+  expect(errors, 'a screen threw while rendering').toEqual([]);
+});
+
+/**
+ * The whole P6 project in, the T&C slice of it to the budget, and the rest of it on
+ * the Schedule screen. The fixture is the one file this suite reads from disk: an
+ * XER is P6's own format, and building one here would be testing the builder.
+ */
+test('a whole-project XER feeds the budget its T&C activities and opens on the Schedule screen', async ({ page }) => {
+  const errors = await open(page);
+  await page.goto('/#/import');
+  await page.locator('input[type=file]').first().setInputFiles({ name: 'full-project.xer', mimeType: 'application/octet-stream', buffer: readFileSync('fixtures/full-project.xer') });
+  await expect(page.getByText(/Which activities are the T&C budget/)).toBeVisible();
+  await expect(page.getByText(/11 of 20 in the project/)).toBeVisible();
+  await page.getByRole('button', { name: /^Confirm import/ }).click();
+  await expect(page.getByText(/schedule imported: 11 activities from P6 project CBTC-PH2/i).first()).toBeVisible();
+
+  await page.goto('/#/schedule');
+  await expect(page.locator('.sched-row').first()).toBeVisible();
+  await page.locator('.sched-row', { hasText: '0-P2-TC-B20-FA-0010' }).first().click();
+  await expect(page.locator('.sched-details-head')).toContainText('Core Network Test');
+  await page.getByRole('tab', { name: /Relationships/ }).click();
+  await expect(page.locator('.sched-details-body')).toContainText('0-P2-IN-B20-FA-0010');
+  await page.getByRole('button', { name: 'Trace driving path' }).click();
+  await expect(page.getByText(/2 activities upstream of 0-P2-TC-B20-FA-0010/)).toBeVisible();
+
+  await page.getByRole('tab', { name: 'T&C lookahead' }).click();
+  await expect(page.getByText('Waiting on others').first()).toBeVisible();
+  await page.getByRole('tab', { name: 'Schedule checks' }).click();
+  await expect(page.getByText('Out of sequence')).toBeVisible();
+
+  // The budget's own screens carry what only the XER knows.
+  await page.goto('/#/budget');
+  await expect(page.getByText('Total float').first()).toBeVisible();
   expect(errors, 'a screen threw while rendering').toEqual([]);
 });
 

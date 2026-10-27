@@ -239,8 +239,49 @@ function extractSheets(model: Model, data: StoreData): ExtractSheet[] {
         { h: 'Budget_Note', meaning: 'The Budget Master note: why the activity was renamed, hidden, excluded or re-priced.', v: (r) => ov(r)?.note ?? '' },
         { h: 'Edited_At', meaning: 'When an edit of yours on this activity (Budget Master) was last made.', kind: 'datetime', v: (r) => toDate(ov(r)?.updatedAt) },
         { h: 'Progress_Keyed_At', meaning: 'When its progress (percent, actual dates, note) was last keyed.', kind: 'datetime', v: (r) => toDate(tp(r)?.updatedAt) },
+        // What only an XER carries. Blank throughout after an Excel import, never zero.
+        { h: 'P6_Status', meaning: 'P6’s own activity status at its data date. Blank unless the schedule was imported from an XER.', v: (r) => r.activity.p6?.status ?? '' },
+        { h: 'P6_Total_Float_Days', meaning: 'Total float in working days on the activity’s calendar, from the XER. Blank once complete, and after an Excel import.', kind: 'number', v: (r) => blank(r.activity.p6?.totalFloat) },
+        { h: 'P6_Free_Float_Days', meaning: 'Free float in working days: how far it can slip before delaying a successor. From the XER.', kind: 'number', v: (r) => blank(r.activity.p6?.freeFloat) },
+        { h: 'P6_Critical', meaning: 'Y when critical the way the project defines it in P6 (float at or under its threshold, or on the longest path).', kind: 'flag', v: (r) => flag(!!r.activity.p6?.critical) },
+        { h: 'P6_Late_Start', meaning: 'The latest the activity can start without delaying the project, from the XER.', kind: 'date', v: (r) => toDate(r.activity.p6?.lateStart) },
+        { h: 'P6_Late_Finish', meaning: 'The latest the activity can finish without delaying the project, from the XER.', kind: 'date', v: (r) => toDate(r.activity.p6?.lateFinish) },
+        { h: 'P6_Constraint', meaning: 'The activity’s own constraint in P6, e.g. Start On or After, from the XER.', v: (r) => r.activity.p6?.constraint ?? '' },
+        { h: 'P6_Constraint_Date', meaning: 'The date that constraint holds it to.', kind: 'date', v: (r) => toDate(r.activity.p6?.constraintDate) },
+        { h: 'P6_Pct_Complete', meaning: 'P6’s own percent complete for the activity’s percent complete type. The budget’s Pct_Complete is separate.', kind: 'pct', v: (r) => (r.activity.p6 ? r.activity.p6.p6Pct : '') },
+        { h: 'P6_WBS', meaning: 'Where the activity sits in the P6 work breakdown structure, as a path of names.', v: (r) => r.activity.p6?.wbs ?? '' },
+        { h: 'P6_Predecessors', meaning: 'How many predecessors the activity has in the P6 logic.', kind: 'int', v: (r) => blank(r.activity.p6?.preds) },
+        { h: 'P6_Successors', meaning: 'How many successors the activity has in the P6 logic.', kind: 'int', v: (r) => blank(r.activity.p6?.succs) },
+        { h: 'P6_Open_Predecessors', meaning: 'Predecessors not yet finished: what the activity is still waiting on. P6_Waiting_On lists them.', kind: 'int', v: (r) => blank(r.activity.p6?.waitingOnCount) },
+        { h: 'P6_Waiting_On_Outside_TC', meaning: 'Y when at least one open predecessor is outside the T&C scope: somebody else’s work.', kind: 'flag', v: (r) => flag(!!r.activity.p6?.waitingOn.some((l) => !l.inScope)) },
+        { h: 'P6_Planned_Labour_Hours', meaning: 'Labour hours P6 plans on the activity through its resource assignments. Built separately from Budget_Hours.', kind: 'hours', v: (r) => (r.activity.p6 && r.activity.p6.resources.length ? r.activity.p6.resources.reduce((n, l) => n + l.budget, 0) : '') },
       ],
       all,
+    ),
+  );
+
+  type OpenLink = { r: BudgetRow; l: NonNullable<BudgetRow['activity']['p6']>['waitingOn'][number] };
+  out.push(
+    table<OpenLink>(
+      'P6_Waiting_On',
+      'One row per predecessor still open on an activity, from the logic in the XER: what each activity is waiting on, whose work that is, and whether it is the one holding the date. Empty after an Excel import, which carries no logic.',
+      [
+        { h: 'Activity_ID', meaning: 'The P6 Activity ID of the activity that is waiting.', v: (x) => x.r.activityId },
+        { h: 'Activity_Name', meaning: 'Its name as reported.', v: (x) => x.r.activityName },
+        { h: 'Phase', meaning: 'Its phase as reported.', v: (x) => x.r.phaseName },
+        { h: 'Current_Start', meaning: 'Its start as the forecast uses it.', kind: 'date', v: (x) => toDate(x.r.currentStart) },
+        { h: 'Predecessor_ID', meaning: 'The Activity ID of the predecessor still open.', v: (x) => x.l.id },
+        { h: 'Predecessor_Name', meaning: 'The predecessor’s name in P6.', v: (x) => x.l.name },
+        { h: 'Relationship', meaning: 'FS, SS, FF or SF: which end of the predecessor drives which end of the activity.', v: (x) => x.l.rel },
+        { h: 'Lag_Days', meaning: 'Lag on the relationship in working days; negative is a lead.', kind: 'number', v: (x) => x.l.lagDays },
+        { h: 'Predecessor_Status', meaning: 'The predecessor’s P6 status.', v: (x) => x.l.status },
+        { h: 'Predecessor_Finish', meaning: 'When the predecessor is forecast to finish (actual where it has).', kind: 'date', v: (x) => toDate(x.l.finish) },
+        { h: 'In_TC_Scope', meaning: 'Y when the predecessor is itself T&C work; blank when it is somebody else’s.', kind: 'flag', v: (x) => flag(x.l.inScope) },
+        { h: 'Whose', meaning: 'Whose work the predecessor is, as near as the file says: the work type in its Activity ID, or its WBS.', v: (x) => x.l.group },
+        { h: 'Predecessor_WBS', meaning: 'The predecessor’s WBS as a path of names.', v: (x) => x.l.wbs },
+        { h: 'Driving', meaning: 'Y when no working time separates the two: this predecessor is what holds the activity’s date.', kind: 'flag', v: (x) => flag(x.l.driving) },
+      ],
+      model.rows.flatMap((r) => (r.activity.p6?.waitingOn ?? []).map((l) => ({ r, l }))),
     ),
   );
 

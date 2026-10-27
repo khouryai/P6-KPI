@@ -5,6 +5,9 @@ budget and track Testing and Commissioning man hours on the BART CBTC program.
 
 - Reads Primavera P6 exports directly: **`.xer` (P6's own format), `.xlsx` or `.csv`**.
   Excel is never needed, and the column order does not have to match.
+- Opens the **whole P6 project** from its `.xer` on the **Schedule** screen — WBS, Gantt,
+  logic, float, resources, codes, notebooks — while the budget keeps reading only the T&C
+  activities, exactly as it read the filtered Excel export.
 - Derives a man hour budget for every activity from a small reusable rate library.
 - Tracks earned value from a percent complete you key by hand, falling back to P6
   duration only where nobody has keyed one.
@@ -39,10 +42,12 @@ The workbook never has to be opened again, and neither does Excel:
 
 | Job | Where |
 | --- | --- |
-| Load a schedule | **Import**: drop an `.xer`, `.xlsx` or `.csv`, paste rows, or pick a file already in the folder. Columns are matched by header name and can be corrected by hand before importing. The history below can **remove** an import that should not have been made — the next newest of that kind takes over, or none does, and nothing you keyed is touched. |
+| See the whole P6 project | **Schedule (P6)**: every activity under its WBS with a Gantt chart beside it — actual, remaining, critical and baseline bars, the data date, and the relationship lines, driving ones dark. Group by WBS, phase, location, work type, status or any activity code; filter by status, float (critical, near critical, negative), the next two or six weeks, or *finishing after baseline*; find by ID or name; choose and size columns (dates, float, constraints, resources, codes, user fields, the T&C budget's own hours); zoom from weeks to years; Excel exports what is shown. Pick an activity for its details — dates, float, constraint, resources, codes and fields, notebook, its T&C budget — and its predecessors and successors with which one is **driving**; **Trace driving path** lists the chain that sets its date. **T&C lookahead** lists the T&C work due to start in the next 2–12 weeks and what each is still waiting on, inside T&C or outside it, and who that other work belongs to. **Schedule checks** runs a DCMA-style review (negative float, out of sequence, open ends, hard constraints, leads, long durations, forecasts before the data date). **Resources** shows P6's labour by resource and month, and P6's planned hours against the budget by activity type. **About the file** shows the project's dates, calendars (work week and holidays), codes and every table in the file. It opens the file kept with the schedule in use, or any `.xer` just to look at, which saves nothing. Up and down arrows step through the activities. |
+| Load a schedule | **Import**: drop an `.xer`, `.xlsx` or `.csv`, paste rows, or pick a file already in the folder. A **whole-project `.xer`** is read in full and the budget takes the T&C activities out of it by a scope rule — work type `TC` in the Activity ID by default, **proposed from the schedule already in use** so the first XER import reads exactly what the last Excel import did. The preview says how the two compare before anything changes, with one click to keep any odd activity by ID. It also offers P6's **data date** and a **baseline in the same file**, and keeps a compressed copy of the whole file for the Schedule screen. Columns are matched by header name and can be corrected by hand before importing. The history below can **remove** an import that should not have been made — the next newest of that kind takes over, or none does, and nothing you keyed is touched. |
 | Price activity types | **Activity Library**: inline editing, plus adding keys by hand. An activity type is priced by an exact match on its library key; anything unmatched shows as REVIEW. Its **Subsystem** can name more than one — `ATS, IXL` — and every activity of that type then splits its hours evenly between them wherever the budget is rolled up by subsystem. |
 | Split the KPIs by Static / Dynamic | Every activity is **Static**, **Dynamic** or **Other**. Set it once for a whole activity type in the **Activity Library** (Static / Dynamic column), or for one activity in **Budget Master** (same column, or Bulk edit on a filter), which wins; unset is Other. **By Phase & Location → Static / Dynamic** rolls the budget up by it, Budget Master filters by it, and the Excel export carries it on every activity sheet plus a **KPI_By_Static_Dynamic** sheet: budget, earned, remaining and percent complete for each phase and the whole project, split three ways. |
 | Per-location complexity, and what each code means | **Locations**: a complexity factor per location, and a **Reported as** name — W40 is *Millbury Station*, 2W is *Phase 2* — which every screen, report and export then shows in place of the code. The code is still what everything joins on. |
+| What P6's logic says about the T&C work | After an XER import: **Budget Master** shows each activity's **Total float** and what it is **Waiting on** (a red dot when that predecessor is the one holding the date, the owner's work type when it is outside T&C, and a link to it on the Gantt), with P6 status, P6 %, P6 planned hours, WBS, constraint and late finish on the Columns button and *Critical*, *Negative float* and *Waiting on work outside T&C* quality filters. The **Two-Week Log** says what a missed activity is waiting on and records *Predecessor work not complete* in one click. **Progress** shows P6's own percent beside yours. The **Dashboard** has a *From the P6 file* panel. The import's change report adds float lost and activities newly critical. |
 | Edit one activity | **Budget Master**: rename it, set its discipline, override its hours, note why, or take it out of the budget or out of the program entirely. **Move it to another phase or location** — type it in the Phase or Loc cell, or use Bulk edit on a filter — and it moves on every screen, ahead of any Activity ID Rule, with the new location's complexity; clear it and it goes back. **Split it across locations** when it serves more than one — type `W40 50` in the Split cell (or `W40 50, 2W 50`, or `W40, 2W` for an even split) and whatever the percentages leave stays at its own location. Its hours, earned hours and complexity factor are divided the same way on every rollup by location, the Locations screen counts it at each by its share, and Bulk edit can split a whole filter at once. **Key its start or finish over P6's** and those dates are used everywhere until the schedule is corrected: the *Dates changed — for the scheduler* filter lists them with P6's dates beside yours and a note on why, ready for the Excel button, and says which ones a later import now agrees with so they can be cleared. It also says which resources the activity is crewed with and how many of each. Everything you edit is keyed on the Activity ID and survives every import; everything P6 owns is read-only. |
 | Answer the REVIEW rows | REVIEW means the activity's type has no live key in the Activity Library — never added (a schedule brought back from the import history, a library restored from a backup) or retired — so it has no rate, carries no hours, and is on neither the Activity Library list nor Progress. Every row's **Why / what to do** column says which and what it needs, and **Budget Master → Needing REVIEW** (also at the top of the **Activity Library**) groups them by type with what each would carry on the default rate and one-click answers: **Add to library** or **Restore key** if it is work in this budget, **Exclude** if it belongs to someone else's, **Hide** if it is not work at all. Nothing is deleted. |
 | What is in the percent complete | **Dashboard → What the percent complete counts**: earned hours over budget hours across the activities in the budget — exactly Budget Master's *In the budget* view — and how many are left out and why: excluded by you, hidden by you, excluded by their library key, deleted in P6, in REVIEW. It also says when activities with a percent but no actual start make the earned curve read lower than the percent. |
@@ -75,6 +80,10 @@ application to read:
   progress, notes — hidden activities included and marked.
 - **Activity_Locations** and **Activity_Resources** give one row per location share and per
   crew line, ready to pivot.
+- After an XER import, `All_Activities` ends with P6's own fields — status, float, critical,
+  late dates, constraint, P6 percent, WBS, predecessors and successors, what is still open
+  — and **P6_Waiting_On** has one row per predecessor still open on an activity: whose work
+  it is and whether it is the one holding the date.
 - **Rollups**, **Resources** and **Resource_Cuts** are the By Phase & Location and Resources
   screens; **Two_Week_Log** and **Two_Week_Phases** are the fortnight to the data date against
   the baseline, with the reason recorded for every miss; **Capacity_By_Month**, **Headcount**,
@@ -179,6 +188,14 @@ with the rows as you have filtered and sorted them. It is the answer to "send me
 that list". **Settings → Export workbook** is the other thing — the whole model in
 one file, every sheet, for project controls.
 
+## Getting the .xer out of P6
+
+In P6 on the web (EPPM): **Projects → EPS**, select the project, then **Actions → Export**
+and choose **XER**. In P6 Professional: **File → Export → Primavera PM (XER)**. Export the
+whole project — not a filtered layout — and include its baseline if P6 offers it. Then drop
+the file on **Import** as the current schedule. The menus move between P6 versions; the
+format does not.
+
 ## Development
 
 ```
@@ -188,6 +205,7 @@ npm run dev            # dev server on http://localhost:47800
 npm run build          # rebuilds BOTH dist/ and standalone/ — commit them together
 npm run test:ui        # playwright smoke tests; needs a build, serves it on 127.0.0.1:4173
 TC_WORKBOOK=path/to/TC_P6_Budget_SCurve.xlsx npm test   # parity against the real workbook
+node scripts/build-p6-fixture.mjs   # rebuilds fixtures/full-project.xer, the whole-project test file
 ```
 
 `dist/` and `standalone/` are committed deliberately: the laptop that runs this cannot
@@ -205,16 +223,19 @@ The only schedule data in the repo is the anonymised fixture in `fixtures/`, reb
 ```
 src/engine     pure calculation engine (no storage, no UI): pricing, progress,
                curve, rollup, burn, capacity, staffing, trend,
-               schedule diff
+               schedule diff; xer*.ts read a whole P6 project (calendars,
+               logic, scope, outline)
 src/storage    StorageAdapter: File System Access, IndexedDB, memory; atomic writes, lock, conflicts
-src/app        React screens: Dashboard, Import, Library, Locations, Budget Master,
-               Progress, Two-Week Log, Earned vs Actual, Capacity,
-               Staffing Scenarios, Settings
+src/app        React screens: Dashboard, Schedule, Import, Library, Locations,
+               Budget Master, Progress, Two-Week Log, Earned vs Actual, Capacity,
+               Staffing Scenarios, Settings; src/app/schedule is the Schedule
+               screen's grid, Gantt, details and tabs
 server/        serve.ps1 (no-install Windows server), serve.mjs (Node equivalent),
                build plugins for the service worker and the single-file bundle
 dist/          built application, committed
 standalone/    the whole application as one HTML file, committed
-fixtures/      anonymised fixture schedules (.xlsx, .xer, .tsv) and expected figures
+fixtures/      anonymised fixture schedules (.xlsx, .xer, .tsv) and expected figures;
+               full-project.xer is a whole synthetic project, logic and all
 tests/         vitest suites (the engine, in a second, with no browser)
 tests-ui/      playwright smoke tests: every screen opens, the data paths work
 docs/          INSTALL.md, DESIGN.md

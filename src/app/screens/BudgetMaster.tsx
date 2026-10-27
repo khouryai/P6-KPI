@@ -11,6 +11,7 @@ import { normalisePhaseValue, phaseLabel, phaseOf } from '../../engine/parse';
 import { formatLocationSplit, locationLabel, parseLocationSplit } from '../../engine/locations';
 import { upsertOverrides } from '../overrides';
 import { ReviewPanel } from '../components/ReviewPanel';
+import { hasP6, p6Columns } from '../p6Columns';
 
 const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> = {
   review: { label: 'Needing REVIEW', test: (r) => r.status === 'REVIEW' },
@@ -33,6 +34,10 @@ const FLAGS: Record<string, { label: string; test: (r: BudgetRow) => boolean }> 
   },
   split: { label: 'Split across locations', test: (r) => r.locationSplit },
   forcedzero: { label: 'Forced in but carrying no hours', test: (r) => r.visibility === 'INCLUDED' && r.status === 'IN BUDGET' && r.budgetHours === 0 },
+  // These three read what only an XER carries, so they are empty after an Excel import.
+  critical: { label: 'Critical in P6 (XER imports)', test: (r) => !!r.activity.p6?.critical },
+  negfloat: { label: 'Negative float in P6 (XER imports)', test: (r) => (r.activity.p6?.totalFloat ?? 0) < 0 },
+  waitingothers: { label: 'Waiting on work outside T&C (XER imports)', test: (r) => !!r.activity.p6?.waitingOn.some((l) => !l.inScope) },
 };
 
 /** What the In budget? column offers, in the order a person works through them. */
@@ -577,6 +582,8 @@ export function BudgetMaster({ route }: { route: Route }) {
           </span>
         ),
     },
+    // Float, logic and the rest, when the schedule came from an XER.
+    ...(hasP6(model.rows) ? p6Columns() : []),
     {
       key: 'dnote',
       label: 'Date note',
