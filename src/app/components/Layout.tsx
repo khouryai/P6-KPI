@@ -13,6 +13,7 @@ const NAV: { section: string; items: { id: string; label: string }[] }[] = [
     section: 'Overview',
     items: [
       { id: 'dashboard', label: 'Dashboard' },
+      { id: 'schedule', label: 'Schedule (P6)' },
       { id: 'import', label: 'Import' },
     ],
   },

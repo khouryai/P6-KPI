@@ -40,6 +40,11 @@ export type Settings = {
    * store written before it existed, and defaulted rather than assumed to be zero.
    */
   capacity?: CapacitySettings;
+  /**
+   * Which activities of a whole-project XER are this budget's. Absent until the
+   * first XER import, which proposes one from the schedule already in use.
+   */
+  p6Scope?: ScopeRule;
 };
 
 /**
@@ -154,6 +159,113 @@ export type P6Activity = {
   activityType: string;
   excludeReason: ExcludeReason;
   sortOrder: number; // preserve export order
+  /**
+   * What P6 said about the activity beyond the six columns an Excel export carries:
+   * float, logic, constraint, status, resources. Only an activity imported from an
+   * .xer has it, and every screen reads its absence as "the export did not say",
+   * never as zero float or no predecessors.
+   */
+  p6?: P6Extras;
+};
+
+/** One activity linked to another by a relationship, as the budget's screens show it. */
+export type P6Link = {
+  /** The other activity's Activity ID and name. */
+  id: string;
+  name: string;
+  rel: 'FS' | 'SS' | 'FF' | 'SF';
+  /** Lag in working days on the predecessor's calendar. Negative is a lead. */
+  lagDays: number;
+  status: 'NOT STARTED' | 'IN PROGRESS' | 'COMPLETE';
+  start: string | null;
+  finish: string | null;
+  /** Inside the T&C scope: the same rule that decided which activities the budget reads. */
+  inScope: boolean;
+  /** Whose work it is, as near as the file says: the work type in its ID, or its WBS. */
+  group: string;
+  /** Its WBS, as a path of names. */
+  wbs: string;
+  /** No working time between the two: this link is what holds the date. */
+  driving: boolean;
+};
+
+export type P6Extras = {
+  status: 'NOT STARTED' | 'IN PROGRESS' | 'COMPLETE';
+  /** The WBS as a path of names, the project node left off. */
+  wbs: string;
+  /** Working days of float on the activity's own calendar. Null once it is complete. */
+  totalFloat: number | null;
+  freeFloat: number | null;
+  /** Critical the way the project defines it: float at or under its threshold, or on the longest path. */
+  critical: boolean;
+  lateStart: string | null;
+  lateFinish: string | null;
+  /** The activity's own constraint, by name, and its date. */
+  constraint?: string;
+  constraintDate?: string | null;
+  /** True when the constraint pins the date (Mandatory, Start On, Finish On, On or Before). */
+  hardConstraint?: boolean;
+  /** P6's own percent complete for the activity's percent complete type, 0 to 1. */
+  p6Pct: number;
+  pctType: 'Duration' | 'Units' | 'Physical';
+  /** Task dependent, start milestone, level of effort and so on. */
+  taskType: string;
+  calendar: string;
+  preds: number;
+  succs: number;
+  /**
+   * Predecessors that are not finished yet, driving ones first then latest finish
+   * first, at most eight. What this activity is waiting on.
+   */
+  waitingOn: P6Link[];
+  /** How many open predecessors there are in all, when there are more than are listed. */
+  waitingOnCount: number;
+  /** Labour hours P6 plans on the activity, by resource. Empty when nothing is assigned. */
+  resources: { name: string; budget: number; remaining: number }[];
+};
+
+/**
+ * Which activities of a whole P6 project are the T&C budget's.
+ *
+ * The Excel export arrived pre-filtered; an XER is the whole project, so the filter
+ * has to be applied here, and the same way every time. The rule reads one
+ * dash-delimited segment of the Activity ID — the third, the work type, by default
+ * — and takes the activities whose segment is one of `values`. `ids` names single
+ * activities the segment rule does not catch but which belong all the same, which
+ * is how a filter that was never quite "work type = TC" in P6 is reproduced exactly.
+ */
+export type ScopeRule = {
+  /** 1-based segment of the Activity ID. 3 is the work type. */
+  segment: number;
+  /** Segment values that put an activity in scope. Case does not matter. */
+  values: string[];
+  /** Activity IDs in scope whatever their segment says. */
+  ids?: string[];
+  /** Activity IDs out of scope whatever their segment says. */
+  excludeIds?: string[];
+};
+
+/** Where a schedule import came from, when it was an XER. */
+export type P6ImportInfo = {
+  format: 'xer';
+  /** The P6 project ID (short name) and its name. */
+  project: string;
+  projectName: string;
+  /** The data date P6 had for the project, ISO. */
+  dataDate: string | null;
+  /** Activities in that project, and the rule that chose which of them were imported. */
+  totalActivities: number;
+  scope: ScopeRule;
+  /** The stored copy of the whole file, for the Schedule screen. Absent when none was kept. */
+  file?: string;
+  /** Size of the file as exported, in bytes. */
+  bytes?: number;
+  /** For a baseline taken from the same file as a current schedule: that file's name. */
+  baselineOf?: string;
+  /** From the file's header. */
+  version?: string;
+  exportDate?: string;
+  exportedBy?: string;
 };
 
 export type ImportKind = 'current' | 'baseline';
@@ -174,6 +286,8 @@ export type ScheduleImport = {
   dataDate?: string;
   /** True when the stamp was worked out from the file's own actual dates rather than known. */
   dataDateEstimated?: boolean;
+  /** Set when the import was read from an XER: which project, which scope, where the file is kept. */
+  p6?: P6ImportInfo;
 };
 
 export type ImportIndexEntry = Omit<ScheduleImport, 'activities'> & { file: string };

@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useApp } from '../state';
 import { Page, Stat, Notice, Panel, type HeroStat } from '../components/ui';
 import { CurveChart } from '../components/CurveChart';
+import { P6Panel } from '../components/P6Panel';
 import { fmtHours, fmtPct, fmtDate } from '../format';
 import type { GroupStat } from '../../engine/types';
 import { buildCurve, rowTotals } from '../../engine/compute';
@@ -469,6 +470,10 @@ export function Dashboard() {
           </Panel>
         </div>
       )}
+
+      <div className="mt-4 empty:hidden">
+        <P6Panel rows={model.rows} dataDate={state.data.settings.dataDate} />
+      </div>
 
       {model.notes.length > 0 && (
         <div className="mt-4 space-y-2">

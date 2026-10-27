@@ -146,6 +146,8 @@ const CANONICAL: RegExp[] = [
 const STEMS = ['settings', 'locations', 'activity-library', 'activity-overrides', 'test-progress', 'missed-reasons', 'subsystems', 'team-actuals', 'id-rules', 'headcounts'];
 const CANONICAL_IMPORT = /^(index|\d{4}-\d{2}-\d{2}T\d{4,6}(-\d+)?-(current|baseline))\.json$/;
 
+const CANONICAL_XER = /^\d{4}-\d{2}-\d{2}T\d{4,6}(-\d+)?-(current|baseline)\.xer(\.gz)?$/;
+
 /**
  * A guard on the one operation here that destroys history, so a bad path cannot.
  * `imports/index.json` is deliberately not a deletable import.
@@ -154,6 +156,17 @@ export function isImportFile(path: string): boolean {
   const parts = path.split('/');
   if (parts.length !== 2 || parts[0] !== IMPORT_DIR) return false;
   return parts[1] !== 'index.json' && CANONICAL_IMPORT.test(parts[1]);
+}
+
+/** The stored copy of a whole XER kept beside an import, and nothing else. */
+export function isStoredXerFile(path: string): boolean {
+  const parts = path.split('/');
+  return parts.length === 2 && parts[0] === IMPORT_DIR && CANONICAL_XER.test(parts[1]);
+}
+
+/** Where the whole XER behind an import is kept. */
+export function storedXerPath(importId: string, kind: 'current' | 'baseline', compressed: boolean): string {
+  return `${IMPORT_DIR}/${importId}-${kind}.xer${compressed ? '.gz' : ''}`;
 }
 
 /**
@@ -283,10 +296,25 @@ export class Store {
     if (!isImportFile(file)) throw new Error(`${file} is not an import file`);
     // The index row goes first. A file that fails to delete leaves a stray on disk,
     // which is harmless; an index still pointing at a deleted file is a load error.
+    const gone = index.find((e) => e.file === file);
     const next = index.filter((e) => e.file !== file);
     await this.saveFile('importsIndex', next);
     await this.adapter.remove(file).catch(() => undefined);
+    // The whole XER kept beside it goes with it, unless another import still points at it.
+    const xer = gone?.p6?.file;
+    if (xer && isStoredXerFile(xer) && !next.some((e) => e.p6?.file === xer)) await this.adapter.remove(xer).catch(() => undefined);
     return next;
+  }
+
+  /** Keep the whole XER behind an import. */
+  async writeStoredXer(path: string, bytes: Uint8Array): Promise<void> {
+    if (!isStoredXerFile(path)) throw new Error(`${path} is not where a P6 file is kept`);
+    await this.adapter.writeBinary(path, bytes);
+  }
+
+  async readStoredXer(path: string): Promise<Uint8Array | null> {
+    if (!isStoredXerFile(path)) return null;
+    return this.adapter.readBinary(path);
   }
 
   async readImport(file: string): Promise<ScheduleImport | null> {

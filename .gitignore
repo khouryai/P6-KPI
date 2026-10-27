@@ -8,9 +8,12 @@ Thumbs.db
 *.xlsm
 *.xls
 *.csv
+*.xer
+*.xer.gz
 !fixtures/*.xlsx
 !fixtures/*.csv
 !fixtures/*.tsv
+!fixtures/*.xer
 
 # The built application IS committed: the laptop it runs on has no Node and no npm,
 # so dist/ and standalone/ are the delivered product. Rebuild with `npm run build:all`.

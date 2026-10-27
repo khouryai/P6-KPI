@@ -1430,3 +1430,189 @@ hr.rule { border: 0; border-top: 1px solid var(--line-soft); margin: 0; }
     print-color-adjust: exact;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   The XER import's scope chips: one per value of the Activity ID segment, with
+   its count. Picked reads as picked without colour alone — the border and the
+   weight change with it.
+   --------------------------------------------------------------------------- */
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--white);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+.chip:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+.chip.is-on { background: var(--info-light); border-color: var(--info-border); color: var(--info); font-weight: 600; }
+.chip:disabled { cursor: default; opacity: 0.55; }
+.chip-n { font-size: 10.5px; font-variant-numeric: tabular-nums; opacity: 0.8; }
+
+/* ---------------------------------------------------------------------------
+   The Schedule screen: the activity grid pinned left, the Gantt beside it, one
+   scroll area for both. Rows are absolutely placed and only those on screen exist,
+   so nothing here may depend on a row's neighbours.
+   --------------------------------------------------------------------------- */
+.sched-screen { display: flex; flex-direction: column; min-height: 100%; }
+.sched-screen.is-full { height: 100%; min-height: 520px; }
+.sched-fill { flex: 1; min-height: 0; }
+.sched-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; border-bottom: 1px solid var(--line-soft); margin-bottom: 10px; }
+.sched-tabs > button {
+  font-family: var(--f-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 7px 12px 8px;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+.sched-tabs > button:hover { color: var(--text); }
+.sched-tabs > button.is-on { color: var(--text); border-bottom-color: var(--hitachi-red); }
+.sched-tabs-note { margin-left: auto; font-size: 11px; color: var(--text-subtle); max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.sched { display: flex; flex-direction: column; height: 100%; min-height: 0; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden; }
+.sched-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line-soft); background: var(--surface); }
+.sched-toolbar .input { font-size: 12px; padding: 5px 8px; }
+.sched-search { width: 220px; }
+.sched-toolbar-gap { flex: 1; }
+.sched-toolbar .seg button { font-size: 11.5px; padding: 3px 9px; }
+.sched-subbar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 5px 10px; font-size: 11.5px; color: var(--text-muted); border-bottom: 1px solid var(--line-soft); background: var(--surface-2); }
+.sched-subbar-tools { display: inline-flex; align-items: center; gap: 10px; }
+.sched-banner { color: var(--info); font-weight: 600; }
+.sched-legend { display: inline-flex; align-items: center; gap: 10px; }
+.sched-key { display: inline-flex; align-items: center; gap: 4px; }
+.sched-key i { display: inline-block; width: 14px; border-radius: 3px; }
+
+.sched-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; outline: none; background: var(--surface); }
+.sched-scroll:focus-visible { box-shadow: inset 0 0 0 2px rgba(29, 78, 175, 0.25); }
+.sched-head { position: sticky; top: 0; z-index: 6; display: flex; background: var(--surface-2); border-bottom: 1px solid var(--border-strong); }
+.sched-gridhead { display: flex; flex: none; position: relative; overflow: hidden; background: var(--surface-2); }
+.sched-gridhead.is-pinned { position: sticky; left: 0; z-index: 7; border-right: 1px solid var(--line-strong); }
+.sched-th {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 0 6px 7px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+}
+.sched-th:hover { color: var(--text); }
+.sched-th.num { justify-content: flex-end; text-align: right; }
+.sched-th .col-grip { height: 100%; }
+.sched-split { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; z-index: 8; touch-action: none; }
+.sched-split:hover, .sched-split:active { background: rgba(230, 0, 18, 0.18); }
+
+.sched-scale { position: relative; flex: none; height: 100%; }
+.sched-scale-top, .sched-scale-bot { position: absolute; left: 0; right: 0; height: 50%; }
+.sched-scale-top { top: 0; border-bottom: 1px solid var(--line-soft); }
+.sched-scale-bot { bottom: 0; }
+.sched-scale span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 5px;
+  border-left: 1px solid var(--line-soft);
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sched-scale-top span { font-weight: 600; color: var(--text); }
+
+.sched-row { position: absolute; left: 0; display: flex; height: 26px; cursor: default; }
+.sched-cells { display: flex; flex: none; overflow: hidden; background: var(--surface); }
+.sched-cells.is-pinned { position: sticky; left: 0; z-index: 3; border-right: 1px solid var(--line-strong); }
+.sched-td {
+  flex: none;
+  height: 26px;
+  line-height: 25px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid var(--gray-100);
+}
+.sched-td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.sched-bars { position: relative; flex: none; height: 26px; border-bottom: 1px solid var(--gray-100); }
+.sched-row:hover .sched-cells, .sched-row:hover .sched-bars { background: var(--gray-50); }
+.sched-row.is-sel .sched-cells, .sched-row.is-sel .sched-bars { background: var(--info-light); }
+.sched-row.is-sel .sched-td:first-child { box-shadow: inset 3px 0 0 var(--brand-blue); }
+.sched-group { cursor: pointer; }
+.sched-group .sched-cells, .sched-group .sched-bars { background: var(--surface-3); }
+.sched-group:hover .sched-cells, .sched-group:hover .sched-bars { background: var(--gray-200); }
+.sched-band { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+.sched-caret { width: 10px; flex: none; color: var(--text-muted); font-size: 10px; }
+.sched-band-code { font-family: var(--f-mono); font-size: 10.5px; font-weight: 500; color: var(--text-subtle); }
+.sched-band-n { font-size: 10.5px; font-weight: 600; color: var(--text-muted); background: var(--white); border: 1px solid var(--line-soft); border-radius: 999px; padding: 0 6px; line-height: 16px; }
+.sched-band-crit { font-size: 10.5px; font-weight: 600; color: var(--bad); }
+.sched-band-dates { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.sched-dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; margin-right: 6px; vertical-align: 1px; }
+.sched-dot.st-done { background: #54575f; }
+.sched-dot.st-active { background: var(--warn-dot); }
+.sched-dot.st-todo { background: transparent; box-shadow: inset 0 0 0 1.5px #9a9da4; }
+.sched-level { font-family: var(--f-mono); font-size: 10px; color: var(--info); margin-right: 5px; }
+.sched-empty { position: absolute; left: 0; right: 0; text-align: center; font-size: 12.5px; color: var(--text-subtle); }
+
+/* Bars. Thin, rounded at the data end, never filling the row. */
+.gbar { position: absolute; top: 8px; height: 10px; border-radius: 3px; }
+.gbar-loe { top: 10px; height: 6px; opacity: 0.55; }
+.gbar-bl { position: absolute; top: 20px; height: 3px; border-radius: 2px; background: #9a9da4; }
+.gbar-sum { position: absolute; top: 10px; height: 5px; background: #2a2c31; border-radius: 1px; }
+.gbar-sum::before, .gbar-sum::after { content: ''; position: absolute; top: 0; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid #2a2c31; }
+.gbar-sum::before { left: -1px; transform: translateY(4px); }
+.gbar-sum::after { right: -1px; transform: translateY(4px); }
+.gms { position: absolute; top: 8px; width: 10px; height: 10px; margin-left: -5px; transform: rotate(45deg); border-radius: 1px; }
+.gbar-label { position: absolute; top: 0; line-height: 26px; font-size: 11px; color: var(--text-muted); white-space: nowrap; pointer-events: none; }
+.gline { position: absolute; width: 0; z-index: 2; pointer-events: none; }
+.gline-dd { border-left: 1px dashed #9a9da4; }
+.gline-today { border-left: 1px dotted #e60012; }
+.sched-links { position: absolute; z-index: 1; pointer-events: none; overflow: hidden; }
+
+/* The activity panel under the Gantt. */
+.sched-details { position: relative; flex: none; display: flex; flex-direction: column; border-top: 1px solid var(--line-strong); background: var(--surface); }
+.sched-details-grip { position: absolute; top: -4px; left: 0; right: 0; height: 8px; cursor: row-resize; z-index: 9; touch-action: none; }
+.sched-details-grip:hover { background: rgba(230, 0, 18, 0.12); }
+.sched-details-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 8px 12px 4px; font-size: 13px; }
+.sched-details-tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); }
+.sched-details-tabs button { font-size: 12px; font-weight: 600; color: var(--text-muted); background: none; border: 0; border-bottom: 2px solid transparent; padding: 5px 9px 6px; margin-bottom: -1px; cursor: pointer; }
+.sched-details-tabs button:hover { color: var(--text); }
+.sched-details-tabs button.is-on { color: var(--text); border-bottom-color: var(--brand-blue); }
+.sched-details-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px 14px; font-size: 12.5px; }
+.sched-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 18px; }
+.sched-facts > div { display: flex; gap: 8px; min-width: 0; border-bottom: 1px solid var(--gray-100); padding-bottom: 3px; }
+.sched-facts dt { flex: none; width: 128px; font-size: 11px; color: var(--text-muted); }
+.sched-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.tbl.sched-mini th { padding: 6px 8px; }
+.tbl.sched-mini td { padding: 5px 8px; font-size: 12px; }
+.link-state { font-size: 11.5px; font-weight: 600; }
+.ls-driving, .ls-not-honoured, .ls-violated, .ls-out-of-sequence { color: var(--bad); }
+.ls-satisfied, .ls-done { color: var(--good); }
+.ls-not-driving { color: var(--text-muted); font-weight: 500; }
+
+@media print {
+  .sched-toolbar, .sched-subbar, .sched-details { display: none !important; }
+}

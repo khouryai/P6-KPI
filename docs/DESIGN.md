@@ -524,6 +524,126 @@ Three formats reach the same `P6Activity[]`, so everything downstream is identic
 The XER path also reads dates the Excel path cannot: a P6 constraint star (`01-Oct-26*`)
 defeats Excel's `DATEVALUE`, but the native format carries a real timestamp.
 
+An XER is normally the **whole project**, not the T&C slice the Excel export was
+filtered to. How that is handled is the next section.
+
+## The whole P6 project
+
+The Excel export arrived pre-filtered to the T&C work, so the budget never had to ask
+which activities were its own — and never saw anything else. An XER is the whole
+programme: construction, installation, other contractors, milestones, and the logic
+between all of them. Two things follow, and they are kept apart on purpose.
+
+**The budget still reads only its slice, exactly as before.** `xerScope.ts` applies a
+*scope rule* — a segment of the Activity ID and the values that put an activity in
+(work type `TC` by default), plus activities named by ID — and hands the budget the same
+`P6Activity[]` the Excel path produced. The conversion goes through the same row parser
+with the same strings, and `tests/xer-project.test.ts` holds it to deep equality with the
+original XER import, so no figure can tell which file it came from.
+
+The rule is *proposed from the schedule already in use*: the work types that make up most
+of it, plus any odd activity outside those named by its ID (a programme milestone the old
+P6 filter happened to include). The first XER import therefore reads exactly what the
+last Excel import did. Before anything is confirmed, the import screen says how the slice
+compares with the schedule in use — matched, new, in the file but outside the scope, gone —
+with one click to keep the outside ones by ID. The rule is saved with Settings and reused
+by every later import, and can be changed on any import's preview.
+
+**What only the XER knows rides along on each activity**, as `P6Activity.p6`: P6's status,
+total and free float in working days on the activity's own calendar, criticality as the
+project defines it, late dates, the constraint, P6's own percent complete, the WBS path,
+how many predecessors and successors it has, the predecessors still open on it (up to
+eight, the ones holding its date first) and the labour P6 plans on it. It is an optional
+field: an Excel import has none, and every screen reads its absence as *not known*, never
+as zero float or no logic. The pricing never reads it — the summary of an XER-fed model is
+tested identical with and without it.
+
+It is what lets the existing screens answer questions they could not: **Budget Master**
+carries Total float and Waiting on (and P6 status, P6 %, planned hours, WBS, constraint and
+late finish on the Columns button) plus three quality filters; the **Two-Week Log** says
+what a missed activity is still waiting on and records *Predecessor work not complete* in
+one click; **Progress** shows P6's percent beside the one being keyed, as a reference only;
+the **Dashboard** has a *From the P6 file* panel; the **import change report** adds float
+lost and activities newly critical when both schedules came from an XER; and the full Excel
+extract gains the P6 columns on `All_Activities` (at the end, so nothing anybody references
+moves) and a `P6_Waiting_On` sheet with one row per open predecessor.
+
+**The data date comes from the file.** `PROJECT.last_recalc_date` is the date P6 last
+scheduled to, so a current-schedule import stamps it on the import and offers to put it in
+Settings — after the import is committed, so the schedule it replaces is stamped with the
+old date, not the new one.
+
+**A baseline in the same file** — P6 can export a project with its baseline, which is a
+copy whose `orig_proj_id` names the project — is recognised and offered as the baseline
+import too. Only by default when there is no baseline yet, since swapping the baseline
+moves every planned figure. A separate baseline XER still imports on its own.
+
+### Keeping the file
+
+The budget needs the slice; the Schedule screen needs everything. So the file itself is
+kept beside the import, gzip-compressed (`imports/<id>-current.xer.gz` — an XER is
+repetitive text and comes down to a tenth of its size). It is removed with its import and
+never with anything else; `Store` refuses to write, read or delete a stored file anywhere
+but there. A restored import copies its file rather than sharing it, and a backup carries
+the schedule but not the file, so a restored backup says the file was not kept rather than
+pointing at another folder's.
+
+### Reading it
+
+`xerText.ts` reads the file a step of a few megabytes at a time, handing each row to a
+per-table reader that looks its columns up once, and dropping the row. Splitting the whole
+file into arrays first would hold several times its size in memory at once. Stepping lets
+the screen show a progress bar and stay responsive; a 9 MB, twenty-thousand-activity file
+reads in under half a second in Node and about a second and a half in the browser.
+
+P6 on a Windows desktop writes Windows-1252, not UTF-8. The bytes are tried as strict
+UTF-8 first and read as Windows-1252 otherwise, with the 0x80–0x9F range mapped explicitly
+— some runtimes decode "windows-1252" as ISO-8859-1 and leave control codes where the en
+dashes were.
+
+Notebooks are HTML with P6's line breaks written as 0x7F pairs. They are shown as text,
+never as markup: the file is something somebody sent, and its HTML is not something to run.
+
+### What the logic analysis does and does not do
+
+P6 does not write *driving* into the file. `xerLogic.ts` works it out the way P6 does on
+screen: a relationship drives when there is no working time between the predecessor's date
+and the successor's after the lag, measured on the predecessor's calendar (P6's default)
+to the working minute. That needs the calendars, which are read from `clndr_data` — work
+week, lunch breaks, holidays and short days. A calendar whose pattern cannot be read falls
+back to a Monday-to-Friday week of its hours and says so on *About the file*.
+
+A link is also *done* (the predecessor has done its part), *out of sequence* (the
+successor went ahead regardless) or *not honoured* (scheduled earlier than the logic
+allows: a hard constraint, or a schedule not re-run).
+
+Nothing here reschedules. The dates, floats and criticality are P6's from its last run;
+the screen shows them, it does not recompute them. Changing the schedule is P6's job.
+
+### The Schedule screen
+
+A programme is tens of thousands of rows, so only the rows on screen exist. The grid is
+pinned to the left of one scroll area and the bars sit beside it, so scrolling either way
+moves both with no syncing between two scrollers. Rows are placed at their own position in
+the whole list, so scrolling adds and drops rows at the edges and leaves the ones still in
+view untouched. Filtering, grouping and sorting run over the whole project; the drawing
+never does.
+
+Two things made scrolling slow and were taken out. The relationship lines were an SVG as
+wide as the whole timeline — millions of pixels repainted on every scroll — and are now
+drawn only for the stretch in view. And they were dashed: a dashed line is drawn dash by
+dash, and a few hundred long ones cost a quarter of a second a frame. Driving links are now
+solid and dark, the rest solid and light, which reads as well and costs nothing.
+
+Bar colours follow the status, not a palette: done work in grey, remaining in blue,
+critical in red, the baseline as a thin grey bar beneath. Checked with the dataviz
+validator: every pair separates for colour-blind readers (worst ΔE 10.3); the two greys
+are deliberately low in chroma, because done work and the baseline are meant to recede.
+
+The tabs share one selection: picking an activity on the lookahead, a check or a link in
+the panel opens it on the Gantt. The activity view stays mounted behind the other tabs so
+a search, a trace or a collapsed band is still there on coming back.
+
 ## Adding a library key by hand
 
 Keys are normally discovered from the schedule. **Add a key by hand** on the Activity

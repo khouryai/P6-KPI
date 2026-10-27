@@ -229,7 +229,7 @@ export type TableLayout = {
 
 const LAYOUT_PREFIX = 'tc-cols-';
 
-function readLayout(tableId: string): TableLayout | null {
+export function readLayout(tableId: string): TableLayout | null {
   try {
     const raw = localStorage.getItem(LAYOUT_PREFIX + tableId);
     if (!raw) return null;
@@ -245,18 +245,21 @@ function readLayout(tableId: string): TableLayout | null {
   }
 }
 
+/** What a layout needs to know about a column, whatever its rows are. */
+type LayoutColumn = { key: string; optional?: boolean; locked?: boolean };
+
 /** Is this column on screen, given the layout? The one place that decides. */
-export function isVisible<T>(c: Column<T>, layout: TableLayout | null): boolean {
+export function isVisible(c: LayoutColumn, layout: TableLayout | null): boolean {
   if (c.locked) return true;
   if (layout?.off.includes(c.key)) return false;
   return c.optional ? !!layout?.on.includes(c.key) : true;
 }
 
-function isEmptyLayout(l: TableLayout): boolean {
+export function isEmptyLayout(l: TableLayout): boolean {
   return l.order.length === 0 && l.off.length === 0 && l.on.length === 0 && Object.keys(l.widths ?? {}).length === 0 && !l.wrap;
 }
 
-function writeLayout(tableId: string, layout: TableLayout | null): void {
+export function writeLayout(tableId: string, layout: TableLayout | null): void {
   try {
     if (layout === null) localStorage.removeItem(LAYOUT_PREFIX + tableId);
     else localStorage.setItem(LAYOUT_PREFIX + tableId, JSON.stringify(layout));
@@ -275,7 +278,7 @@ function writeLayout(tableId: string, layout: TableLayout | null): void {
  * position, and if it is optional it stays off, so shipping a new optional column
  * cannot rearrange a table somebody had already set up the way they wanted.
  */
-export function applyLayout<T>(columns: Column<T>[], layout: TableLayout | null): Column<T>[] {
+export function applyLayout<C extends LayoutColumn>(columns: C[], layout: TableLayout | null): C[] {
   const visible = columns.filter((c) => isVisible(c, layout));
   if (!layout?.order.length) return visible;
   const rank = new Map(layout.order.map((k, i) => [k, i]));
@@ -283,7 +286,7 @@ export function applyLayout<T>(columns: Column<T>[], layout: TableLayout | null)
 }
 
 /** The Columns popover: tick what to show, move what matters to the front. */
-function ColumnPicker<T>({
+export function ColumnPicker<T>({
   columns,
   layout,
   onChange,

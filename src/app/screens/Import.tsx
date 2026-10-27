@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useRef } from 'react';
 import type { WorkBook } from 'xlsx';
 import { useApp } from '../state';
 import { Page, Notice, Badge, CellInput } from '../components/ui';
@@ -7,27 +7,33 @@ import { isValidISO } from '../../engine/dates';
 import { parseTable, parseDelimitedText, type ParsedTable } from '../../engine/parse';
 import { detectLayout, columnCount, columnLabel, FIELD_ORDER, FIELD_LABELS, type ColumnMap, type Layout } from '../../engine/columns';
 import { readWorkbook, pickSheet, workbookGrid } from '../../engine/workbook';
-import { parseXer, isXer, xerToActivities, type XerTable } from '../../engine/xer';
+import { isXer } from '../../engine/xer';
+import { readXerBytes, looksLikeXer, rememberProject, type LoadedProject } from '../xerFile';
+import { XerPanel, initialChoice, useXerDerived, type XerChoice } from './ImportXer';
+import { href } from '../router';
 import { distinctActivityTypes, distinctLocations } from '../../engine/discover';
 import { diffSchedules, type ActivityChange } from '../../engine/scheduleDiff';
 import { oneRowPerId } from '../../engine/compute';
 import { normKey } from '../../engine/keys';
-import type { ImportKind, ImportIndexEntry, ScheduleImport, P6Activity } from '../../engine/types';
+import type { ImportKind, ImportIndexEntry, ScheduleImport, P6Activity, P6ImportInfo } from '../../engine/types';
+import { msToDate } from '../../engine/xerText';
 import { fmtDateTime, fmtDate } from '../format';
 import { TERMS } from '../../engine/vocab';
 
 type Pending =
   | { type: 'grid'; name: string; grid: unknown[][] }
   | { type: 'workbook'; name: string; wb: WorkBook; sheet: string }
-  | { type: 'xer'; name: string; tables: Map<string, XerTable> };
+  | { type: 'xer'; name: string; loaded: LoadedProject; raw: Uint8Array };
 
 export function Import() {
   const { state, model, actions } = useApp();
   const [kind, setKind] = useState<ImportKind>('current');
   const [pending, setPending] = useState<Pending | null>(null);
   const [mapOverride, setMapOverride] = useState<Partial<ColumnMap> | null>(null);
-  const [hoursPerDay, setHoursPerDay] = useState(8);
-  const [project, setProject] = useState('');
+  const [xerChoice, setXerChoice] = useState<XerChoice | null>(null);
+  /** A P6 file being read: big projects take a second or two, and the bar says how far. */
+  const [reading, setReading] = useState<{ name: string; progress: number } | null>(null);
+  const readSeq = useRef(0);
   const [paste, setPaste] = useState('');
   const [folderFiles, setFolderFiles] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,16 +71,51 @@ export function Import() {
     }
   };
   const reset = () => {
+    readSeq.current += 1;
+    setReading(null);
     setPending(null);
     setMapOverride(null);
-    setProject('');
+    setXerChoice(null);
   };
+
+  /**
+   * Read a P6 file. It is read off the bytes rather than as text, because P6 writes
+   * Windows-1252 and reading it as UTF-8 mangles every dash and accent in it.
+   */
+  const loadXer = useCallback(
+    async (name: string, raw: Uint8Array) => {
+      const seq = ++readSeq.current;
+      setPending(null);
+      setXerChoice(null);
+      setReading({ name, progress: 0 });
+      try {
+        const loaded = await readXerBytes(raw, (progress) => {
+          if (readSeq.current === seq) setReading({ name, progress });
+        });
+        if (readSeq.current !== seq) return;
+        const d = state.data;
+        setXerChoice(
+          initialChoice(loaded, kind, {
+            savedScope: d.settings.p6Scope,
+            inUse: (kind === 'current' ? d.current : d.baseline)?.activities ?? d.current?.activities ?? null,
+            haveBaseline: !!d.baseline,
+            dataDate: d.settings.dataDate,
+          }),
+        );
+        setPending({ type: 'xer', name, loaded, raw });
+      } catch (e) {
+        if (readSeq.current === seq) fail(e);
+      } finally {
+        if (readSeq.current === seq) setReading(null);
+      }
+    },
+    [kind, state.data],
+  );
 
   const loadBytes = useCallback((name: string, bytes: Uint8Array, text: string | null) => {
     setMapOverride(null);
-    setProject('');
-    if (text !== null && isXer(text)) {
-      setPending({ type: 'xer', name, tables: parseXer(text) });
+    if (looksLikeXer(name, bytes) || (text !== null && isXer(text))) {
+      void loadXer(name, bytes.length ? bytes : new TextEncoder().encode(text ?? ''));
       return;
     }
     if (/\.xlsx?$|\.xlsm$|\.xlsb$/i.test(name)) {
@@ -83,14 +124,14 @@ export function Import() {
       return;
     }
     setPending({ type: 'grid', name, grid: parseDelimitedText(text ?? new TextDecoder().decode(bytes)) });
-  }, [kind]);
+  }, [kind, loadXer]);
 
   const loadFile = useCallback(async (file: File) => {
     setError(null);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      // An .xer is text; a workbook is not. Sniff before deciding.
-      const isBinary = /\.xlsx?$|\.xlsm$|\.xlsb$/i.test(file.name);
+      // An .xer is read from its bytes, a workbook is binary, anything else is text.
+      const isBinary = /\.xlsx?$|\.xlsm$|\.xlsb$/i.test(file.name) || looksLikeXer(file.name, bytes);
       loadBytes(file.name, bytes, isBinary ? null : await file.text());
     } catch (e) {
       fail(e);
@@ -101,7 +142,7 @@ export function Import() {
     setError(null);
     setMapOverride(null);
     try {
-      if (isXer(paste)) setPending({ type: 'xer', name: 'clipboard paste', tables: parseXer(paste) });
+      if (isXer(paste)) void loadXer('clipboard paste', new TextEncoder().encode(paste));
       else setPending({ type: 'grid', name: 'clipboard paste', grid: parseDelimitedText(paste) });
     } catch (e) {
       fail(e);
@@ -111,7 +152,7 @@ export function Import() {
   const loadFolderFile = async (path: string) => {
     setError(null);
     try {
-      const binary = /\.xlsx?$|\.xlsm$|\.xlsb$/i.test(path);
+      const binary = /\.xlsx?$|\.xlsm$|\.xlsb$|\.xer$/i.test(path);
       if (binary) {
         const bytes = await actions.readFolderBinary(path);
         if (!bytes) throw new Error(`${path} could not be read`);
@@ -140,14 +181,11 @@ export function Import() {
     return mapOverride ? { ...detected, map: { ...detected.map, ...mapOverride } } : detected;
   }, [detected, mapOverride]);
 
-  const xer = useMemo(() => {
-    if (pending?.type !== 'xer') return null;
-    return xerToActivities(pending.tables, { hoursPerDay, projectShortName: project || undefined });
-  }, [pending, hoursPerDay, project]);
+  const xer = useXerDerived(pending?.type === 'xer' ? pending.loaded : null, pending?.type === 'xer' ? xerChoice : null, kind);
 
   const parsed = useMemo<ParsedTable | null>(() => {
     if (xer) {
-      return { activities: xer.activities, headerSkipped: false, layout: detectLayout([]), warnings: [], unparseableDates: 0, duplicateIds: [], skippedBlank: 0, skippedBeforeHeader: 0 };
+      return { activities: xer.scoped.activities, headerSkipped: false, layout: detectLayout([]), warnings: [], unparseableDates: 0, duplicateIds: [], skippedBlank: 0, skippedBeforeHeader: 0 };
     }
     if (!grid || !layout) return null;
     return parseTable(grid, layout);
@@ -221,7 +259,8 @@ export function Import() {
     if (!pending || !parsed) return;
     setBusy(true);
     try {
-      await actions.commitImport(kind, parsed.activities, pending.name);
+      if (pending.type === 'xer' && xer && xerChoice) await commitXer(pending, xer, xerChoice);
+      else await actions.commitImport(kind, parsed.activities, pending.name);
       reset();
       setPaste('');
     } catch (e) {
@@ -229,6 +268,43 @@ export function Import() {
     } finally {
       setBusy(false);
     }
+  };
+
+  /**
+   * An XER import: the schedule, and with it whatever else the file settled — its
+   * baseline, its data date, the scope that chose the activities — so none of those
+   * has to be keyed by hand afterwards.
+   */
+  const commitXer = async (p: Extract<Pending, { type: 'xer' }>, x: NonNullable<typeof xer>, choice: XerChoice) => {
+    const imp = await actions.commitImport(kind, x.scoped.activities, p.name, {
+      p6: x.info,
+      ...(choice.keepFile ? { xer: p.raw } : {}),
+      ...(kind === 'current' && x.dataDate ? { dataDate: x.dataDate } : {}),
+      quiet: true,
+    });
+    if (imp.p6?.file) rememberProject(imp.p6.file, p.loaded);
+    let baselineNote = '';
+    if (kind === 'current' && x.baseline) {
+      const bl = x.baseline;
+      const info: P6ImportInfo = {
+        format: 'xer',
+        project: bl.project.shortName,
+        projectName: bl.project.name,
+        dataDate: msToDate(bl.project.dataDate),
+        totalActivities: bl.scoped.total,
+        scope: x.info.scope,
+        baselineOf: p.name,
+      };
+      await actions.commitImport('baseline', bl.scoped.activities, `${p.name} (baseline ${bl.project.shortName})`, { p6: info, quiet: true });
+      baselineNote = `, and its baseline ${bl.project.shortName} (${bl.scoped.activities.length})`;
+    }
+    const setDate = kind === 'current' && choice.setDataDate && !!x.dataDate;
+    actions.update('settings', (st) => ({ ...st, p6Scope: x.info.scope, ...(setDate ? { dataDate: x.dataDate! } : {}) }));
+    actions.notify(
+      'ok',
+      `${kind === 'current' ? 'Current' : 'Baseline'} schedule imported: ${x.scoped.activities.length} activities from P6 project ${x.info.project} (of ${x.scoped.total} in it)${baselineNote}.` +
+        (setDate ? ` Data date set to ${fmtDate(x.dataDate)}.` : ''),
+    );
   };
 
   const conflicts = model.summary.duplicateDateConflicts;
@@ -297,12 +373,23 @@ export function Import() {
 
       {error && <div className="mt-3"><Notice tone="error">{error}</Notice></div>}
 
+      {reading && (
+        <div className="card mt-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="card-title">Reading {reading.name}</h2>
+            <span className="text-[12px] tabular-nums text-[var(--text-muted)]">{Math.round(reading.progress * 100)}%</span>
+          </div>
+          <div className="bar bar-lg mt-2"><span style={{ width: `${Math.round(reading.progress * 100)}%` }} /></div>
+          <div className="mt-1 text-[12px] text-[var(--text-muted)]">The whole project: activities, logic, calendars, resources and codes. Nothing is imported until you confirm.</div>
+        </div>
+      )}
+
       {pending && preview && parsed && (
         <div className="card mt-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="card-title">
-                Preview: {pending.name} {pending.type === 'xer' && <Badge tone="purple">P6 native .xer</Badge>}
+                Preview: {pending.name} {pending.type === 'xer' && <Badge tone="purple">P6 native .xer{xer?.project ? ` · ${xer.project.shortName}` : ''}</Badge>}
               </h2>
               <div className="text-[12px] text-[var(--text-muted)]">Importing as the {kind} schedule. Check the mapping and the counts, then confirm.</div>
             </div>
@@ -324,27 +411,16 @@ export function Import() {
             </div>
           )}
 
-          {pending.type === 'xer' && xer && (
-            <div className="mt-3 flex flex-wrap items-end gap-3 rounded bg-[var(--surface-2)] px-3 py-2 text-[12px]">
-              {xer.projects.length > 1 && (
-                <label>
-                  <div className="font-semibold">Project</div>
-                  <select className="input mt-1" value={project} onChange={(e) => setProject(e.target.value)}>
-                    <option value="">All projects ({xer.projects.reduce((s, p) => s + p.taskCount, 0)} activities)</option>
-                    {xer.projects.map((p) => <option key={p.id} value={p.shortName}>{p.shortName} ({p.taskCount})</option>)}
-                  </select>
-                </label>
-              )}
-              <label>
-                <div className="font-semibold">Hours per day</div>
-                <input className="input mt-1 w-24" type="number" step="0.5" value={hoursPerDay} onChange={(e) => setHoursPerDay(Number(e.target.value) || 8)} />
-              </label>
-              <div className="text-[var(--text-muted)]">
-                XER holds durations in hours. {xer.calendarHours.length > 0
-                  ? <>Converted using each activity's own calendar: {xer.calendarHours.map((c) => `${c.name} at ${c.hoursPerDay} h`).join(', ')}.</>
-                  : <>No calendar was found in the file, so the value above is used for every activity.</>}
-              </div>
-            </div>
+          {pending.type === 'xer' && xer && xerChoice && (
+            <XerPanel
+              loaded={pending.loaded}
+              choice={xerChoice}
+              onChange={setXerChoice}
+              kind={kind}
+              inUse={(kind === 'current' ? state.data.current : state.data.baseline)?.activities ?? state.data.current?.activities ?? null}
+              settingsDataDate={state.data.settings.dataDate}
+              derived={xer}
+            />
           )}
 
           {pending.type !== 'xer' && layout && grid && (
@@ -420,7 +496,6 @@ export function Import() {
               {preview.newTypes.length ? `${preview.newTypes.length} new library type${preview.newTypes.length === 1 ? '' : 's'} on default rates` : 'no new library types'}. Existing entries keep their rates.
             </div>
           )}
-          {xer?.warnings.map((w) => <div key={w} className="mt-2"><Notice tone="warn">{w}</Notice></div>)}
           {preview.dupes.duplicateIds > 0 && (
             <div className="mt-2">
               <Notice tone={preview.dupes.dateConflicts.length ? 'warn' : 'info'}>
@@ -583,7 +658,19 @@ export function Import() {
                       );
                     })()}
                   </td>
-                  <td>{h.sourceFilename}</td>
+                  <td>
+                    {h.sourceFilename}
+                    {h.p6 && (
+                      <span className="ml-1.5 text-[11px] text-[var(--text-muted)]" title={`P6 project ${h.p6.project}${h.p6.projectName ? ` (${h.p6.projectName})` : ''}: ${h.rowCount} of ${h.p6.totalActivities} activities in scope.`}>
+                        <Badge tone="purple">{h.p6.project || 'xer'}</Badge>
+                        {h.p6.file && (
+                          <a className="btn-link ml-1.5" href={href('schedule', { import: h.id })}>
+                            open schedule
+                          </a>
+                        )}
+                      </span>
+                    )}
+                  </td>
                   <td className="num">{h.rowCount}</td>
                   <td className="text-[var(--text-muted)]">{h.file}</td>
                   <td>
@@ -656,9 +743,11 @@ function Slip({ days }: { days: number | null }) {
  * schedules and comparing them by hand.
  */
 function ChangeReport({ against, diff, kind }: { against: string; diff: ReturnType<typeof diffSchedules>; kind: ImportKind }) {
-  const [open, setOpen] = useState<'slipped' | 'pulledIn' | 'finished' | 'started' | 'added' | 'removed' | null>(
+  const [open, setOpen] = useState<'slipped' | 'pulledIn' | 'finished' | 'started' | 'added' | 'removed' | 'floatEroded' | 'becameCritical' | null>(
     diff.slipped.length ? 'slipped' : null,
   );
+  // Float is only comparable when both schedules came from an XER.
+  const floatKnown = diff.changed.some((c) => c.floatMovedDays !== undefined);
 
   const worst = diff.slipped[0]?.finishMovedDays ?? 0;
   const tiles: { key: NonNullable<typeof open>; label: string; rows: ActivityChange[]; tone?: string }[] = [
@@ -668,6 +757,12 @@ function ChangeReport({ against, diff, kind }: { against: string; diff: ReturnTy
     { key: 'started', label: 'Newly started', rows: diff.started },
     { key: 'added', label: 'New activities', rows: diff.added },
     { key: 'removed', label: 'Gone from the schedule', rows: diff.removed, tone: diff.removed.length ? 'tone-bad' : undefined },
+    ...(floatKnown
+      ? ([
+          { key: 'floatEroded', label: 'Lost 5+ days of float', rows: diff.floatEroded, tone: diff.floatEroded.length ? 'tone-bad' : undefined },
+          { key: 'becameCritical', label: 'Became critical', rows: diff.becameCritical, tone: diff.becameCritical.length ? 'tone-bad' : undefined },
+        ] as const)
+      : []),
   ];
   const shown = open ? (tiles.find((t) => t.key === open)?.rows ?? []) : [];
 
@@ -680,7 +775,7 @@ function ChangeReport({ against, diff, kind }: { against: string; diff: ReturnTy
           {worst > 0 && <> The worst slip is <b className="tone-bad">{worst} days</b>.</>}
         </span>
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
+      <div className={`mt-2 grid grid-cols-2 gap-2 md:grid-cols-4 ${floatKnown ? 'lg:grid-cols-8' : 'lg:grid-cols-6'}`}>
         {tiles.map((t) => (
           <button
             key={t.key}

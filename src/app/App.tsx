@@ -16,6 +16,7 @@ import { Dashboard } from './screens/Dashboard';
  * standalone build inlines dynamic imports, so it is unaffected.
  */
 const Import = lazy(() => import('./screens/Import').then((m) => ({ default: m.Import })));
+const Schedule = lazy(() => import('./screens/Schedule').then((m) => ({ default: m.Schedule })));
 const Library = lazy(() => import('./screens/Library').then((m) => ({ default: m.Library })));
 const Locations = lazy(() => import('./screens/Locations').then((m) => ({ default: m.Locations })));
 const BudgetMaster = lazy(() => import('./screens/BudgetMaster').then((m) => ({ default: m.BudgetMaster })));
@@ -43,6 +44,9 @@ function Shell() {
   switch (route.screen) {
     case 'import':
       screen = <Import />;
+      break;
+    case 'schedule':
+      screen = <Schedule route={route} />;
       break;
     case 'library':
       screen = <Library route={route} />;

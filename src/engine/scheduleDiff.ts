@@ -36,6 +36,13 @@ export type ActivityChange = {
   newlyStarted: boolean;
   /** Every field that differs, for the row to explain itself. */
   fields: FieldChange[];
+  /**
+   * Working days the total float moved, when both schedules came from an XER and so
+   * both say. Negative is float lost. Null when either does not say.
+   */
+  floatMovedDays?: number | null;
+  /** Critical now and not before. Only known when both schedules came from an XER. */
+  becameCritical?: boolean;
 };
 
 export type ScheduleDiff = {
@@ -51,7 +58,17 @@ export type ScheduleDiff = {
   finished: ActivityChange[];
   /** Newly carrying an actual start. */
   started: ActivityChange[];
+  /**
+   * Lost five working days of float or more, worst first. Empty unless both
+   * schedules are XER imports: an Excel export does not carry float.
+   */
+  floatEroded: ActivityChange[];
+  /** Critical in the incoming schedule and not in the one in use. */
+  becameCritical: ActivityChange[];
 };
+
+/** Float lost by this much, in working days, is worth a line in the change report. */
+export const FLOAT_EROSION_DAYS = 5;
 
 const days = (from: string | null, to: string | null): number | null =>
   from && to ? Math.round((isoToMs(to) - isoToMs(from)) / 86_400_000) : null;
@@ -84,6 +101,19 @@ function compare(before: P6Activity, after: P6Activity): ActivityChange {
   if (before.activityName !== after.activityName) {
     fields.push({ field: 'Name', from: before.activityName, to: after.activityName });
   }
+  // Float and criticality only where both files said: one Excel side means unknown, not zero.
+  let floatMovedDays: number | null = null;
+  let becameCritical = false;
+  if (before.p6 && after.p6) {
+    const fb = before.p6.totalFloat;
+    const fa = after.p6.totalFloat;
+    if (fb !== null && fa !== null) {
+      floatMovedDays = Math.round((fa - fb) * 100) / 100;
+      if (Math.abs(floatMovedDays) >= 0.5) fields.push({ field: 'Total float', from: `${fb} d`, to: `${fa} d`, days: floatMovedDays });
+    }
+    becameCritical = after.p6.critical && !before.p6.critical;
+    if (becameCritical) fields.push({ field: 'Critical', from: 'no', to: 'yes' });
+  }
 
   return {
     activityId: after.activityId,
@@ -94,6 +124,7 @@ function compare(before: P6Activity, after: P6Activity): ActivityChange {
     newlyFinished: after.actualFinish && !before.actualFinish,
     newlyStarted: after.actualStart && !before.actualStart,
     fields,
+    ...(before.p6 && after.p6 ? { floatMovedDays, becameCritical } : {}),
   };
 }
 
@@ -156,5 +187,9 @@ export function diffSchedules(before: P6Activity[], after: P6Activity[]): Schedu
     pulledIn: changed.filter((c) => (c.finishMovedDays ?? 0) < 0).sort(byFinish(-1)),
     finished: changed.filter((c) => c.newlyFinished),
     started: changed.filter((c) => c.newlyStarted && !c.newlyFinished),
+    floatEroded: changed
+      .filter((c) => c.floatMovedDays !== undefined && c.floatMovedDays !== null && c.floatMovedDays <= -FLOAT_EROSION_DAYS)
+      .sort((x, y) => (x.floatMovedDays ?? 0) - (y.floatMovedDays ?? 0)),
+    becameCritical: changed.filter((c) => c.becameCritical),
   };
 }

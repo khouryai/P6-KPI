@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { Model, ModelBase, ScheduleImport, ImportKind, ImportIndexEntry, P6Activity } from '../engine/types';
+import type { Model, ModelBase, ScheduleImport, ImportKind, ImportIndexEntry, P6Activity, P6ImportInfo } from '../engine/types';
 import { attachBurn, computeBase } from '../engine/compute';
 import { discoverLibrary, discoverLocations } from '../engine/discover';
 import type { StorageAdapter } from '../storage/adapter';
@@ -8,7 +8,8 @@ import { FsaDirectory } from '../storage/fsaDirectory';
 import { IndexedDbAdapter } from '../storage/indexedDbAdapter';
 import { MemoryAdapter } from '../storage/memoryAdapter';
 import { outgoingDataDate } from './updateDates';
-import { Store, emptyStoreData, importStamp, FILES, type StoreData, type StoreFileKey, type ConflictCopy, type LockStatus } from '../storage/store';
+import { Store, emptyStoreData, importStamp, storedXerPath, FILES, type StoreData, type StoreFileKey, type ConflictCopy, type LockStatus } from '../storage/store';
+import { gzip, isGzip } from './xerFile';
 import { fsaSupported, loadFolderHandle, saveFolderHandle, forgetFolderHandle, pickFolder, queryPermission, requestPermission, ownerIdentity } from './folder';
 
 const MODE_KEY = 'tc-storage-mode';
@@ -64,6 +65,20 @@ export type AppState = {
 
 export type DataUpdater = <K extends StoreFileKey>(key: K, fn: (prev: StoreData[K]) => StoreData[K]) => void;
 
+/** What else an import can carry, when it came from an XER. */
+export type CommitOptions = {
+  /** Which project and scope it was read with. */
+  p6?: P6ImportInfo;
+  /** The whole file as exported, kept (compressed) for the Schedule screen. */
+  xer?: Uint8Array;
+  /** A copy already as stored, when an import that had one is restored. */
+  xerStored?: Uint8Array;
+  /** The schedule's data date, when the file says what it is. */
+  dataDate?: string;
+  /** No toast: the caller reports, because it is making more than one import at once. */
+  quiet?: boolean;
+};
+
 export type AppActions = {
   chooseFolder(): Promise<void>;
   useBrowserStorage(): Promise<void>;
@@ -76,7 +91,9 @@ export type AppActions = {
   save(opts?: { silent?: boolean }): Promise<void>;
   setAutoSave(on: boolean): void;
   update: DataUpdater;
-  commitImport(kind: ImportKind, activities: P6Activity[], sourceFilename: string): Promise<void>;
+  commitImport(kind: ImportKind, activities: P6Activity[], sourceFilename: string, opts?: CommitOptions): Promise<ScheduleImport>;
+  /** The whole XER kept beside an import, as stored. */
+  readStoredXer(path: string): Promise<Uint8Array | null>;
   restoreImport(entry: ImportIndexEntry): Promise<void>;
   readImport(entry: ImportIndexEntry): Promise<ScheduleImport | null>;
   /** Delete one schedule import. Nothing you keyed is touched; see the action. */
@@ -406,7 +423,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [state.autoSave, state.status, state.saving, state.dirty, state.adapterKind]);
 
   const commitImport = useCallback(
-    async (kind: ImportKind, activities: P6Activity[], sourceFilename: string) => {
+    async (kind: ImportKind, activities: P6Activity[], sourceFilename: string, opts: CommitOptions = {}) => {
       const store = storeRef.current;
       if (!store) throw new Error('No storage open');
       /*
@@ -418,6 +435,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const stamp = importStamp();
       let id = stamp;
       for (let n = 1; taken.has(id); n++) id = `${stamp}-${n}`;
+      /*
+       * The whole file goes in first, so an import never points at a copy that is
+       * not there. Failing to keep it is not a reason to refuse the import — the
+       * budget does not read it — so that is reported and the import goes ahead.
+       */
+      let p6 = opts.p6 ? { ...opts.p6 } : undefined;
+      if (p6) delete p6.file;
+      if (p6 && (opts.xer || opts.xerStored)) {
+        try {
+          const packed = opts.xerStored ?? (await gzip(opts.xer!)) ?? opts.xer!;
+          const path = storedXerPath(id, kind, isGzip(packed));
+          await store.writeStoredXer(path, packed);
+          p6 = { ...p6, file: path, ...(opts.xer ? { bytes: opts.xer.length } : {}) };
+        } catch (err) {
+          notify('error', `The schedule was imported, but the whole P6 file could not be kept for the Schedule screen: ${(err as Error).message}`);
+        }
+      }
       const imp: ScheduleImport = {
         id,
         kind,
@@ -425,6 +459,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         sourceFilename,
         rowCount: activities.length,
         activities,
+        ...(opts.dataDate ? { dataDate: opts.dataDate } : {}),
+        ...(p6 ? { p6 } : {}),
       };
       const cur = stateRef.current.data;
       /*
@@ -465,10 +501,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         return { ...s, dirty, data: { ...s.data, importsIndex: index, locations, library, [kind]: imp } };
       });
-      notify('ok', `${kind === 'current' ? 'Current' : 'Baseline'} schedule imported: ${activities.length} rows.`);
+      /*
+       * The ref normally catches up on the next render. An XER can bring a current
+       * schedule and its baseline in one go, and the second import reads the index
+       * the first one wrote — so the ref is moved on now rather than after a render
+       * that has not happened yet, or the second would write the first out of the
+       * history.
+       */
+      const s0 = stateRef.current;
+      stateRef.current = { ...s0, data: { ...s0.data, importsIndex: index, locations, library, [kind]: imp } };
+      if (!opts.quiet) notify('ok', `${kind === 'current' ? 'Current' : 'Baseline'} schedule imported: ${activities.length} rows.`);
+      return imp;
     },
     [mirror, notify],
   );
+
+  const readStoredXer = useCallback(async (path: string) => storeRef.current?.readStoredXer(path) ?? null, []);
 
   const readImport = useCallback(async (entry: ImportIndexEntry) => storeRef.current?.readImport(entry.file) ?? null, []);
 
@@ -543,7 +591,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     for (const kind of ['current', 'baseline'] as const) {
       const imp = b[kind];
       if (!imp) continue;
-      const res = await store.appendImport({ ...imp, id: importStamp(), importedAt: new Date().toISOString(), sourceFilename: `restored from backup (${imp.sourceFilename})` }, index);
+      // A backup carries the schedule, not the whole P6 file behind it, so the restored
+      // import must not point at a copy that may belong to another folder entirely.
+      const p6 = imp.p6 ? { ...imp.p6 } : undefined;
+      if (p6) delete p6.file;
+      const res = await store.appendImport({ ...imp, ...(p6 ? { p6 } : {}), id: importStamp(), importedAt: new Date().toISOString(), sourceFilename: `restored from backup (${imp.sourceFilename})` }, index);
       index = res.index;
     }
     await reload();
@@ -554,7 +606,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     async (entry: ImportIndexEntry) => {
       const imp = await readImport(entry);
       if (!imp) throw new Error(`Import file ${entry.file} could not be read`);
-      await commitImport(entry.kind, imp.activities, `restored from ${entry.file}`);
+      // The P6 file behind it is copied, not shared, so removing either import later
+      // cannot take the other's copy with it.
+      const stored = imp.p6?.file ? await storeRef.current?.readStoredXer(imp.p6.file).catch(() => null) : null;
+      await commitImport(entry.kind, imp.activities, `restored from ${entry.file}`, {
+        ...(imp.p6 ? { p6: imp.p6 } : {}),
+        ...(stored ? { xerStored: stored } : {}),
+        ...(imp.dataDate ? { dataDate: imp.dataDate } : {}),
+      });
     },
     [commitImport, readImport],
   );
@@ -620,8 +679,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const readFolderBinary = useCallback(async (path: string) => storeRef.current?.adapter.readBinary(path) ?? null, []);
 
   const actions = useMemo<AppActions>(
-    () => ({ chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, removeImport, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify }),
-    [chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, restoreImport, readImport, removeImport, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify],
+    () => ({ chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, readStoredXer, restoreImport, readImport, removeImport, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify }),
+    [chooseFolder, useBrowserStorage, exportBundle, restoreBundle, grantPermission, useMemoryOnly, forgetFolder, reload, save, setAutoSave, update, commitImport, readStoredXer, restoreImport, readImport, removeImport, writeExport, listFolderFiles, readFolderFile, readFolderBinary, notify],
   );
 
   return <AppContext.Provider value={{ state, model, actions }}>{children}</AppContext.Provider>;

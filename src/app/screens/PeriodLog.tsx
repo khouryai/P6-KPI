@@ -6,6 +6,7 @@ import { periodLog, addDays, OUTCOMES, needsReason, type PeriodActivity, type Pe
 import { fmtHours, fmtPct, fmtDate, todayISO, num } from '../format';
 import { isValidISO } from '../../engine/dates';
 import { normKey } from '../../engine/keys';
+import type { P6Extras } from '../../engine/types';
 import { href } from '../router';
 import { useUnit } from '../units';
 import { usePeriodWindow } from '../periodWindow';
@@ -118,6 +119,9 @@ function ChartKey({ update }: { update: boolean }) {
 /** The option that opens the box for a reason the list does not have yet. */
 const ADD_REASON = '__add-a-reason__';
 
+/** The reason a predecessor still open explains, as the built-in catalogue words it. */
+const PREDECESSOR_REASON = 'Predecessor work not complete';
+
 /** What Progress holds for one activity, as this screen reads and writes it. */
 type TestProgressEntry = {
   pctOverride?: number;
@@ -221,6 +225,16 @@ export function PeriodLog() {
   const planState = usePeriodPlan(from, against);
   const plan = planState.kind === 'ready' ? planState.plan : null;
   const log = useMemo(() => periodLog(model.rows, from, end, plan), [model.rows, from, end, plan]);
+  /*
+   * What P6 says each activity is waiting on, when the schedule came from an XER.
+   * The log already knows WHAT missed; the logic is often the WHY, and saying so on
+   * the row turns "why was it missed?" from a question into a confirmation.
+   */
+  const p6ById = useMemo(() => {
+    const m = new Map<string, P6Extras>();
+    for (const r of model.rows) if (r.activity.p6) m.set(normKey(r.activityId), r.activity.p6);
+    return m;
+  }, [model.rows]);
   /** Whether the log is on an update; the baseline is then the comparison, not the plan. */
   const onUpdate = !!log.plan;
   const planWord = log.plan ? log.plan.label : 'baseline';
@@ -435,7 +449,10 @@ export function PeriodLog() {
       render: (a) => {
         if (!needsReason(a)) return <span className="text-[var(--text-subtle)]">—</span>;
         const eff = effectiveReasonFor(missedReasons, a.activityId, log.to);
+        const x = p6ById.get(normKey(a.activityId));
+        const waiting = x?.waitingOn ?? [];
         return (
+          <div>
           <MissedReasonCell
             value={eff?.entry.reason ?? ''}
             options={catalogue}
@@ -449,6 +466,22 @@ export function PeriodLog() {
             }}
             onAdd={(reason) => addReasonToCatalogue(actions.update, reason)}
           />
+          {waiting.length > 0 && (
+            <div
+              className="mt-0.5 text-[11px] text-[var(--text-muted)]"
+              title={`P6 has ${x!.waitingOnCount} predecessor${x!.waitingOnCount === 1 ? '' : 's'} still open on this activity:\n${waiting.map((l) => `${l.id} ${l.name} — ${l.status.toLowerCase()}, finish ${fmtDate(l.finish)}${l.driving ? ' (driving)' : ''}${l.inScope ? '' : ` — ${l.group || l.wbs}`}`).join('\n')}`}
+            >
+              P6: waiting on <span className="mono">{waiting[0].id}</span>
+              {!waiting[0].inScope && ` (${waiting[0].group || 'other'})`}
+              {x!.waitingOnCount > 1 && ` +${x!.waitingOnCount - 1}`}
+              {!eff && catalogue.includes(PREDECESSOR_REASON) && (
+                <button className="btn-link ml-1.5" onClick={() => setMissedReason(actions.update, a.activityId, log.to, PREDECESSOR_REASON)} title={`Record “${PREDECESSOR_REASON}” as the reason`}>
+                  use this
+                </button>
+              )}
+            </div>
+          )}
+          </div>
         );
       },
     },
