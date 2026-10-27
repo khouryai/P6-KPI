@@ -329,26 +329,85 @@ test('a named location reports by its name, and a split activity puts its share 
  * click through, so it is stood in for by the browser's private file system, which
  * hands back a real directory handle the export writes into exactly as it would a
  * folder on disk. The clock is the browser's, moved on by the test.
+ *
+ * One thing that handle cannot do is go through IndexedDB. The app keeps the
+ * chosen folder there — it has to, to remember it — and reads it back before every
+ * export, and reading a private-file-system handle back out of IndexedDB kills
+ * Chromium outright: the whole browser exits on a failed internal check (SIGTRAP),
+ * headless shell and full build alike. That is why both export tests failed in CI
+ * from the day they were added, as "session closed" right after the export click.
+ * A real folder's handle round-trips fine, and that is all the app ever stores.
+ *
+ * So the stand-in goes into IndexedDB as a marker and comes back out as the live
+ * handle. Every line of the app between the two — keeping the folder, reading it
+ * back, asking for permission, writing the file — runs exactly as it does in use.
  */
-async function exportedFiles(page: Page): Promise<{ name: string; bytes: number[] }[]> {
+async function standInFolder(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const MARK = 'tc-test:picked-folder';
+    const picked = navigator.storage.getDirectory().then((root) => root.getDirectoryHandle('picked', { create: true }));
+    let live: FileSystemDirectoryHandle | null = null;
+    void picked.then((h) => (live = h));
+    (window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker = () => picked;
+
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, ...key: [IDBValidKey?]) {
+      return put.call(this, value instanceof FileSystemDirectoryHandle ? MARK : value, ...(key as [IDBValidKey]));
+    };
+    const result = Object.getOwnPropertyDescriptor(IDBRequest.prototype, 'result')!;
+    Object.defineProperty(IDBRequest.prototype, 'result', {
+      ...result,
+      get(this: IDBRequest) {
+        const v = result.get!.call(this);
+        return v === MARK ? live : v;
+      },
+    });
+  });
+}
+
+/** The names in the stand-in folder: cheap, and safe to poll while an export is still writing. */
+async function exportedNames(page: Page): Promise<string[]> {
   return page.evaluate(async () => {
     const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle('picked', { create: true });
-    const out: { name: string; bytes: number[] }[] = [];
+    const out: string[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for await (const name of (dir as any).keys()) out.push(name);
+    return out.sort();
+  });
+}
+
+/**
+ * Every file in the stand-in folder, bytes and all, for when no export is running.
+ * The bytes cross as base64: as a list of numbers, one 270 KB workbook took two
+ * seconds to come back, and a poll whose every look takes that long misses a
+ * deadline it should have met with time to spare.
+ */
+async function exportedFiles(page: Page): Promise<{ name: string; bytes: Buffer }[]> {
+  const files = await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('picked', { create: true });
+    const out: { name: string; base64: string }[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for await (const [name, h] of (dir as any).entries()) {
-      if (h.kind === 'file') out.push({ name, bytes: [...new Uint8Array(await (await h.getFile()).arrayBuffer())] });
+      if (h.kind !== 'file') continue;
+      const file: File = await h.getFile();
+      const url = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      out.push({ name, base64: url.slice(url.indexOf(',') + 1) });
     }
     return out;
   });
+  return files.map((f) => ({ name: f.name, bytes: Buffer.from(f.base64, 'base64') }));
 }
 
 test('exports everything to a chosen folder by hand, and on the schedule set', async ({ page }) => {
   await page.clock.install({ time: new Date(2026, 9, 21, 6, 57) });
-  await page.addInitScript(() => {
-    (window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker = async () =>
-      (await navigator.storage.getDirectory()).getDirectoryHandle('picked', { create: true });
-  });
+  await standInFolder(page);
   const errors = await open(page);
   await importSchedule(page, 'current', schedule({ finished: 2, ahead: 2 }));
 
@@ -373,10 +432,10 @@ test('exports everything to a chosen folder by hand, and on the schedule set', a
   await expect(page.getByText(/Exports every day at 07:00/)).toBeVisible();
   // Setting it at 06:57 owes nothing yet: yesterday's 07:00 came before the schedule did.
   await page.clock.fastForward('01:00');
-  expect((await exportedFiles(page)).map((f) => f.name)).not.toContain('TC_Budget_Data_latest.xlsx');
+  expect(await exportedNames(page)).not.toContain('TC_Budget_Data_latest.xlsx');
 
   await page.clock.fastForward('03:00');
-  await expect.poll(async () => (await exportedFiles(page)).map((f) => f.name).sort()).toContain('TC_Budget_Data_latest.xlsx');
+  await expect.poll(() => exportedNames(page)).toContain('TC_Budget_Data_latest.xlsx');
   await expect(page.getByText(/Last export .*TC_Budget_Data_latest\.xlsx/)).toBeVisible();
   expect(errors, 'a screen threw while rendering').toEqual([]);
 });
@@ -457,10 +516,7 @@ test('the Two-Week Log changes and clears a reason from any reporting date', asy
  * the Excel export's folder as SCurve_Latest.png.
  */
 test('exports an S-curve per phase chosen, stacked, as SCurve_Latest.png', async ({ page }) => {
-  await page.addInitScript(() => {
-    (window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker = async () =>
-      (await navigator.storage.getDirectory()).getDirectoryHandle('picked', { create: true });
-  });
+  await standInFolder(page);
   const errors = await open(page);
   await importSchedule(page, 'current', schedule({ finished: 2, ahead: 2 }));
   await page.goto('/#/settings');
